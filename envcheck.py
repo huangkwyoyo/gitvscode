@@ -14,4 +14,4 @@ if not api_key:
 else:
     print("API Key 已加载！")
     # 注意：不要打印完整的 API Key，只显示前几位
-    print(f"Key 前缀: {api_key[:10]}...")pyt
+    print(f"Key 前缀: {api_key[:10]}...")

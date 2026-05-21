@@ -16,3 +16,7 @@ node_modules/
 .next/
 dist/
 *.tsbuildinfo
+
+# 忽略大模型配置文件（包含密钥，不能上传）
+llm_config.json
+
