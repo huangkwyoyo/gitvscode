@@ -3,6 +3,7 @@
 环境配置验证脚本
 运行此脚本检查所有依赖是否正确安装
 """
+from openai import OpenAI
 from dotenv import load_dotenv
 import os
 import sys
