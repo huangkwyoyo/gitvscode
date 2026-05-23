@@ -3,21 +3,37 @@ import gradio as gr
 # 导入核心Agent功能函数
 from agent_core import execute_single_data_task, execute_multi_batch_task, reset_agent_memory, agent_memory
 
+
+
 # 单任务回调函数：接收前端输入，返回执行结果
 def web_run_single_task(demand_text):
-    result_msg = execute_single_data_task(demand_text)
-    # 拼接所有运行日志
-    log_text = "\n".join(agent_memory["run_logs"])
-    # 返回结果、日志、数据预览
-    return result_msg, log_text, str(agent_memory["final_result"])
+    try:
+        result_msg = execute_single_data_task(demand_text)
+        # 拼接所有运行日志
+        log_text = "\n".join(agent_memory["run_logs"])
+        # 返回结果、日志、数据预览
+        return result_msg, log_text, str(agent_memory["final_result"])
+    
+    # 【关键】捕获所有报错，输出到网页日志
+    except Exception as e:
+        err_msg = f"❌ 任务执行异常：{str(e)}"
+        agent_memory["run_logs"].append(err_msg)
+        log_text = "\n".join(agent_memory["run_logs"])
+        return "任务执行失败", log_text, ""
 
 # 多任务回调函数：批量执行多个需求
 def web_run_multi_task(t1,t2,t3):
-    # 过滤空任务
-    task_arr = [i for i in [t1,t2,t3] if i.strip()]
-    batch_res = execute_multi_batch_task(task_arr)
-    log_text = "\n".join(agent_memory["run_logs"])
-    return "\n".join(batch_res), log_text
+    try:
+        # 过滤空任务
+        task_arr = [i for i in [t1,t2,t3] if i.strip()]
+        batch_res = execute_multi_batch_task(task_arr)
+        log_text = "\n".join(agent_memory["run_logs"])
+        return "\n".join(batch_res), log_text
+    except Exception as e:
+        err_msg = f"❌ 批量任务执行异常：{str(e)}"
+        agent_memory["run_logs"].append(err_msg)
+        log_text = "\n".join(agent_memory["run_logs"])
+        return "批量任务执行失败", log_text
 
 # 重置按钮回调
 def web_reset_agent():
