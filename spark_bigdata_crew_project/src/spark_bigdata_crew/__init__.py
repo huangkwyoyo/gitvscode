@@ -8,7 +8,7 @@
 """
 
 # 核心模块统一导出
-from .crew import SparkBigDataCrew
+from .crew import SparkBigDataEnterpriseCrew as SparkBigDataCrew
 from .agents import get_all_agents
 from .tasks import get_all_tasks
 

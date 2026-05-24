@@ -3,7 +3,7 @@ import os
 from pathlib import Path
 import fitz
 from docx import Document
-from src.spark_bigdata_crew.main import run
+from main import run
 
 # 多模态文档统一解析：支持PDF、DOCX、MD、TXT
 def parse_upload_file(file_path):

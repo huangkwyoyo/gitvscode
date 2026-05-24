@@ -1,11 +1,14 @@
-crewai>=0.30.0
-crewai-tools>=0.20.0
+crewai>=0.100.0
+crewai-tools>=0.10.0
+openai>=1.30.0
+ollama>=0.4.0
 gradio>=4.0.0
 pyspark>=3.3.0
 pandas>=2.0.0
 numpy>=1.24.0
 python-dotenv>=1.0.0
 pymysql>=1.1.0
-pyodbc>=4.0.39
+pyodbc>=5.1.0
 cx_Oracle>=8.3.0
+pyhive>=0.7.0
 gitpython>=3.1.40

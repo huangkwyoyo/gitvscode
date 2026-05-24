@@ -14,6 +14,7 @@ class DBConnectionTool(BaseTool):
     def _run(self, ds_type: str):
         try:
             config = DataSourceSkill.get_ds_config(ds_type)
-            return f"✅ {ds_type} 数据源配置加载成功，配置信息：{str(config)}"
+            safe_config = {k: ("****" if k in ("password", "service") else v) for k, v in config.items()}
+            return f"✅ {ds_type} 数据源配置加载成功，配置信息：{str(safe_config)}"
         except Exception as e:
             return f"❌ 数据源连接失败：{str(e)}"

@@ -1,0 +1,83 @@
+{
+  "active_provider": "auto",
+  "default_params": {
+    "temperature": 0.3,
+    "max_tokens": 4096,
+    "max_retries": 2,
+    "timeout": 120
+  },
+  "providers": {
+    "openai": {
+      "name": "OpenAI GPT",
+      "model": "gpt-4o",
+      "api_key_env": "OPENAI_API_KEY",
+      "base_url": "https://api.openai.com/v1",
+      "temperature": 0.3,
+      "max_tokens": 8192,
+      "description": "OpenAI官方API，支持GPT-4o/GPT-4-turbo/GPT-3.5等全系列模型"
+    },
+    "deepseek": {
+      "name": "DeepSeek",
+      "model": "deepseek-chat",
+      "api_key_env": "DEEPSEEK_API_KEY",
+      "base_url": "https://api.deepseek.com/v1",
+      "temperature": 0.3,
+      "max_tokens": 4096,
+      "description": "DeepSeek官方API，高性价比推理"
+    },
+    "qwen": {
+      "name": "通义千问 (Qwen)",
+      "model": "qwen-max",
+      "api_key_env": "DASHSCOPE_API_KEY",
+      "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      "temperature": 0.3,
+      "max_tokens": 4096,
+      "description": "阿里云通义千问API，DashScope兼容OpenAI格式"
+    },
+    "zhipu": {
+      "name": "智谱 GLM",
+      "model": "glm-4-plus",
+      "api_key_env": "ZHIPU_API_KEY",
+      "base_url": "https://open.bigmodel.cn/api/paas/v4",
+      "temperature": 0.3,
+      "max_tokens": 4096,
+      "description": "智谱AI开放平台，GLM-4系列模型"
+    },
+    "moonshot": {
+      "name": "Moonshot Kimi",
+      "model": "moonshot-v1-8k",
+      "api_key_env": "MOONSHOT_API_KEY",
+      "base_url": "https://api.moonshot.cn/v1",
+      "temperature": 0.3,
+      "max_tokens": 4096,
+      "description": "月之暗面Kimi API，长上下文推理"
+    },
+    "ollama": {
+      "name": "Ollama 本地",
+      "model": "llama3",
+      "api_key_env": null,
+      "base_url": "http://localhost:11434/v1",
+      "temperature": 0.3,
+      "max_tokens": 4096,
+      "description": "本地Ollama部署，支持Llama3/Qwen2/Mistral/Phi等开源模型"
+    },
+    "llama": {
+      "name": "LLaMA (OpenAI兼容)",
+      "model": "meta-llama/llama-4",
+      "api_key_env": "OPENAI_API_KEY",
+      "base_url": "https://openrouter.ai/api/v1",
+      "temperature": 0.3,
+      "max_tokens": 4096,
+      "description": "通过OpenRouter或兼容网关访问LLaMA系列模型"
+    },
+    "custom": {
+      "name": "自定义中转API",
+      "model": "gpt-3.5-turbo",
+      "api_key_env": "OPENAI_API_KEY",
+      "base_url": "https://your-proxy.com/v1",
+      "temperature": 0.3,
+      "max_tokens": 4096,
+      "description": "通用OpenAI兼容中转API，适配one-api/new-api等网关"
+    }
+  }
+}

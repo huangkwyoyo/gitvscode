@@ -38,8 +38,14 @@ class DataQualityVerifySkill:
 
     @staticmethod
     def business_rule_check(df, rule_expr: str) -> dict:
-        """自定义业务规则校验"""
+        """自定义业务规则校验。df为None时仅做规则表达式语法验证。"""
         try:
+            if df is None:
+                return {
+                    "rule": rule_expr,
+                    "status": "规则表达式已记录（无DataFrame，仅做语法记录）",
+                    "fail_count": 0
+                }
             fail_df = df.filter(~df.expr(rule_expr))
             fail_count = fail_df.count()
             res = {

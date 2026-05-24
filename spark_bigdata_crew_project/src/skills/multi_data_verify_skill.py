@@ -4,21 +4,32 @@ MCP写入：data_verify_result
 适配：Hive表、Parquet/CSV文件 | 双层参数兜底 | 精细化异常捕获
 """
 import os
-from pyspark.sql import SparkSession
+import logging
 from src.mcp.context_protocol import mcp
+
+logger = logging.getLogger(__name__)
 
 OUTPUT_ROOT = "./output"
 os.makedirs(OUTPUT_ROOT, exist_ok=True)
 
+
 class MultiDataVerifySkill:
     @staticmethod
     def get_spark_session():
-        return SparkSession.builder \
-            .appName("Production_Data_Verify") \
-            .enableHiveSupport() \
-            .master("local[*]") \
-            .config("spark.sql.adaptive.enabled", "true") \
+        try:
+            from pyspark.sql import SparkSession
+        except ImportError as e:
+            raise ImportError(
+                "PySpark未安装或未正确配置。请执行: pip install pyspark 或配置 SPARK_HOME 环境变量"
+            ) from e
+        return (
+            SparkSession.builder
+            .appName("Production_Data_Verify")
+            .enableHiveSupport()
+            .master("local[*]")
+            .config("spark.sql.adaptive.enabled", "true")
             .getOrCreate()
+        )
 
     @staticmethod
     def verify_by_output_param(
@@ -108,9 +119,12 @@ class MultiDataVerifySkill:
 
         except Exception as e:
             err_msg = f"❌ 校验异常：{str(e)}"
-            # MCP写入：缓存异常信息
+            logger.error("数据校验失败: %s", str(e), exc_info=True)
             mcp.set("data_verify_result", err_msg)
             return err_msg
         finally:
             if spark:
-                spark.stop()
+                try:
+                    spark.stop()
+                except Exception:
+                    pass
