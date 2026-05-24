@@ -1,0 +1,146 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+@Project: spark_bigdata_crew_project
+@File: tasks.py
+@Desc: 全链路11步生产流水线任务统一编排、依赖绑定、任务实例化
+@Core: 串行闭环、依赖精准、Agent绑定唯一、产出标准化
+@Author:
+@Date: 2026-05-24
+"""
+from crewai import Task
+from .agents import get_all_agents
+
+# 全局获取所有智能体实例
+agents = get_all_agents()
+
+# 按顺序解包对应智能体
+(
+    requirement_analyst_agent,
+    data_modeling_agent,
+    spark_architect_agent,
+    spark_developer_agent,
+    unit_test_agent,
+    job_submit_agent,
+    data_validator_agent,
+    data_inspection_agent,
+    devops_sre_agent,
+    document_agent
+) = agents
+
+def get_all_tasks() -> list[Task]:
+    """获取全链路11步标准化流水线任务"""
+
+    # 任务1：PRD多源数据资源解析
+    task_1_source_parse = Task(
+        description="接收业务PRD文档，依托PRD需求字段解析工具、业务规则校验工具，自动解析多源数据源类型、原始业务表清单、核心业务字段、基础业务规则，剔除模糊需求与无效字段，确权真实可落地的数据资源，同步写入MCP全局上下文，为全流程提供真实数据源底座。",
+        expected_output="标准化多源数据源解析报告，包含：数据源类型、原始源表清单、核心业务字段明细、基础业务规则、无效需求剔除说明、全局上下文初始化结果",
+        agent=requirement_analyst_agent
+    )
+
+    # 任务2：标准化业务需求拆解
+    task_2_requirement_analysis = Task(
+        description="基于Task1解析完成的真实数据资源，杜绝虚构表、虚构字段、虚构逻辑，深度拆解业务统计口径、维度体系、指标计算规则、数据更新周期、验收标准、数据血缘关系，梳理需求冲突点与落地风险，输出完全贴合生产环境的标准化业务需求。",
+        expected_output="完整可落地大数据业务需求说明书，包含：数据资源清单、指标口径字典、维度规范、计算逻辑、更新策略、验收标准、数据血缘图谱、需求风险评估报告",
+        agent=requirement_analyst_agent,
+        context=[task_1_source_parse]
+    )
+
+    # 任务3：四层数仓分层建模
+    task_3_data_modeling = Task(
+        description="依托多源数据库连接工具、表结构查询工具，拉取真实库表元数据，基于固化业务需求，完成ODS原始层、DWD明细层、DWS聚合层、ADS应用层标准化分层设计，规范字段映射、数据类型适配、分区策略、存储格式、主键约束，生成可直接执行的生产级建表语句，规避数据冗余与分层混乱问题。",
+        expected_output="数仓分层设计方案、全层级生产建表SQL、字段映射字典、分区&存储规范文档、数仓建模风险优化说明",
+        agent=data_modeling_agent,
+        context=[task_2_requirement_analysis]
+    )
+
+    # 任务4：Spark生产架构设计与调优
+    task_4_spark_architecture = Task(
+        description="结合多源数据接入特性、数据体量、业务聚合逻辑、数仓分层结构，依托Spark代码性能优化工具，定制Spark分布式作业架构，针对性解决数据倾斜、Shuffle拥堵、小文件泛滥、内存溢出、任务超时等生产问题，输出专属资源配置、分区策略、缓存机制、自适应调优方案。",
+        expected_output="Spark分布式架构设计文档、生产级参数调优方案、数据倾斜治理方案、小文件优化策略、资源配额配置规范、前置风险防控清单",
+        agent=spark_architect_agent,
+        context=[task_2_requirement_analysis, task_3_data_modeling]
+    )
+
+    # 任务5：生产级Spark代码动态开发
+    task_5_spark_development = Task(
+        description="读取MCP全局上下文真实表名、字段清单、业务口径、分层规则、架构调优参数，依托代码生成、版本比对、记忆回溯、版本迭代工具，动态渲染全量代码逻辑，生成零硬编码、零占位符、适配多源数据源、可直接集群提交的PySpark生产代码，保留历史版本优势、迭代优化新增逻辑。",
+        expected_output="完整可上线PySpark生产代码、代码版本迭代说明、多源适配兼容说明、动态参数配置清单",
+        agent=spark_developer_agent,
+        context=[task_1_source_parse, task_2_requirement_analysis, task_3_data_modeling, task_4_spark_architecture]
+    )
+
+    # 任务6：代码单元测试与智能自愈
+    task_6_unit_test = Task(
+        description="依托代码语法逻辑校验工具、代码故障自愈工具，对生成代码进行全维度校验，覆盖语法错误、缩进异常、变量缺失、空值漏洞、逻辑冲突、字段不匹配、资源未释放等问题，自动完成缺陷修复与迭代优化，彻底拦截生产隐性BUG。",
+        expected_output="代码单元测试报告、缺陷明细清单、智能自愈修复记录、最终优化版可运行代码",
+        agent=unit_test_agent,
+        context=[task_5_spark_development]
+    )
+
+    # 任务7：集群任务调度提交预检与模拟运行
+    task_7_job_submit = Task(
+        description="结合语法校验结果与数据库连通性校验，模拟生产spark-submit集群提交流程，前置校验代码可用性、数据源连通性、任务依赖完整性、资源配额合理性、权限合规性、路径有效性，排查启动报错、资源不足、分区异常等调度故障。",
+        expected_output="Spark任务集群前置预检报告、调度参数配置清单、故障排查记录、任务模拟启动运行状态报告",
+        agent=job_submit_agent,
+        context=[task_6_unit_test]
+    )
+
+    # 任务8：全维度数据质量审计
+    task_8_data_validation = Task(
+        description="依托数据库查询兜底工具、多源统一数据校验工具，对标原始业务数据源与PRD验收口径，全量核验产出数据的完整性、准确性、唯一性、一致性、合规性，校验空数据、重复数据、异常数据、指标偏差，精准定位问题根因。",
+        expected_output="全维度数据质量审计报告、数据抽样核验结果、异常数据明细、指标比对台账、问题根因分析与修复建议",
+        agent=data_validator_agent,
+        context=[task_7_job_submit]
+    )
+
+    # 任务9：数仓存储健康度巡检与治理
+    task_9_data_inspection = Task(
+        description="基于最终产出数仓表与数据文件，依托多源统一数据校验工具，深度巡检数仓分区完整性、数据增量有效性、小文件数量、存储冗余、数据膨胀、分区断裂等生产隐患，输出可落地的存储优化与数据治理方案。",
+        expected_output="数仓健康度巡检报告、小文件治理方案、分区修复策略、存储瘦身优化方案、数据增量运维规范",
+        agent=data_inspection_agent,
+        context=[task_8_data_validation]
+    )
+
+    # 任务10：集群SRE运维复盘与稳定性优化
+    task_10_devops_monitor = Task(
+        description="结合全链路任务运行日志、集群资源负载、任务稳定性数据，依托代码故障自愈工具，复盘任务耗时、资源利用率、失败风险、拥堵问题、异常告警，定位性能瓶颈与稳定性隐患，输出生产级SLA运维保障与自愈优化方案。",
+        expected_output="集群全链路运维复盘报告、资源负载分析报表、故障根因总结、SLA稳定性优化方案、常态化运维自愈策略",
+        agent=devops_sre_agent,
+        context=[task_9_data_inspection]
+    )
+
+    # 任务11：全链路标准化交付文档汇总
+    task_11_document_generate = Task(
+        description="汇总全流程所有产出物，依托PRD解析、数据校验、版本比对工具能力，自动整合数据源解析、需求文档、建模方案、架构调优、生产代码、测试报告、运行日志、数据质检、巡检治理、运维复盘所有成果，生成整套企业级标准化交付文档。",
+        expected_output="全套项目交付文档合集（含需求、建模、架构、代码、测试、调度、质检、巡检、运维全流程归档文档）",
+        agent=document_agent,
+        context=[
+            task_1_source_parse,
+            task_2_requirement_analysis,
+            task_3_data_modeling,
+            task_4_spark_architecture,
+            task_5_spark_development,
+            task_6_unit_test,
+            task_7_job_submit,
+            task_8_data_validation,
+            task_9_data_inspection,
+            task_10_devops_monitor
+        ]
+    )
+
+    return [
+        task_1_source_parse,
+        task_2_requirement_analysis,
+        task_3_data_modeling,
+        task_4_spark_architecture,
+        task_5_spark_development,
+        task_6_unit_test,
+        task_7_job_submit,
+        task_8_data_validation,
+        task_9_data_inspection,
+        task_10_devops_monitor,
+        task_11_document_generate
+    ]
+
+__all__ = ["get_all_tasks"]

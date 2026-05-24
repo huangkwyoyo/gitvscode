@@ -194,15 +194,49 @@ def execute_single_data_task(user_data_demand: str, save_path: str = "./agent_re
     write_task_log("数据加工代码生成完毕")
 
 
-    # 步骤4：自动执行代码，加工数据
+    # 步骤4：自动执行代码，加工数据（加入反思重试机制）
     write_task_log("4. 自动执行数据清洗、聚合计算")
-    final_result_df = agent_tools.safe_run_code(process_code, raw_data)
+    max_retries = 3  # 最大反思重试次数
+    final_result_df = None
+    
+    for attempt in range(1, max_retries + 1):
+        write_task_log(f"第 {attempt} 次执行加工代码...")
+        final_result_df = agent_tools.safe_run_code(process_code, raw_data)
+        
+        # 校验执行结果：若为字符串说明代码运行异常
+        if isinstance(final_result_df, str):
+            write_task_log(f"❌ 第 {attempt} 次执行失败：{final_result_df}")
+            if attempt < max_retries:
+                # 触发反思：让大模型根据报错信息重新生成代码
+                write_task_log("🤖 AI 正在反思错误，尝试修复代码...")
+                reflection_prompt = f"""
+你之前生成的pandas代码执行报错了。
+【原始代码】：
+{process_code}
+【报错信息】：
+{final_result_df}
+【当前DataFrame的真实列名为】：[{real_columns}]
+请仔细分析报错原因，重新编写正确的pandas聚合统计代码。
+要求：基于df处理数据，只能使用上述真实列名，最终结果必须存入result变量。仅输出代码，不要解释：
+"""
+                # 重新生成代码
+                process_code = llm_think_analysis(reflection_prompt)
+                # 清洗重新生成的代码
+                process_code = re.sub(r'^```(?:python)?\s*\n?', '', process_code)
+                process_code = re.sub(r'\n?```\s*$', '', process_code)
+                agent_memory["exec_code"] = process_code
+            else:
+                # 达到最大重试次数，彻底放弃
+                agent_memory["task_status"] = "fail"
+                write_task_log(f"❌ 已达到最大重试次数 {max_retries} 次，任务终止")
+                return f"任务执行失败，加工代码报错：{final_result_df}"
+        else:
+            # 代码执行成功，跳出循环
+            write_task_log("✅ 加工代码执行成功！")
+            break
+            
     agent_memory["final_result"] = final_result_df
-    # 校验执行结果：若为字符串说明代码运行异常，提前终止任务
-    if isinstance(final_result_df, str):
-        agent_memory["task_status"] = "fail"
-        write_task_log(f"❌ 数据加工代码执行失败：{final_result_df}")
-        return f"任务执行失败，加工代码报错：{final_result_df}"
+
 
     # 步骤5：自动导出Excel报表
     write_task_log("5. 自动生成Excel业务报表")

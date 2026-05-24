@@ -1,0 +1,22 @@
+# 缓存文件
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# 日志与临时文件
+*.log
+*.tmp
+*.temp
+
+# 环境与依赖
+.env.local
+.venv/
+venv/
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# 项目产出临时目录
+output/temp/
