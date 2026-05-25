@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>{{ title }}</title>
+  <link rel="stylesheet" href="../../src/web/static/app.css">
+</head>
+<body>
+  <h1>{{ title }}</h1>
+  <section class="summary">
+    <h2>分析结论</h2>
+    <p>{{ insights.summary }}</p>
+    {% if insights.highlights %}
+      <h3>关键发现</h3>
+      <ul>
+        {% for item in insights.highlights %}
+          <li>{{ item }}</li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+    {% if insights.risks %}
+      <h3>风险与异常</h3>
+      <ul>
+        {% for item in insights.risks %}
+          <li>{{ item }}</li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+    {% if insights.recommended_actions %}
+      <h3>建议动作</h3>
+      <ul>
+        {% for item in insights.recommended_actions %}
+          <li>{{ item }}</li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+  </section>
+
+  <h2>数据概览</h2>
+  <p>行数：{{ shape[0] }}，列数：{{ shape[1] }}</p>
+
+  {% if metrics %}
+    <h2>业务指标</h2>
+    <div class="metric-grid">
+      {% if metrics.total_revenue is defined %}
+        <div><span>总收入</span><strong>{{ "{:,.0f}".format(metrics.total_revenue) }}</strong></div>
+        <div><span>总成本</span><strong>{{ "{:,.0f}".format(metrics.total_cost) }}</strong></div>
+        <div><span>总利润</span><strong>{{ "{:,.0f}".format(metrics.total_profit) }}</strong></div>
+        <div><span>利润率</span><strong>{{ "{:.1%}".format(metrics.profit_margin) }}</strong></div>
+      {% endif %}
+    </div>
+  {% endif %}
+
+  <h2>描述性统计</h2>
+  {{ numeric_statistics | safe }}
+
+  <h2>缺失值统计</h2>
+  {{ missing_statistics | safe }}
+
+  <h2>图表</h2>
+  {% for name, path in charts.items() %}
+    <h3>{{ name }}</h3>
+    <img src="../figures/{{ path.name }}" alt="{{ name }}">
+  {% endfor %}
+</body>
+</html>

@@ -1,0 +1,54 @@
+project:
+  name: business_data_report
+  timezone: Asia/Shanghai
+
+input:
+  source_type: csv
+  path: data/raw/sample.csv
+  sheet_name: null
+  database_url_env: DATABASE_URL
+  query: null
+
+schema:
+  infer_types: true
+  datetime_formats:
+    - "%Y-%m-%d"
+    - "%Y/%m/%d"
+    - "%Y-%m-%d %H:%M:%S"
+
+cleaning:
+  drop_duplicates: true
+  missing:
+    numeric_strategy: median
+    categorical_strategy: mode
+    datetime_strategy: none
+  standardize:
+    trim_strings: true
+    normalize_column_names: true
+  outliers:
+    enabled: true
+    method: iqr
+    iqr_multiplier: 1.5
+
+analysis:
+  correlation:
+    enabled: true
+    method: pearson
+  distributions:
+    enabled: true
+    max_columns: 12
+
+llm:
+  enabled: false
+  provider: openai
+  model: gpt-4.1-mini
+  api_key_env: OPENAI_API_KEY
+  temperature: 0.2
+  max_sample_rows: 8
+
+report:
+  title: 业务数据分析报告
+  output_dir: reports/output
+  figures_dir: reports/figures
+  tables_dir: reports/tables
+  format: html

@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>业务数据报表应用</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body class="app-shell">
+  <aside class="sidebar">
+    <div>
+      <p class="eyebrow">Data Pipeline</p>
+      <h1>业务数据报表</h1>
+      <p class="subtle">上传数据，运行清洗、分析、可视化和洞察生成。</p>
+    </div>
+
+    <form action="/run" method="post" enctype="multipart/form-data">
+      <label>
+        报告标题
+        <input type="text" name="title" value="{{ config.report.title }}" required>
+      </label>
+
+      <label>
+        数据文件
+        <input type="file" name="source_file" accept=".csv,.xlsx,.xls">
+      </label>
+
+      <label class="check-row">
+        <input type="checkbox" name="enable_llm" value="true" {% if config.llm.enabled %}checked{% endif %}>
+        <span>启用 LLM 洞察</span>
+      </label>
+
+      <button type="submit">运行分析</button>
+    </form>
+
+    <div class="status-box">
+      {% if success %}
+        <p class="success">{{ success }}</p>
+      {% endif %}
+      {% if error %}
+        <p class="error">{{ error }}</p>
+      {% endif %}
+      <p>当前数据源：{{ config.input.path }}</p>
+      <p>LLM：{{ "已启用" if config.llm.enabled else "未启用" }}</p>
+    </div>
+  </aside>
+
+  <main class="report-pane">
+    {% if report_exists %}
+      <iframe title="业务数据分析报告" src="{{ report_url }}"></iframe>
+    {% else %}
+      <section class="empty-state">
+        <h2>还没有报告</h2>
+        <p>点击左侧“运行分析”即可使用示例数据生成第一份报告。</p>
+      </section>
+    {% endif %}
+  </main>
+</body>
+</html>
+

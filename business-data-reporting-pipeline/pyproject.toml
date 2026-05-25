@@ -1,0 +1,46 @@
+[project]
+name = "business-data-reporting-pipeline"
+version = "0.1.0"
+description = "Data cleaning, analysis, visualization, LLM insight extraction, and report generation pipeline."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "pandas>=2.2",
+    "numpy>=1.26",
+    "openpyxl>=3.1",
+    "sqlalchemy>=2.0",
+    "pyyaml>=6.0",
+    "pydantic>=2.7",
+    "scipy>=1.13",
+    "matplotlib>=3.8",
+    "seaborn>=0.13",
+    "pillow>=10.0",
+    "plotly>=5.22",
+    "jinja2>=3.1",
+    "markdown>=3.6",
+    "python-dotenv>=1.0",
+    "fastapi>=0.111",
+    "uvicorn>=0.30",
+    "python-multipart>=0.0.9"
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.2",
+    "ruff>=0.4",
+    "mypy>=1.10",
+    "jupyterlab>=4.2"
+]
+llm = [
+    "openai>=1.30"
+]
+
+[project.scripts]
+data-report = "src.cli:main"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
