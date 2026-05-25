@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{{ title }}</title>
+  <style>
+    body { margin: 0; font-family: Arial, "Microsoft YaHei", sans-serif; color: #172026; background: #f5f7f9; }
+    main { max-width: 1120px; margin: 0 auto; padding: 32px 20px 56px; }
+    h1 { font-size: 30px; margin: 0 0 6px; }
+    h2 { font-size: 20px; margin: 28px 0 12px; }
+    .muted { color: #68737d; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+    .card { background: #fff; border: 1px solid #dfe5ea; border-radius: 8px; padding: 16px; }
+    .metric { font-size: 26px; font-weight: 700; margin-top: 6px; }
+    table { width: 100%; border-collapse: collapse; background: #fff; border: 1px solid #dfe5ea; }
+    th, td { border-bottom: 1px solid #e8edf1; padding: 9px 10px; text-align: left; font-size: 13px; }
+    th { background: #eef3f7; }
+    .insight { margin: 8px 0; padding: 12px 14px; background: #fff; border-left: 4px solid #176b87; border-radius: 6px; }
+    .chart { height: 260px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>{{ title }}</h1>
+    <div class="muted">自动生成的数据清洗、探索分析、可视化与洞察报告</div>
+
+    <h2>数据概览</h2>
+    <section class="grid">
+      <div class="card"><div class="muted">原始行数</div><div class="metric">{{ state.schema.rows }}</div></div>
+      <div class="card"><div class="muted">字段数</div><div class="metric">{{ state.schema.columns }}</div></div>
+      <div class="card"><div class="muted">清洗后行数</div><div class="metric">{{ state.quality.rows_after }}</div></div>
+      <div class="card"><div class="muted">完整度</div><div class="metric">{{ "%.1f"|format(state.quality.completeness * 100) }}%</div></div>
+    </section>
+
+    <h2>关键洞察</h2>
+    {% for insight in state.insights %}
+      <div class="insight">{{ insight }}</div>
+    {% endfor %}
+
+    <h2>清洗记录</h2>
+    <table>
+      <thead><tr><th>类型</th><th>字段</th><th>说明</th></tr></thead>
+      <tbody>
+      {% for item in state.cleaning_log %}
+        <tr><td>{{ item.type }}</td><td>{{ item.field or "" }}</td><td>{{ item.message }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+
+    <h2>数值字段统计</h2>
+    <table>
+      <thead><tr><th>字段</th><th>均值</th><th>中位数</th><th>标准差</th><th>最小</th><th>最大</th></tr></thead>
+      <tbody>
+      {% for field, s in state.exploration.numeric_summary.items() %}
+        <tr><td>{{ field }}</td><td>{{ s.mean }}</td><td>{{ s.median }}</td><td>{{ s.std }}</td><td>{{ s.min }}</td><td>{{ s.max }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </main>
+</body>
+</html>
+

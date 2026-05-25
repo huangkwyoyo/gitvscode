@@ -1,0 +1,22 @@
+# Runtime data
+data/uploads/
+data/outputs/
+!data/
+!data/uploads/
+!data/outputs/
+!data/uploads/.gitkeep
+!data/outputs/.gitkeep
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Local env
+.env
+.env.local
+.venv/
+venv/
+
+# Logs
+*.log

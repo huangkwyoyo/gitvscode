@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AI Data Analyst</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark">DA</div>
+        <div>
+          <strong>AI Data Analyst</strong>
+          <span>Workflow BI</span>
+        </div>
+      </div>
+      <nav>
+        <button class="nav-item active" data-target="run">分析入口</button>
+        <button class="nav-item" data-target="result">结果看板</button>
+        <button class="nav-item" data-target="history">历史任务</button>
+      </nav>
+    </aside>
+
+    <main>
+      <section id="run" class="view active">
+        <div class="topbar">
+          <div>
+            <h1>数据清洗 → 分析 → 可视化</h1>
+            <p>上传业务数据，输入分析需求，生成可追踪的分析报告。</p>
+          </div>
+          <div class="status-pill" id="statusPill">待上传</div>
+        </div>
+
+        <form id="analysisForm" class="workspace">
+          <section class="panel upload-panel">
+            <h2>输入</h2>
+            <label class="dropzone">
+              <input id="dataFile" name="data_file" type="file" accept=".csv,.xlsx,.xls,.db,.sqlite,.sqlite3" required />
+              <span class="icon">↑</span>
+              <strong>上传 CSV / Excel / SQLite 数据</strong>
+              <small id="fileName">拖入或点击选择文件</small>
+            </label>
+
+            <label class="field">
+              <span>分析需求</span>
+              <textarea name="analysis_goal" rows="8" placeholder="例如：分析销售额趋势，找出异常门店，并给出下月经营建议。"></textarea>
+            </label>
+
+            <label class="field">
+              <span>需求文档（可选 TXT）</span>
+              <input name="brief_file" type="file" accept=".txt,.md" />
+            </label>
+
+            <button class="primary" type="submit">开始分析</button>
+          </section>
+
+          <section class="panel settings-panel">
+            <h2>组件范式</h2>
+            <div class="control-row">
+              <span>自动清洗</span>
+              <label class="switch"><input type="checkbox" checked disabled><i></i></label>
+            </div>
+            <div class="control-row">
+              <span>异常检测</span>
+              <label class="switch"><input type="checkbox" checked disabled><i></i></label>
+            </div>
+            <div class="control-row">
+              <span>报告生成</span>
+              <label class="switch"><input type="checkbox" checked disabled><i></i></label>
+            </div>
+            <div class="tabs">
+              <button type="button" class="tab active">本地规则</button>
+              <button type="button" class="tab">可接入 LLM</button>
+            </div>
+            <div class="stepper" id="stepper">
+              <div>1 数据加载</div>
+              <div>2 数据清洗</div>
+              <div>3 探索分析</div>
+              <div>4 洞察提取</div>
+              <div>5 报告生成</div>
+            </div>
+          </section>
+        </form>
+      </section>
+
+      <section id="result" class="view">
+        <div class="topbar">
+          <div>
+            <h1>结果看板</h1>
+            <p id="resultSubtitle">完成一次分析后会显示图表、洞察与报告入口。</p>
+          </div>
+          <a class="secondary hidden" id="reportLink" target="_blank">打开报告</a>
+        </div>
+        <div id="metrics" class="metrics"></div>
+        <div class="panel">
+          <h2>关键洞察</h2>
+          <div id="insights" class="insights empty">暂无结果</div>
+        </div>
+        <div class="chart-grid" id="charts"></div>
+        <div class="panel">
+          <h2>数据预览</h2>
+          <div class="table-wrap"><table id="previewTable"></table></div>
+        </div>
+      </section>
+
+      <section id="history" class="view">
+        <div class="topbar">
+          <div>
+            <h1>历史任务</h1>
+            <p>当前服务进程内的分析记录。</p>
+          </div>
+          <button class="secondary" id="refreshJobs">刷新</button>
+        </div>
+        <div id="historyList" class="history-list"></div>
+      </section>
+    </main>
+  </div>
+  <script src="/app.js"></script>
+</body>
+</html>
