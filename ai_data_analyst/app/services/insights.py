@@ -35,8 +35,47 @@ def _rule_based_insights(state: AnalysisState) -> list[str]:
             if gap / spread > 0.15:
                 insights.append(f"{field} 的均值和中位数差异较明显，分布可能存在偏态或极端值影响。")
 
+    insights += _finance_insights(state)
+
     if state.analysis_goal:
         insights.append(f"围绕你的分析需求：{state.analysis_goal[:120]}，建议重点查看高相关字段、异常字段和主要分类分布。")
+
+    return insights
+
+
+def _finance_insights(state: AnalysisState) -> list[str]:
+    """从金融指标中提取关键洞察。"""
+    insights: list[str] = []
+    fm = state.finance_metrics
+    if not fm:
+        return insights
+
+    for field_name, m in fm.items():
+        field_label = m.get("field", field_name)
+
+        ann_ret = m.get("annualized_return")
+        if ann_ret is not None:
+            insights.append(f"{field_label} 年化收益率为 {ann_ret * 100:.2f}%，累计收益率 {m.get('cumulative_return', 0) * 100:.2f}%。")
+
+        ann_vol = m.get("annualized_volatility")
+        sharpe = m.get("sharpe_ratio")
+        if ann_vol is not None and sharpe is not None:
+            level = "优秀" if sharpe > 1 else "良好" if sharpe > 0.5 else "一般"
+            insights.append(f"{field_label} 年化波动率 {ann_vol * 100:.2f}%，夏普比率 {sharpe:.2f}（{level}）。")
+
+        max_dd = m.get("max_drawdown")
+        dd_info = m.get("drawdown_info", {})
+        if max_dd is not None:
+            insights.append(f"{field_label} 最大回撤 {max_dd * 100:.2f}%，发生在 {dd_info.get('trough_date', '未知')}，持续 {dd_info.get('drawdown_days', '?')} 天。")
+
+        excess = m.get("excess_return")
+        if excess is not None:
+            direction = "跑赢" if excess > 0 else "跑输"
+            insights.append(f"{field_label} 相对基准超额收益 {excess * 100:.2f}%（{direction}基准）。")
+
+        calmar = m.get("calmar_ratio")
+        if calmar is not None:
+            insights.append(f"{field_label} Calmar比率（年化收益/最大回撤）为 {calmar:.2f}。")
 
     return insights
 

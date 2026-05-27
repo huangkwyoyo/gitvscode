@@ -64,6 +64,46 @@ def build_chart_specs(state: AnalysisState) -> AnalysisState:
             }
         )
 
+    if state.finance_metrics:
+        chart_specs += _finance_charts(state.finance_metrics)
+
     state.chart_specs = chart_specs
     return state
+
+
+def _finance_charts(metrics: dict) -> list[dict]:
+    """为每个净值字段生成金融专属图表规格。"""
+    charts = []
+    for field_name, m in metrics.items():
+        field_label = m.get("field", field_name)
+
+        if m.get("cumulative_curve"):
+            charts.append({
+                "id": f"cumret-{field_name}",
+                "type": "line",
+                "title": f"{field_label} 累计收益曲线",
+                "data": m["cumulative_curve"],
+                "format": "pct",
+            })
+
+        if m.get("drawdown_curve"):
+            charts.append({
+                "id": f"drawdown-{field_name}",
+                "type": "area",
+                "title": f"{field_label} 回撤曲线",
+                "data": m["drawdown_curve"],
+                "format": "pct",
+            })
+
+        rolling = m.get("rolling_returns", {})
+        if rolling:
+            charts.append({
+                "id": f"rolling-{field_name}",
+                "type": "multiline",
+                "title": f"{field_label} 滚动收益率",
+                "data": rolling,
+                "format": "pct",
+            })
+
+    return charts
 

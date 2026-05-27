@@ -3,6 +3,7 @@ from __future__ import annotations
 import pandas as pd
 
 from app.models import AnalysisState
+from app.services.finance_metrics import compute_finance_metrics, detect_time_series
 
 
 def _safe_float(value):
@@ -48,12 +49,21 @@ def explore_data(state: AnalysisState) -> AnalysisState:
                         correlations.append({"x": row, "y": col, "value": round(float(value), 4)})
         correlations.sort(key=lambda item: abs(item["value"]), reverse=True)
 
+    date_col, nav_cols, benchmark_col = detect_time_series(df)
+    finance_metrics = {}
+    if date_col and nav_cols:
+        finance_metrics = compute_finance_metrics(df, date_col, nav_cols, benchmark_col)
+
     state.exploration = {
         "numeric_columns": numeric_cols,
         "categorical_columns": categorical_cols,
         "numeric_summary": numeric_summary,
         "categorical_summary": categorical_summary,
         "top_correlations": correlations[:10],
+        "date_column": date_col,
+        "nav_columns": nav_cols,
+        "benchmark_column": benchmark_col,
     }
+    state.finance_metrics = finance_metrics
     return state
 

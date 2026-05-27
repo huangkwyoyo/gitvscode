@@ -38,6 +38,66 @@
       <div class="insight">{{ insight }}</div>
     {% endfor %}
 
+    {% if state.finance_metrics %}
+    <h2>私募产品分析指标</h2>
+    {% for field_name, m in state.finance_metrics.items() %}
+    <section style="margin-bottom:24px;">
+      <h3 style="margin:16px 0 8px;">📈 {{ m.field }}</h3>
+      <p class="muted">区间：{{ m.start_date }} ~ {{ m.end_date }} · {{ m.data_points }} 个数据点</p>
+      <div class="grid">
+        <div class="card">
+          <div class="muted">年化收益率</div>
+          <div class="metric" style="color:{{ 'var(--ok)' if m.annualized_return and m.annualized_return > 0 else 'var(--danger)' }}">{{ "%.2f"|format(m.annualized_return * 100) if m.annualized_return is not none else '--' }}%</div>
+        </div>
+        <div class="card">
+          <div class="muted">累计收益率</div>
+          <div class="metric" style="color:{{ 'var(--ok)' if m.cumulative_return and m.cumulative_return > 0 else 'var(--danger)' }}">{{ "%.2f"|format(m.cumulative_return * 100) if m.cumulative_return is not none else '--' }}%</div>
+        </div>
+        <div class="card">
+          <div class="muted">年化波动率</div>
+          <div class="metric">{{ "%.2f"|format(m.annualized_volatility * 100) if m.annualized_volatility is not none else '--' }}%</div>
+        </div>
+        <div class="card">
+          <div class="muted">夏普比率</div>
+          <div class="metric">{{ "%.2f"|format(m.sharpe_ratio) if m.sharpe_ratio is not none else '--' }}</div>
+        </div>
+        <div class="card">
+          <div class="muted">最大回撤</div>
+          <div class="metric" style="color:var(--danger)">{{ "%.2f"|format(m.max_drawdown * 100) if m.max_drawdown is not none else '--' }}%</div>
+        </div>
+        <div class="card">
+          <div class="muted">Calmar比率</div>
+          <div class="metric">{{ "%.2f"|format(m.calmar_ratio) if m.calmar_ratio is not none else '--' }}</div>
+        </div>
+        {% if m.excess_return is not none %}
+        <div class="card">
+          <div class="muted">超额收益率 (vs {{ m.benchmark_field }})</div>
+          <div class="metric" style="color:{{ 'var(--ok)' if m.excess_return and m.excess_return > 0 else 'var(--danger)' }}">{{ "%.2f"|format(m.excess_return * 100) if m.excess_return is not none else '--' }}%</div>
+        </div>
+        {% endif %}
+      </div>
+      {% if m.drawdown_info %}
+      <h4 style="margin:16px 0 8px;">回撤分析</h4>
+      <table>
+        <thead><tr><th>指标</th><th>数值</th></tr></thead>
+        <tbody>
+          <tr><td>最大回撤</td><td>{{ "%.2f"|format(m.max_drawdown * 100) }}%</td></tr>
+          <tr><td>峰值日期</td><td>{{ m.drawdown_info.peak_date }}</td></tr>
+          <tr><td>谷底日期</td><td>{{ m.drawdown_info.trough_date }}</td></tr>
+          <tr><td>回撤持续天数</td><td>{{ m.drawdown_info.drawdown_days }} 天</td></tr>
+          {% if m.drawdown_info.recovered %}
+          <tr><td>恢复日期</td><td>{{ m.drawdown_info.recovery_date }}</td></tr>
+          <tr><td>恢复天数</td><td>{{ m.drawdown_info.recovery_days }} 天</td></tr>
+          {% else %}
+          <tr><td>恢复状态</td><td>尚未恢复至前高</td></tr>
+          {% endif %}
+        </tbody>
+      </table>
+      {% endif %}
+    </section>
+    {% endfor %}
+    {% endif %}
+
     <h2>清洗记录</h2>
     <table>
       <thead><tr><th>类型</th><th>字段</th><th>说明</th></tr></thead>

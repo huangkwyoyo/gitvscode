@@ -22,6 +22,7 @@ class AnalysisState:
     exploration: dict[str, Any] = field(default_factory=dict)
     chart_specs: list[dict[str, Any]] = field(default_factory=list)
     insights: list[str] = field(default_factory=list)
+    finance_metrics: dict[str, Any] = field(default_factory=dict)
     report_path: Path | None = None
     preview_rows: list[dict[str, Any]] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
@@ -37,6 +38,7 @@ class AnalysisState:
             "exploration": self.exploration,
             "chart_specs": self.chart_specs,
             "insights": self.insights,
+            "finance_metrics": self.finance_metrics,
             "preview_rows": self.preview_rows,
             "report_url": f"/api/report/{self.job_id}" if self.report_path else None,
             "errors": self.errors,
