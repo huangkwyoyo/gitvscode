@@ -52,7 +52,7 @@ def explore_data(state: AnalysisState) -> AnalysisState:
     date_col, nav_cols, benchmark_col = detect_time_series(df)
     finance_metrics = {}
     if date_col and nav_cols:
-        finance_metrics = compute_finance_metrics(df, date_col, nav_cols, benchmark_col)
+        finance_metrics = compute_finance_metrics(df, date_col, nav_cols, benchmark_col, errors=state.errors)
 
     state.exploration = {
         "numeric_columns": numeric_cols,
