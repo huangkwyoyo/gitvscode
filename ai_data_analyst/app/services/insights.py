@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 
 from app.models import AnalysisState
@@ -104,7 +105,7 @@ def _llm_insights(state: AnalysisState, base_insights: list[str]) -> list[str]:
             model=model,
             messages=[
                 {"role": "system", "content": "你是严谨的业务数据分析师。用中文输出5条可执行洞察，避免夸大因果。"},
-                {"role": "user", "content": str(prompt)},
+                {"role": "user", "content": json.dumps(prompt, ensure_ascii=False, indent=2)},
             ],
             temperature=0.2,
         )
