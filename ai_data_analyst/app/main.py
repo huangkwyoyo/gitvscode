@@ -2,29 +2,65 @@ from __future__ import annotations
 
 import shutil
 import uuid
+from collections import OrderedDict
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
+from starlette.responses import JSONResponse
 
 from app.models import AnalysisState
 from app.settings import OUTPUT_DIR, STATIC_DIR, UPLOAD_DIR
 from app.workflow import AnalysisWorkflow
 
 app = FastAPI(title="AI Data Analyst", version="0.1.0")
+MAX_UPLOAD_BYTES = 50 * 1024 * 1024  # 50MB
+
+
+class UploadSizeMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        if request.method == "POST":
+            content_length = request.headers.get("content-length")
+            if content_length and int(content_length) > MAX_UPLOAD_BYTES:
+                return JSONResponse(
+                    status_code=413,
+                    content={"detail": "上传文件超过 50MB 限制"},
+                )
+        response = await call_next(request)
+        return response
+
+
+app.add_middleware(UploadSizeMiddleware)
+
 workflow = AnalysisWorkflow()
-JOBS: dict[str, AnalysisState] = {}
+MAX_JOBS = 50
+JOBS: OrderedDict[str, AnalysisState] = OrderedDict()
+
+
+def _evict_old_jobs() -> None:
+    while len(JOBS) >= MAX_JOBS:
+        JOBS.popitem(last=False)
 
 
 def _safe_name(filename: str) -> str:
     name = Path(filename).name.replace(" ", "_")
+    # strip path-traversal sequences like "../" or "..\"
+    name = Path(name).name
+    # only allow safe characters
+    name = "".join(c for c in name if c.isalnum() or c in {".", "-", "_"})
     return name or "dataset.csv"
 
 
 async def _save_upload(file: UploadFile, target: Path) -> None:
     with target.open("wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
+    saved = target.stat().st_size
+    if saved > MAX_UPLOAD_BYTES:
+        target.unlink()
+        raise HTTPException(status_code=413, detail="上传文件超过 50MB 限制")
 
 
 async def _read_brief(brief_file: UploadFile | None) -> str:
@@ -68,6 +104,7 @@ async def analyze(
         output_dir=job_output_dir,
     )
     state = workflow.run(state)
+    _evict_old_jobs()
     JOBS[job_id] = state
     return state.public_payload()
 

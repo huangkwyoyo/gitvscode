@@ -83,7 +83,7 @@ def clean_data(state: AnalysisState) -> AnalysisState:
     for col in numeric_cols:
         series = pd.to_numeric(df[col], errors="coerce")
         std = series.std()
-        if std and not np.isnan(std):
+        if not np.isnan(std):
             z = ((series - series.mean()) / std).abs()
             count = int((z > 3).sum())
             if count:

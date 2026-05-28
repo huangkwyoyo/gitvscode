@@ -22,6 +22,16 @@ class AnalysisWorkflow:
     LangGraph later should not require changing the service layer.
     """
 
+    # dependencies: which upstream fields each node requires
+    REQUIREMENTS = {
+        "load_data": [],
+        "clean_data": ["raw_df"],
+        "explore_data": ["clean_df"],
+        "visualize": ["exploration"],
+        "generate_insights": ["exploration"],
+        "generate_report": ["insights"],
+    }
+
     def __init__(self) -> None:
         self.nodes: list[tuple[str, WorkflowNode]] = [
             ("load_data", load_data),
@@ -34,10 +44,14 @@ class AnalysisWorkflow:
 
     def run(self, state: AnalysisState) -> AnalysisState:
         for node_name, node in self.nodes:
+            required = self.REQUIREMENTS[node_name]
+            missing = [key for key in required if getattr(state, key) is None and not getattr(state, key, {})]
+            if missing:
+                state.errors.append(f"{node_name}: skipped — upstream dependency missing ({', '.join(missing)})")
+                continue
             try:
                 state = node(state)
-            except Exception as exc:  # keep jobs inspectable rather than opaque
+            except Exception as exc:
                 state.errors.append(f"{node_name}: {exc}")
-                break
         return state
 
