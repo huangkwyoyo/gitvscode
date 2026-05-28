@@ -27,5 +27,10 @@ class SQLiteDataSourceAdapter(DataSourceAdapter):
             if tables.empty:
                 raise ValueError("SQLite 数据库中没有可读取的数据表")
             table = tables.iloc[0]["name"]
+            # 白名单校验：表名仅允许字母、数字、下划线，防止 SQL 注入
+            if not table.replace("_", "").isalnum():
+                raise ValueError(f"表名包含非法字符: {table}")
+            if table not in tables["name"].values:
+                raise ValueError(f"表不存在: {table}")
             return pd.read_sql_query(f'select * from "{table}"', conn)
 

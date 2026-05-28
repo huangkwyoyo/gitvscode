@@ -4,12 +4,7 @@ import pandas as pd
 
 from app.models import AnalysisState
 from app.services.finance_metrics import compute_finance_metrics, detect_time_series
-
-
-def _safe_float(value):
-    if pd.isna(value):
-        return None
-    return round(float(value), 4)
+from app.services.utils import safe_float
 
 
 def explore_data(state: AnalysisState) -> AnalysisState:
@@ -22,15 +17,15 @@ def explore_data(state: AnalysisState) -> AnalysisState:
 
     numeric_summary = {}
     for col in numeric_cols:
-        s = pd.to_numeric(df[col], errors="coerce")
+        s = df[col]  # cleaning.py 已完成类型转换，无需重复 to_numeric
         numeric_summary[col] = {
-            "mean": _safe_float(s.mean()),
-            "median": _safe_float(s.median()),
-            "std": _safe_float(s.std()),
-            "min": _safe_float(s.min()),
-            "max": _safe_float(s.max()),
-            "q1": _safe_float(s.quantile(0.25)),
-            "q3": _safe_float(s.quantile(0.75)),
+            "mean": safe_float(s.mean()),
+            "median": safe_float(s.median()),
+            "std": safe_float(s.std()),
+            "min": safe_float(s.min()),
+            "max": safe_float(s.max()),
+            "q1": safe_float(s.quantile(0.25)),
+            "q3": safe_float(s.quantile(0.75)),
         }
 
     categorical_summary = {}
@@ -40,13 +35,16 @@ def explore_data(state: AnalysisState) -> AnalysisState:
 
     correlations = []
     if len(numeric_cols) >= 2:
-        corr = df[numeric_cols].corr(numeric_only=True)
+        # 数值列过多时限制计算规模，避免 O(n²) 性能问题
+        MAX_CORR_COLS = 20
+        corr_cols = numeric_cols[:MAX_CORR_COLS]
+        corr = df[corr_cols].corr(numeric_only=True)
         for row in corr.index:
             for col in corr.columns:
                 if row < col:
                     value = corr.loc[row, col]
                     if pd.notna(value):
-                        correlations.append({"x": row, "y": col, "value": round(float(value), 4)})
+                        correlations.append({"x": row, "y": col, "value": safe_float(value)})
         correlations.sort(key=lambda item: abs(item["value"]), reverse=True)
 
     date_col, nav_cols, benchmark_col = detect_time_series(df)

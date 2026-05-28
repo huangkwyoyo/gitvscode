@@ -1,3 +1,7 @@
+/* ── 全局配置 ── */
+const CHART_WIDTH = 520;
+const CHART_HEIGHT = 260;
+
 /* ── 全局引用与事件绑定 ── */
 const form = document.querySelector("#analysisForm");
 const statusPill = document.querySelector("#statusPill");
@@ -168,7 +172,7 @@ function renderChart(spec) {
 }
 
 function renderBars(data) {
-  const W = 520, H = 260, pad = 34;
+  const W = CHART_WIDTH, H = CHART_HEIGHT, pad = 34;
   const max = Math.max(...data.map((d) => Number(d.value) || 0), 1);
   const barGap = 8;
   const barWidth = Math.max(10, (W - pad * 2) / Math.max(data.length, 1) - barGap);

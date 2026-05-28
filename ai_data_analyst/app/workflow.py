@@ -21,6 +21,9 @@ class AnalysisWorkflow:
     """
 
     # 依赖关系：每个节点需要的上游字段
+    # 关键节点失败时应提前终止整个流程
+    CRITICAL_NODES = {"load_data", "clean_data", "explore_data"}
+
     REQUIREMENTS = {
         "load_data": [],
         "clean_data": ["raw_df"],
@@ -41,15 +44,43 @@ class AnalysisWorkflow:
         ]
 
     def run(self, state: AnalysisState) -> AnalysisState:
+        failed_nodes: set[str] = set()
         for node_name, node in self.nodes:
             required = self.REQUIREMENTS[node_name]
             missing = [key for key in required if getattr(state, key) is None and not getattr(state, key, {})]
+            # 检查上游依赖节点是否失败
+            upstream_failed = self._upstream_failed(node_name, failed_nodes)
+            if upstream_failed:
+                state.errors.append(f"{node_name}: skipped — upstream node(s) failed")
+                continue
             if missing:
                 state.errors.append(f"{node_name}: skipped — upstream dependency missing ({', '.join(missing)})")
+                failed_nodes.add(node_name)
                 continue
             try:
                 state = node(state)
             except Exception as exc:
                 state.errors.append(f"{node_name}: {exc}")
+                failed_nodes.add(node_name)
+                if node_name in self.CRITICAL_NODES:
+                    state.errors.append("分析流程因关键节点失败而终止")
+                    break
         return state
+
+    @staticmethod
+    def _upstream_failed(node_name: str, failed_nodes: set[str]) -> bool:
+        """检查节点的上游依赖节点是否有失败的。"""
+        deps = AnalysisWorkflow.REQUIREMENTS.get(node_name, [])
+        # 根据依赖字段反推上游节点
+        field_to_node = {
+            "raw_df": "load_data",
+            "clean_df": "clean_data",
+            "exploration": "explore_data",
+            "insights": "generate_insights",
+        }
+        for dep_field in deps:
+            upstream_node = field_to_node.get(dep_field)
+            if upstream_node and upstream_node in failed_nodes:
+                return True
+        return False
 

@@ -7,12 +7,9 @@ import warnings
 import numpy as np
 import pandas as pd
 
-# 交易日历基准：日频场景下的年交易日数
-TRADING_DAYS = 252
-# 无风险利率默认值（3%）
-RISK_FREE_RATE = 0.03
-# 滚动收益窗口配置
-ROLLING_WINDOWS = {"3个月": 63, "6个月": 126, "1年": 252}
+from app.services.utils import safe_float
+from app.settings import RISK_FREE_RATE, ROLLING_WINDOWS, TRADING_DAYS
+
 # 频率检测的交易日阈值（年交易日数的容忍区间）
 FREQUENCY_THRESHOLDS = {
     "daily": (200, 260),       # 日频：200-260 天/年
@@ -26,12 +23,6 @@ FREQUENCY_MULTIPLIER = {
     "monthly": 12,
 }
 
-
-def _safe_float(value) -> float | None:
-    """安全转换为 float，NaN 或 None 时返回 None。"""
-    if value is None or (isinstance(value, float) and np.isnan(value)):
-        return None
-    return round(float(value), 6)
 
 
 def _detect_frequency(dates: pd.Series) -> str:
@@ -181,9 +172,9 @@ def rolling_returns(nav: pd.Series, dates: pd.Series, frequency: str | None = No
         # 使用 nav 的索引作为日期，与 roll 的长度严格对齐
         roll_dates = nav.index[-len(roll):]
         result[label] = [
-            {"date": str(d.date()), "value": _safe_float(v)}
+            {"date": str(d.date()), "value": safe_float(v)}
             for d, v in zip(roll_dates, roll)
-            if _safe_float(v) is not None
+            if safe_float(v) is not None
         ]
     return result
 
@@ -217,18 +208,18 @@ def drawdown_duration(nav: pd.Series, drawdown_series: pd.Series) -> dict:
     cumulative = nav / nav.iloc[0]
     running_max = cumulative.cummax()
 
-    # 修复：在等值平台期选择最接近谷底的峰值索引
+    # 在等值平台期选择最接近谷底的峰值索引（需严格在谷底之前）
     peak_values = running_max.loc[:max_dd_end_idx]
     peak_idx = peak_values.idxmax()
-    # 如果多个索引对应相同的最大值，取最后一个（最接近谷底）
-    if isinstance(peak_idx, pd.Index):
-        peak_idx = peak_idx[-1]
-    else:
-        # 手动检查是否存在多个相同最大值的索引
-        max_val = peak_values.max()
-        all_peaks = peak_values[peak_values == max_val]
-        if len(all_peaks) > 1:
-            peak_idx = all_peaks.index[-1]
+    max_val = peak_values.max()
+    all_peaks = peak_values[peak_values == max_val]
+    if len(all_peaks) > 1:
+        # 排除谷底索引本身，取最后一个严格在谷底之前的峰值
+        candidates = all_peaks.index[all_peaks.index < max_dd_end_idx]
+        if len(candidates) > 0:
+            peak_idx = candidates[-1]
+        else:
+            peak_idx = all_peaks.index[-2] if len(all_peaks) > 1 else all_peaks.index[0]
 
     def _fmt_date(idx) -> str:
         try:
@@ -252,7 +243,7 @@ def drawdown_duration(nav: pd.Series, drawdown_series: pd.Series) -> dict:
         recovery_date = _fmt_date(recovery_idx)
 
     return {
-        "max_drawdown": _safe_float(max_dd),
+        "max_drawdown": safe_float(max_dd),
         "peak_date": peak_date,
         "trough_date": trough_date,
         "recovery_date": recovery_date,
@@ -344,9 +335,9 @@ def win_rate_stats(nav: pd.Series, frequency: str | None = None) -> dict:
         "total_periods": len(rets),
         "winning_periods": len(positive),
         "losing_periods": len(negative),
-        "avg_win": _safe_float(avg_win),
-        "avg_loss": _safe_float(avg_loss),
-        "profit_loss_ratio": _safe_float(profit_loss_ratio) if profit_loss_ratio is not None else None,
+        "avg_win": safe_float(avg_win),
+        "avg_loss": safe_float(avg_loss),
+        "profit_loss_ratio": safe_float(profit_loss_ratio) if profit_loss_ratio is not None else None,
     }
 
 
@@ -390,21 +381,21 @@ def compute_finance_metrics(
             "start_date": str(dates.iloc[0].date()),
             "end_date": str(dates.iloc[-1].date()),
             "frequency": frequency,
-            "annualized_return": _safe_float(ann_ret),
-            "cumulative_return": _safe_float(cum_ret),
-            "annualized_volatility": _safe_float(ann_vol),
-            "sharpe_ratio": _safe_float(sharpe) if sharpe is not None else None,
-            "sortino_ratio": _safe_float(sortino) if sortino is not None else None,
-            "max_drawdown": _safe_float(max_dd),
+            "annualized_return": safe_float(ann_ret),
+            "cumulative_return": safe_float(cum_ret),
+            "annualized_volatility": safe_float(ann_vol),
+            "sharpe_ratio": safe_float(sharpe) if sharpe is not None else None,
+            "sortino_ratio": safe_float(sortino) if sortino is not None else None,
+            "max_drawdown": safe_float(max_dd),
             "drawdown_info": dd_info,
             "rolling_returns": rolling,
             "win_rate_stats": win_stats,
             "cumulative_curve": [
-                {"date": str(d.date()), "value": _safe_float(nav.iloc[i] / nav.iloc[0] - 1)}
+                {"date": str(d.date()), "value": safe_float(nav.iloc[i] / nav.iloc[0] - 1)}
                 for i, d in enumerate(dates)
             ],
             "drawdown_curve": [
-                {"date": str(d.date()), "value": _safe_float(dd_series.iloc[i])}
+                {"date": str(d.date()), "value": safe_float(dd_series.iloc[i])}
                 for i, d in enumerate(dates)
             ],
         }
@@ -413,11 +404,11 @@ def compute_finance_metrics(
             try:
                 bench_nav = df.set_index(date_col)[benchmark_col].dropna()
                 excess = excess_return(nav, bench_nav, dates, frequency)
-                metrics["excess_return"] = _safe_float(excess) if excess is not None else None
+                metrics["excess_return"] = safe_float(excess) if excess is not None else None
                 metrics["benchmark_field"] = benchmark_col
 
                 info_ratio = information_ratio(nav, bench_nav, dates, frequency)
-                metrics["information_ratio"] = _safe_float(info_ratio) if info_ratio is not None else None
+                metrics["information_ratio"] = safe_float(info_ratio) if info_ratio is not None else None
             except Exception as bench_exc:
                 if errors is not None:
                     errors.append(f"基准对比 {col}: {bench_exc}")
@@ -425,7 +416,7 @@ def compute_finance_metrics(
         calmar = None
         if ann_ret is not None and max_dd != 0 and abs(max_dd) > 1e-10:
             calmar = ann_ret / abs(max_dd)
-        metrics["calmar_ratio"] = _safe_float(calmar) if calmar is not None else None
+        metrics["calmar_ratio"] = safe_float(calmar) if calmar is not None else None
 
         results[col] = metrics
 

@@ -4,14 +4,7 @@ import numpy as np
 import pandas as pd
 
 from app.models import AnalysisState
-
-
-def _normalize_preview_value(value):
-    if pd.isna(value):
-        return None
-    if hasattr(value, "isoformat"):
-        return value.isoformat()
-    return value
+from app.services.utils import normalize_preview_value
 
 
 def _try_datetime(column: str, series: pd.Series) -> pd.Series:
@@ -103,7 +96,7 @@ def clean_data(state: AnalysisState) -> AnalysisState:
         "outliers": outliers,
     }
     state.preview_rows = [
-        {k: _normalize_preview_value(v) for k, v in row.items()}
+        {k: normalize_preview_value(v) for k, v in row.items()}
         for row in df.head(25).to_dict(orient="records")
     ]
 

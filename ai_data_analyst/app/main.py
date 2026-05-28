@@ -13,11 +13,10 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 
 from app.models import AnalysisState
-from app.settings import OUTPUT_DIR, STATIC_DIR, UPLOAD_DIR
+from app.settings import MAX_JOBS, MAX_UPLOAD_BYTES, OUTPUT_DIR, STATIC_DIR, UPLOAD_DIR
 from app.workflow import AnalysisWorkflow
 
 app = FastAPI(title="AI Data Analyst", version="0.1.0")
-MAX_UPLOAD_BYTES = 50 * 1024 * 1024  # 50MB
 
 
 class UploadSizeMiddleware(BaseHTTPMiddleware):
@@ -36,7 +35,6 @@ class UploadSizeMiddleware(BaseHTTPMiddleware):
 app.add_middleware(UploadSizeMiddleware)
 
 workflow = AnalysisWorkflow()
-MAX_JOBS = 50
 JOBS: OrderedDict[str, AnalysisState] = OrderedDict()
 
 
