@@ -22,6 +22,7 @@ class SparkCodeGenerateTool(BaseTool):
 
     def _run(self, table_list=None, field_list=None, logic_desc="常规统计聚合计算",
              output_type=None, table_name=None, write_mode=None, file_format=None):
+        """融合PRD解析的输出参数与手动入参，调用skill层生成PySpark代码"""
         table_list = table_list or []
         field_list = field_list or []
 

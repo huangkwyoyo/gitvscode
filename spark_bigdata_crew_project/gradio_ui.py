@@ -5,17 +5,20 @@ import fitz
 from docx import Document
 from main import run
 
-# 多模态文档统一解析：支持PDF、DOCX、MD、TXT
+
 def parse_upload_file(file_path):
+    """读取上传的文件并提取文本内容，支持PDF/DOCX/MD/TXT四种格式"""
     if not file_path or not os.path.exists(file_path):
         return ""
     suffix = Path(file_path).suffix.lower()
     content = ""
     if suffix == ".pdf":
+        # PDF使用PyMuPDF（fitz）解析
         doc = fitz.open(file_path)
         for page in doc:
             content += page.get_text()
     elif suffix == ".docx":
+        # DOCX使用python-docx解析段落文本
         doc = Document(file_path)
         content = "\n".join([p.text for p in doc.paragraphs])
     elif suffix in [".md", ".txt"]:
@@ -23,8 +26,10 @@ def parse_upload_file(file_path):
             content = f.read()
     return content.strip()
 
+
 def start_pipeline(upload_file, prd_text, data_source_type):
-    # 融合：数据源标识 + 上传文档 + 手动需求
+    """组装多源需求输入并启动流水线"""
+    # 融合：数据源标识 + 上传文档 + 手动需求 三项合一为最终PRD
     file_content = parse_upload_file(upload_file) if upload_file else ""
     final_prd = f"【指定数据源环境】{data_source_type}\n【上传文档内容】\n{file_content}\n【手动补充需求】\n{prd_text}"
     result = run(user_prd=final_prd)

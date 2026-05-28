@@ -16,6 +16,7 @@ class BusinessRuleVerifyTool(BaseTool):
     args_schema: Type[RuleVerifyInput] = RuleVerifyInput
 
     def _run(self, rule_expr: str, df_path: str = None):
+        """无DataFrame时仅作规则表达式语法记录，实际执行需传入数据源"""
         res = DataQualityVerifySkill.business_rule_check(None, rule_expr)
         mcp.set("business_rule_result", res)
         return f"📊 业务规则校验结果：\n{str(res)}"

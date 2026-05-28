@@ -1,3 +1,12 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+多数据库统一配置模块
+
+功能：集中管理MySQL/SQLServer/Oracle/Hive四大数据源的连接参数，
+      通过环境变量注入实现环境隔离。
+      所有配置均可被.env文件覆盖，未设置时提供安全的默认值。
+"""
 import os
 from dotenv import load_dotenv
 load_dotenv()

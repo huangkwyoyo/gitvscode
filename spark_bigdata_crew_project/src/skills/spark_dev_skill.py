@@ -7,8 +7,11 @@ import re
 from src.mcp.context_protocol import mcp
 
 class SparkCodeDevSkill:
+    """Spark动态参数研发技能：解析输出参数、生成PySpark代码（零硬编码）"""
+
     @staticmethod
     def parse_output_param(prd_content: str, db_type: str) -> dict:
+        """从PRD文本和数据库类型推断输出表名、写入模式、文件格式等动态参数"""
         output_param = {
             "output_type": "hive_table",
             "table_name": "dws_business_result",
@@ -23,7 +26,7 @@ class SparkCodeDevSkill:
         elif db_type == "hive":
             output_param["output_type"] = "hive_table"
 
-        # 提取数仓分层表名
+        # 提取数仓分层表名（取最后一个匹配以优先使用最后提及的表）
         table_matches = re.findall(r"(dws|ads|dwd|ods)_\w+", prd_content)
         if table_matches:
             output_param["table_name"] = table_matches[-1]
@@ -38,19 +41,19 @@ class SparkCodeDevSkill:
         if re.search(r"csv格式|文本输出", prd_content, re.I):
             output_param["file_format"] = "csv"
 
-        # MCP写入：全局缓存动态输出参数
         mcp.set("spark_output_param", output_param)
         return output_param
 
     @staticmethod
     def generate_code(table_list: list, field_list: list, logic_desc: str, output_param: dict) -> str:
+        """根据表清单、字段列表、业务逻辑描述和输出参数动态渲染PySpark生产代码"""
         output_type = output_param["output_type"]
         table_name = output_param["table_name"]
         write_mode = output_param["write_mode"]
         partition_col = output_param["partition_col"]
         file_format = output_param["file_format"]
 
-        # 动态多表读取
+        # 动态多表读取SQL
         read_sql = ""
         for idx, table in enumerate(table_list):
             read_sql += f"df_{idx+1} = spark.sql(\"SELECT * FROM {table}\")\n        "
@@ -87,6 +90,5 @@ df_result = df_clean.select({select_fields}).distinct()
 
 spark.stop()
 """
-        # MCP写入：全局缓存生成的完整Spark源码
         mcp.set("spark_code_raw", spark_code)
         return spark_code

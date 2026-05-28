@@ -1,2 +1,2 @@
-"""Web reporting application."""
+"""Web 报表应用（FastAPI）。"""
 

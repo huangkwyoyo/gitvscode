@@ -34,15 +34,15 @@ class MCPContext:
         }
 
     def set(self, key: str, value: Any):
-        """写入全局上下文（自动支持新增key）"""
+        """写入全局上下文（自动支持新增key，无需预定义）"""
         self._context[key] = value
 
     def get(self, key: str, default: Any = "") -> Any:
-        """读取上下文，带默认值，防止空值、KeyError"""
+        """读取上下文，带默认值以防止空值和KeyError异常"""
         return self._context.get(key, default)
 
     def clear(self):
-        """清空并重置为默认上下文（任务隔离必备）"""
+        """清空并重置为默认上下文（每次新任务开始前调用以实现隔离）"""
         self._init_default_context()
 
 

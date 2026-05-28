@@ -9,6 +9,15 @@ from src.analysis.statistics import describe_dataframe
 
 
 def run_eda(dataframe: pd.DataFrame, config: dict[str, Any]) -> dict[str, Any]:
+    """执行完整探索性数据分析：shape、列名、业务指标、描述统计、相关性。
+
+    Args:
+        dataframe: 已清洗的数据框。
+        config: 管道配置字典。
+
+    Returns:
+        包含各分析结果的字典。
+    """
     return {
         "shape": dataframe.shape,
         "columns": list(dataframe.columns),
@@ -19,6 +28,14 @@ def run_eda(dataframe: pd.DataFrame, config: dict[str, Any]) -> dict[str, Any]:
 
 
 def compute_business_metrics(dataframe: pd.DataFrame) -> dict[str, Any]:
+    """从数据中抽取业务维度指标：总收入/成本/利润率、按月收入汇总、按区域/品类汇总。
+
+    Args:
+        dataframe: 已清洗的数据框。
+
+    Returns:
+        业务指标字典。
+    """
     metrics: dict[str, Any] = {}
     if {"revenue", "cost"}.issubset(dataframe.columns):
         profit = dataframe["revenue"] - dataframe["cost"]

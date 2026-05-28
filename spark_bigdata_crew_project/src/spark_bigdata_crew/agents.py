@@ -128,6 +128,7 @@ document_agent = Agent(
 
 
 def get_all_agents() -> list[Agent]:
+    """返回十大生产级智能体实例列表，按流水线顺序排列"""
     return [
         requirement_analyst_agent,
         data_modeling_agent,

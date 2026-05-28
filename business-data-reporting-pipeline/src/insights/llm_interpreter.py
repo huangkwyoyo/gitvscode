@@ -13,16 +13,26 @@ def extract_insights(
     analysis_result: dict[str, Any],
     config: dict[str, Any],
 ) -> dict[str, Any]:
+    """提取业务洞察：若 LLM 启用则调用大模型，否则回退到规则引擎。
+
+    Args:
+        dataframe: 已清洗的数据框。
+        analysis_result: EDA 分析结果字典。
+        config: 管道配置字典。
+
+    Returns:
+        包含 summary、highlights、risks、recommended_actions 的洞察字典。
+    """
     if not config["llm"].get("enabled", False):
         return _rule_based_insights(dataframe, analysis_result)
 
     if config["llm"].get("provider") != "openai":
-        raise ValueError(f"Unsupported LLM provider: {config['llm'].get('provider')}")
+        raise ValueError(f"不支持的 LLM 提供商: {config['llm'].get('provider')}")
 
     try:
         from openai import OpenAI
     except ImportError as exc:
-        raise RuntimeError("Install the llm extra to enable OpenAI insights: pip install -e .[llm]") from exc
+        raise RuntimeError("安装 llm 依赖以启用 OpenAI 洞察: pip install -e .[llm]") from exc
 
     client = OpenAI(api_key=get_env_value(config["llm"].get("api_key_env", "OPENAI_API_KEY")))
     context = _build_llm_context(dataframe, analysis_result, config)
@@ -48,6 +58,7 @@ def extract_insights(
 
 
 def _rule_based_insights(dataframe: pd.DataFrame, analysis_result: dict[str, Any]) -> dict[str, Any]:
+    """基于规则的轻量洞察引擎：从业务指标和异常值标志中提取关键信息。"""
     metrics = analysis_result.get("business_metrics", {})
     highlights: list[str] = []
     risks: list[str] = []
@@ -83,6 +94,7 @@ def _build_llm_context(
     analysis_result: dict[str, Any],
     config: dict[str, Any],
 ) -> dict[str, Any]:
+    """构造发送给 LLM 的上下文摘要，避免暴露全部原始数据。"""
     max_sample_rows = config["llm"].get("max_sample_rows", 8)
     descriptive = analysis_result["descriptive_statistics"]
     return {
@@ -96,6 +108,7 @@ def _build_llm_context(
 
 
 def _safe_parse_json(text: str) -> dict[str, Any]:
+    """安全解析 LLM 返回的 JSON 文本，解析失败时返回结构化默认值。"""
     try:
         parsed = json.loads(text)
     except json.JSONDecodeError:

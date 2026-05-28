@@ -6,5 +6,6 @@ class GitCodeCompareTool(BaseTool):
     description = "比对当前代码与历史版本差异，输出变更明细"
 
     def _run(self):
+        """执行git diff HEAD获取工作区相对于最新提交的变更"""
         diff = GitCodeVersionSkill.get_diff()
         return f"📝 版本差异比对结果：\n{diff}"

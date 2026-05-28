@@ -13,6 +13,7 @@ class GitCodeVersionTool(BaseTool):
     args_schema: Type[GitCodeIterateInput] = GitCodeIterateInput
 
     def _run(self, code_content: str, iterate_desc: str = "Spark生产代码迭代优化"):
+        """将新代码与历史版本进行差异分析后提交到Git仓库"""
         iterate_code = GitCodeVersionSkill.iterate_optimize(code_content)
         commit_res = GitCodeVersionSkill.save_code_to_git(iterate_code, iterate_desc)
         diff_res = GitCodeVersionSkill.get_diff()

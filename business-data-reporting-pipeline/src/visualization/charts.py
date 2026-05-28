@@ -6,15 +6,15 @@ from typing import Any
 import pandas as pd
 from PIL import Image, ImageDraw, ImageFont
 
-
+# 画布尺寸与颜色主题（基于 Material Design）
 CANVAS = (960, 560)
-BG = "#ffffff"
-INK = "#17202a"
-MUTED = "#637381"
-GRID = "#d9dee5"
-BLUE = "#275f7f"
-TEAL = "#3d8b7d"
-RED = "#b75b5b"
+BG = "#ffffff"          # 背景白
+INK = "#17202a"          # 主文本色
+MUTED = "#637381"        # 辅助文本色
+GRID = "#d9dee5"         # 网格线色
+BLUE = "#275f7f"         # 柱状图主色
+TEAL = "#3d8b7d"         # 直方图色
+RED = "#b75b5b"          # 异常/高亮色
 
 
 def create_charts(
@@ -22,6 +22,16 @@ def create_charts(
     analysis_result: dict[str, Any],
     config: dict[str, Any],
 ) -> dict[str, Path]:
+    """根据数据列自动生成关联热力图、分组柱状图和直方图。
+
+    Args:
+        dataframe: 已清洗的数据框。
+        analysis_result: EDA 分析结果。
+        config: 管道配置。
+
+    Returns:
+        图表文件名到路径的映射字典。
+    """
     figures_dir = Path(config["report"]["figures_dir"])
     figures_dir.mkdir(parents=True, exist_ok=True)
 
@@ -55,6 +65,7 @@ def create_charts(
 
 
 def _new_canvas(title: str) -> tuple[Image.Image, ImageDraw.ImageDraw, ImageFont.ImageFont]:
+    """创建空白画布并绘制标题，返回绘图对象。"""
     image = Image.new("RGB", CANVAS, BG)
     draw = ImageDraw.Draw(image)
     font = ImageFont.load_default()
@@ -63,6 +74,7 @@ def _new_canvas(title: str) -> tuple[Image.Image, ImageDraw.ImageDraw, ImageFont
 
 
 def _draw_bar_chart(series: pd.Series, path: Path, title: str, ylabel: str) -> None:
+    """绘制分组柱状图，用于展示按区域/品类等分组的汇总指标。"""
     image, draw, font = _new_canvas(title)
     left, top, right, bottom = 92, 88, 910, 470
     draw.rectangle((left, top, right, bottom), outline=GRID)
@@ -90,6 +102,7 @@ def _draw_bar_chart(series: pd.Series, path: Path, title: str, ylabel: str) -> N
 
 
 def _draw_histogram(series: pd.Series, path: Path, title: str) -> None:
+    """绘制数值分布直方图，自动确定分箱数量。"""
     image, draw, font = _new_canvas(title)
     left, top, right, bottom = 92, 88, 910, 470
     draw.rectangle((left, top, right, bottom), outline=GRID)
@@ -119,6 +132,7 @@ def _draw_histogram(series: pd.Series, path: Path, title: str) -> None:
 
 
 def _draw_heatmap(dataframe: pd.DataFrame, path: Path, title: str) -> None:
+    """绘制相关系数热力图，使用渐变色表示相关性方向与强度。"""
     image, draw, font = _new_canvas(title)
     columns = list(dataframe.columns)
     if not columns:
@@ -145,6 +159,7 @@ def _draw_heatmap(dataframe: pd.DataFrame, path: Path, title: str) -> None:
 
 
 def _correlation_color(value: float) -> str:
+    """将 [-1, 1] 的相关系数映射为 RGB 颜色：正相关偏暖黄，负相关偏冷蓝。"""
     value = max(-1.0, min(1.0, value))
     if value >= 0:
         intensity = int(235 - 105 * value)

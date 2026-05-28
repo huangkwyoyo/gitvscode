@@ -1,2 +1,2 @@
-"""LLM insight extraction modules."""
+"""LLM 洞察提取模块。"""
 

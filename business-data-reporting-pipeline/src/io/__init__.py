@@ -1,2 +1,2 @@
-"""Data input and output adapters."""
+"""数据读写适配器（CSV / Excel / 数据库）。"""
 

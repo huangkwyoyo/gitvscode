@@ -12,6 +12,7 @@ class CodeVerifyTool(BaseTool):
     args_schema: Type[CodeVerifyInput] = CodeVerifyInput
 
     def _run(self, code: str):
+        """使用ast.parse进行语法树解析，检测语法/缩进/关键字错误"""
         try:
             ast.parse(code)
             return "✅ 代码语法校验通过，无语法错误、缩进错误、关键字错误"

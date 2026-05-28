@@ -1,2 +1,2 @@
-"""Report generation modules."""
+"""报告生成模块。"""
 

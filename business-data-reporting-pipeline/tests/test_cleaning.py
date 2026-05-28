@@ -1,9 +1,14 @@
+"""数据清洗模块单元测试：验证列名标准化与缺失值填充逻辑。"""
+
+from __future__ import annotations
+
 import pandas as pd
 
 from src.cleaning.cleaner import clean_dataframe
 
 
 def test_clean_dataframe_normalizes_names_and_fills_missing_values() -> None:
+    """测试数据框经过清洗后：列名被统一、重复行被删除、缺失值被填充。"""
     dataframe = pd.DataFrame(
         {
             " Customer Name ": [" Alice ", "Alice", None],

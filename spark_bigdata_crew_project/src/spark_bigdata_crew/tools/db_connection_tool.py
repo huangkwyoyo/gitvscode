@@ -12,6 +12,7 @@ class DBConnectionTool(BaseTool):
     args_schema: Type[DBConnInput] = DBConnInput
 
     def _run(self, ds_type: str):
+        """加载指定数据源配置并脱敏返回（隐藏密码等敏感字段）"""
         try:
             config = DataSourceSkill.get_ds_config(ds_type)
             safe_config = {k: ("****" if k in ("password", "service") else v) for k, v in config.items()}

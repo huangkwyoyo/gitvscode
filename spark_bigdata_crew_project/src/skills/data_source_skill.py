@@ -10,9 +10,11 @@ from src.mcp.context_protocol import mcp
 load_dotenv()
 
 class DataSourceSkill:
+    """多源数据源适配技能：四大数据源统一配置加载、PRD自动识别"""
+
     @staticmethod
     def get_ds_config(ds_type: str) -> dict:
-        """根据数据源类型读取对应环境配置并写入全局上下文"""
+        """根据数据源类型读取对应环境配置（环境变量注入），缓存到MCP全局上下文"""
         config_map = {
             "hive": {
                 "host": os.getenv("HIVE_HOST"),

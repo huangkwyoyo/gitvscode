@@ -14,8 +14,11 @@ os.makedirs(OUTPUT_ROOT, exist_ok=True)
 
 
 class MultiDataVerifySkill:
+    """全场景数据质量校验技能：适配Hive表与Parquet/CSV文件，双层参数兜底"""
+
     @staticmethod
     def get_spark_session():
+        """创建带自适应查询优化的SparkSession实例"""
         try:
             from pyspark.sql import SparkSession
         except ImportError as e:
@@ -39,7 +42,8 @@ class MultiDataVerifySkill:
         check_empty: bool = True,
         check_duplicate: bool = True
     ) -> str:
-        # 双层参数兜底：手动入参优先
+        """按输出类型（hive_table/file）分别执行空值/重复/行数校验并生成报告"""
+        # 双层参数兜底：手动入参优先于MCP缓存的默认参数
         output_param = mcp.get("spark_output_param") or {}
         output_type = input_output_type if input_output_type else output_param.get("output_type", "")
         table_name = input_table_name if input_table_name else output_param.get("table_name", "")

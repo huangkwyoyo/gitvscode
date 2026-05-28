@@ -14,9 +14,11 @@ logger = logging.getLogger(__name__)
 
 
 class DBSchemaSkill:
+    """跨数据库表结构查询技能：统一接口拉取字段名、类型、注释、主键"""
 
     @staticmethod
     def get_table_schema(table_name: str, ds_type: str) -> dict:
+        """根据数据源类型路由到对应的查询方法，返回标准化表结构信息并缓存到MCP"""
         ds_type = ds_type.lower()
         ds_config = DataSourceSkill.get_ds_config(ds_type)
         schema_info = {
@@ -40,6 +42,7 @@ class DBSchemaSkill:
 
     @staticmethod
     def _mysql_schema(table_name: str, config: dict, schema_info: dict):
+        """从MySQL INFORMATION_SCHEMA拉取表的字段信息和主键"""
         conn = pymysql.connect(
             host=config["host"],
             port=int(config["port"]),
@@ -76,6 +79,7 @@ class DBSchemaSkill:
 
     @staticmethod
     def _sqlserver_schema(table_name: str, config: dict, schema_info: dict):
+        """从SQL Server系统视图拉取表的字段信息和主键（依赖pyodbc）"""
         try:
             import pyodbc
         except ImportError:
@@ -116,6 +120,7 @@ class DBSchemaSkill:
 
     @staticmethod
     def _oracle_schema(table_name: str, config: dict, schema_info: dict):
+        """从Oracle ALL_COL_COMMENTS等视图拉取表结构和主键（依赖cx_Oracle）"""
         try:
             import cx_Oracle
         except ImportError:
@@ -149,6 +154,7 @@ class DBSchemaSkill:
 
     @staticmethod
     def _hive_schema(table_name: str, config: dict, schema_info: dict):
+        """从Hive DESCRIBE FORMATTED获取表结构（解析列名段和分隔线）"""
         try:
             from pyhive import hive
         except ImportError:

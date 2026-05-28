@@ -16,6 +16,7 @@ CHECKPOINT_FILE = os.path.join(CHECKPOINT_DIR, "pipeline_checkpoint.json")
 
 
 def save_checkpoint(task_index: int, task_name: str):
+    """保存当前任务执行状态到JSON文件，用于故障后断点续跑"""
     checkpoint = {
         "task_index": task_index,
         "task_name": task_name,
@@ -28,6 +29,7 @@ def save_checkpoint(task_index: int, task_name: str):
 
 
 def load_checkpoint() -> dict | None:
+    """从JSON文件加载最近一次检查点，不存在则返回None"""
     if not os.path.exists(CHECKPOINT_FILE):
         return None
     with open(CHECKPOINT_FILE, "r", encoding="utf-8") as f:
@@ -35,12 +37,13 @@ def load_checkpoint() -> dict | None:
 
 
 def clear_checkpoint():
+    """删除检查点文件（流水线成功完成后清理）"""
     if os.path.exists(CHECKPOINT_FILE):
         os.remove(CHECKPOINT_FILE)
 
 
 def retry(max_attempts: int = 3, delay_seconds: int = 5, backoff: float = 2.0):
-    """重试装饰器，支持指数退避"""
+    """重试装饰器，支持指数退避策略。失败时记录警告日志并等待指定时长后重试。"""
     def decorator(func):
         @functools.wraps(func)
         def wrapper(*args, **kwargs):

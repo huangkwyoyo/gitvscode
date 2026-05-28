@@ -12,9 +12,10 @@ class DemandFieldAnalyzeTool(BaseTool):
     args_schema: Type[DemandAnalyzeInput] = DemandAnalyzeInput
 
     def _run(self, prd_content: str):
-        # 提取表名
+        """通过正则从PRD提取表名列表、字段列表和业务逻辑描述"""
+        # 提取表名（匹配数仓分层前缀或t_前缀的表名）
         table_list = re.findall(r"(ods|dwd|dws|ads)_\w+|t_\w+", prd_content)
-        # 提取字段
+        # 提取字段名（支持中英文冒号）
         field_list = re.findall(r"字段[:：]\s*([\u4e00-\u9fa5a-zA-Z0-9,_]+)", prd_content)
         # 提取业务逻辑
         logic_list = re.findall(r"逻辑[:：]\s*([^\n]+)", prd_content)

@@ -14,6 +14,7 @@ class MySQLQueryTool(BaseTool):
     args_schema: Type[MySQLQueryInput] = MySQLQueryInput
 
     def _run(self, sql: str, db_name: str = "test_db"):
+        """执行MySQL查询，用于元数据校验或数据抽样"""
         try:
             config = DataSourceSkill.get_ds_config("mysql")
             conn = pymysql.connect(

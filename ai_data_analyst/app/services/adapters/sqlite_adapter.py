@@ -9,11 +9,8 @@ from app.services.adapters.base import DataSourceAdapter
 
 
 class SQLiteDataSourceAdapter(DataSourceAdapter):
-    """Optional adapter example for future database mode.
-
-    It expects a local SQLite file and reads the first user table. A production
-    database adapter should receive an explicit connection profile and table or
-    SQL query from a secured backend configuration, not directly from the UI.
+    """SQLite 数据源适配器：从本地 .db/.sqlite 文件读取第一个用户表。
+    生产环境应通过安全后端配置传入连接信息和表名/SQL 查询，而非直接从 UI 获取。
     """
 
     supported_suffixes = {".db", ".sqlite", ".sqlite3"}

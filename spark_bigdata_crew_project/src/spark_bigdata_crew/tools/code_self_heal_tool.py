@@ -12,8 +12,8 @@ class CodeSelfHealTool(BaseTool):
     args_schema: Type[SelfHealInput] = SelfHealInput
 
     def _run(self, code: str, error_msg: str = ""):
+        """执行基础自愈：filter前置na.fill防空指针，确保spark.stop()存在"""
         heal_code = code
-        # 常规自愈规则
         heal_code = heal_code.replace("df_1.filter(", "df_1.na.fill(0).filter(")
         if "spark.stop()" not in heal_code:
             heal_code += "\nspark.stop()\n"

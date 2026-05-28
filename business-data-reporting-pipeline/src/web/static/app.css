@@ -1,3 +1,4 @@
+/* 业务数据报表应用 — 响应式双栏布局样式 */
 :root {
   color-scheme: light;
   font-family: Inter, "Segoe UI", Arial, sans-serif;
@@ -13,6 +14,7 @@ body {
   margin: 0;
 }
 
+/* 非 app-shell 模式（嵌入 iframe 时）：居中卡片样式 */
 body:not(.app-shell) {
   max-width: 1120px;
   margin: 0 auto;
@@ -20,6 +22,7 @@ body:not(.app-shell) {
   background: #ffffff;
 }
 
+/* 主布局：左侧边栏 + 右侧报告区 */
 .app-shell {
   min-height: 100vh;
   display: grid;

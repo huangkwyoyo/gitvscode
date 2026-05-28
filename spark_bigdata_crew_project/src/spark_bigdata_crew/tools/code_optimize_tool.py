@@ -11,8 +11,8 @@ class CodeOptimizeTool(BaseTool):
     args_schema: Type[CodeOptimizeInput] = CodeOptimizeInput
 
     def _run(self, code: str):
+        """自动追加Shuffle分区、文件大小限制、AQE等生产级Spark优化配置"""
         optimize_code = code
-        # 自动追加生产优化配置
         optimize_code = optimize_code.replace(
             "spark = SparkSession.builder",
             """spark = SparkSession.builder \\

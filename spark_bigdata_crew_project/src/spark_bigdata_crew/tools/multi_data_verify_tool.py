@@ -16,6 +16,7 @@ class MultiDataVerifyTool(BaseTool):
     args_schema: Type[MultiDataVerifyInput] = MultiDataVerifyInput
 
     def _run(self, output_type=None, table_name=None, sample_limit=100, check_empty=True, check_duplicate=True):
+        """调用MultiDataVerifySkill执行输出校验，支持手动覆盖参数"""
         return MultiDataVerifySkill.verify_by_output_param(
             input_output_type=output_type,
             input_table_name=table_name,

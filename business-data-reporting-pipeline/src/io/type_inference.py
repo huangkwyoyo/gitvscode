@@ -6,6 +6,10 @@ import pandas as pd
 
 
 def infer_dataframe_types(dataframe: pd.DataFrame, config: dict[str, Any]) -> pd.DataFrame:
+    """自动推断字符串列的类型：优先转换为数值，其次尝试日期时间。
+
+    转换规则：90% 以上能成功解析的值会被整体转换。
+    """
     if not config.get("schema", {}).get("infer_types", True):
         return dataframe
 
@@ -23,6 +27,7 @@ def infer_dataframe_types(dataframe: pd.DataFrame, config: dict[str, Any]) -> pd
 
 
 def _try_numeric(series: pd.Series) -> pd.Series:
+    """将字符串序列尝试转为数值类型，成功率低于 90% 则保持原样。"""
     converted = pd.to_numeric(series, errors="coerce")
     if converted.notna().sum() >= series.notna().sum() * 0.9:
         return converted
@@ -30,6 +35,7 @@ def _try_numeric(series: pd.Series) -> pd.Series:
 
 
 def _try_datetime(series: pd.Series, datetime_formats: list[str]) -> pd.Series:
+    """使用给定格式列表尝试解析日期时间，全部失败则回退原始系列。"""
     for datetime_format in datetime_formats:
         converted = pd.to_datetime(series, format=datetime_format, errors="coerce")
         if converted.notna().sum() >= series.notna().sum() * 0.9:
@@ -39,5 +45,6 @@ def _try_datetime(series: pd.Series, datetime_formats: list[str]) -> pd.Series:
 
 
 def _looks_like_datetime_column(column: str) -> bool:
+    """通过列名关键词快速判断是否可能是日期时间列。"""
     normalized = column.lower()
     return any(token in normalized for token in ("date", "time", "dt", "日期", "时间"))

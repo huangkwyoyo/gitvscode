@@ -14,6 +14,18 @@ def build_report(
     insight_result: dict[str, Any],
     config: dict[str, Any],
 ) -> Path:
+    """使用 Jinja2 模板生成包含分析结果、图表和洞察的 HTML 报告。
+
+    Args:
+        dataframe: 已清洗的数据框。
+        analysis_result: EDA 分析结果。
+        chart_result: 图表输出路径字典。
+        insight_result: LLM 或规则生成的洞察。
+        config: 管道配置。
+
+    Returns:
+        生成的 HTML 报告文件路径。
+    """
     output_dir = Path(config["report"]["output_dir"])
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -38,6 +50,7 @@ def build_report(
 
 
 def _to_html(dataframe: pd.DataFrame) -> str:
+    """将 DataFrame 渲染为 HTML 表格字符串；空表返回提示语。"""
     if dataframe.empty:
         return "<p>No data available.</p>"
     return dataframe.to_html(classes="data-table", border=0)

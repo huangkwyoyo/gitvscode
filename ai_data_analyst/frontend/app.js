@@ -1,3 +1,4 @@
+/* ── 全局引用与事件绑定 ── */
 const form = document.querySelector("#analysisForm");
 const statusPill = document.querySelector("#statusPill");
 const fileInput = document.querySelector("#dataFile");

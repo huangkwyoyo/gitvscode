@@ -1,2 +1,2 @@
-"""Business data reporting pipeline."""
+"""业务数据报表分析管道."""
 

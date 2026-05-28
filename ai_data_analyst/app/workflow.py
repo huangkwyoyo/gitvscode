@@ -15,14 +15,12 @@ WorkflowNode = Callable[[AnalysisState], AnalysisState]
 
 
 class AnalysisWorkflow:
-    """Small deterministic graph runner.
-
-    This is intentionally LangGraph-shaped: a state object moves through named
-    nodes, and each node owns one business capability. Replacing this with
-    LangGraph later should not require changing the service layer.
+    """确定性图运行器。
+    状态对象沿命名节点推进，每个节点负责一个业务能力。
+    后续若替换为 LangGraph，服务层代码无需改动。
     """
 
-    # dependencies: which upstream fields each node requires
+    # 依赖关系：每个节点需要的上游字段
     REQUIREMENTS = {
         "load_data": [],
         "clean_data": ["raw_df"],

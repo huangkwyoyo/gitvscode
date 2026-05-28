@@ -14,8 +14,11 @@ CODE_FILE_NAME = "spark_production_task.py"
 Path(GIT_REPO_PATH).mkdir(exist_ok=True)
 
 class GitCodeVersionSkill:
+    """企业级Git代码版本管理技能：初始化仓库、保存代码、获取版本、比对差异"""
+
     @staticmethod
     def _exec_git_cmd(cmd: list) -> tuple[bool, str]:
+        """执行Git命令，返回(成功标志, 输出/错误信息)"""
         try:
             res = subprocess.run(
                 cmd, cwd=GIT_REPO_PATH, capture_output=True, text=True, encoding="utf-8"
@@ -26,6 +29,7 @@ class GitCodeVersionSkill:
 
     @staticmethod
     def init_git_repo() -> str:
+        """初始化本地Git仓库，配置user信息和.gitignore规则"""
         if os.path.exists(os.path.join(GIT_REPO_PATH, ".git")):
             return "Git仓库已就绪"
         GitCodeVersionSkill._exec_git_cmd(["git", "init"])
@@ -38,6 +42,7 @@ class GitCodeVersionSkill:
 
     @staticmethod
     def save_code_to_git(code: str, desc: str = "Spark代码迭代升级") -> str:
+        """将代码写入文件并提交到Git仓库，MCP缓存最新代码和版本时间"""
         GitCodeVersionSkill.init_git_repo()
         code_path = os.path.join(GIT_REPO_PATH, CODE_FILE_NAME)
         with open(code_path, "w", encoding="utf-8") as f:
@@ -49,7 +54,6 @@ class GitCodeVersionSkill:
         success, msg = GitCodeVersionSkill._exec_git_cmd(["git", "commit", "-m", commit_msg])
 
         if success:
-            # MCP写入：缓存最新版本时间、最终落地代码
             mcp.set("git_latest_version", timestamp)
             mcp.set("spark_final_code", code)
             return f"✅ Git版本提交成功｜版本时间：{timestamp}"
@@ -57,6 +61,7 @@ class GitCodeVersionSkill:
 
     @staticmethod
     def get_latest_code() -> str:
+        """从Git仓库读取最新提交的代码内容"""
         code_path = os.path.join(GIT_REPO_PATH, CODE_FILE_NAME)
         if not os.path.exists(code_path):
             return ""
@@ -65,17 +70,18 @@ class GitCodeVersionSkill:
 
     @staticmethod
     def get_diff() -> str:
+        """比对工作区与HEAD的差异，返回统一的diff文本"""
         _, diff = GitCodeVersionSkill._exec_git_cmd(["git", "diff", "HEAD"])
         return diff if diff else "首次生成，无历史版本差异"
 
     @staticmethod
     def iterate_optimize(new_code: str) -> str:
+        """结合历史稳定版本和新代码的Diff，构造多轮重复推理优化Prompt"""
         old_code = GitCodeVersionSkill.get_latest_code()
         if not old_code:
             return new_code
 
         diff = GitCodeVersionSkill.get_diff()
-        # MCP写入：缓存历史版本代码、版本差异内容
         mcp.set("git_old_code", old_code)
         mcp.set("git_diff", diff)
 
