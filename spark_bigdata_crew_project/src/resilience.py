@@ -1,5 +1,6 @@
 """
-流水线韧性模块：重试机制 + MCP检查点断点续跑
+流水线韧性模块：重试机制 + 检查点断点续跑
+状态管理以 workflow/state.py + workflow/checkpoints.py 为主，本模块提供辅助。
 """
 import functools
 import time
@@ -7,8 +8,6 @@ import json
 import os
 
 from src.logger import logger
-from src.mcp.context_protocol import mcp
-
 
 CHECKPOINT_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "output", "checkpoints")
 os.makedirs(CHECKPOINT_DIR, exist_ok=True)
@@ -21,7 +20,6 @@ def save_checkpoint(task_index: int, task_name: str):
         "task_index": task_index,
         "task_name": task_name,
         "timestamp": time.time(),
-        "context_snapshot": {k: str(v)[:500] for k, v in mcp._context.items()}
     }
     with open(CHECKPOINT_FILE, "w", encoding="utf-8") as f:
         json.dump(checkpoint, f, ensure_ascii=False, indent=2)

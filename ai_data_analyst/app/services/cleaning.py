@@ -21,12 +21,17 @@ def _try_datetime(column: str, series: pd.Series) -> pd.Series:
     return series
 
 
-def _try_numeric(series: pd.Series) -> pd.Series:
+def _try_numeric(column: str, series: pd.Series) -> pd.Series:
     if pd.api.types.is_numeric_dtype(series):
         return series
-    cleaned = series.astype("string").str.replace(",", "", regex=False).str.replace("%", "", regex=False)
+    as_string = series.astype("string")
+    percent_mask = as_string.str.contains("%", regex=False, na=False)
+    has_percent = percent_mask.mean() >= 0.5
+    cleaned = as_string.str.replace(",", "", regex=False).str.replace("%", "", regex=False)
     parsed = pd.to_numeric(cleaned, errors="coerce")
     if parsed.notna().mean() >= 0.85:
+        if has_percent:
+            parsed = parsed / 100
         return parsed
     return series
 
@@ -47,7 +52,7 @@ def clean_data(state: AnalysisState) -> AnalysisState:
     for col in df.columns:
         original_dtype = str(df[col].dtype)
         df[col] = _try_datetime(col, df[col])
-        df[col] = _try_numeric(df[col])
+        df[col] = _try_numeric(col, df[col])
         new_dtype = str(df[col].dtype)
         if new_dtype != original_dtype:
             log.append({"type": "standardize", "field": col, "message": f"{col} 类型从 {original_dtype} 标准化为 {new_dtype}"})

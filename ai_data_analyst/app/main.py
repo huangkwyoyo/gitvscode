@@ -10,6 +10,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
+from starlette.concurrency import run_in_threadpool
 from starlette.responses import JSONResponse
 
 from app.models import AnalysisState
@@ -77,8 +78,13 @@ async def _read_brief(brief_file: UploadFile | None) -> str:
 async def analyze(
     data_file: UploadFile = File(...),
     analysis_goal: str = Form(""),
+    analysis_type: str = Form("general"),
     brief_file: UploadFile | None = File(None),
 ):
+    analysis_type = analysis_type.strip().lower()
+    if analysis_type not in {"general", "finance"}:
+        raise HTTPException(status_code=400, detail="分析类型仅支持 general 或 finance")
+
     suffix = Path(data_file.filename or "").suffix.lower()
     if suffix not in {".csv", ".xlsx", ".xls", ".db", ".sqlite", ".sqlite3"}:
         raise HTTPException(status_code=400, detail="数据文件仅支持 CSV、XLSX、XLS、SQLite")
@@ -98,10 +104,11 @@ async def analyze(
         job_id=job_id,
         original_filename=data_file.filename or upload_path.name,
         analysis_goal=goal,
+        analysis_type=analysis_type,
         upload_path=upload_path,
         output_dir=job_output_dir,
     )
-    state = workflow.run(state)
+    state = await run_in_threadpool(workflow.run, state)
     _evict_old_jobs()
     JOBS[job_id] = state
     return state.public_payload()

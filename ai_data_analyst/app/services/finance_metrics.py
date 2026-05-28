@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import warnings
-
 import numpy as np
 import pandas as pd
 
@@ -122,17 +120,26 @@ def calculate_returns(nav: pd.Series) -> pd.Series:
 
 
 def annualized_return(nav: pd.Series, dates: pd.Series, frequency: str | None = None) -> float:
-    """年化收益率 = (期末净值/期初净值)^(年化乘数/有效数据点数) - 1"""
+    """年化收益率：优先按真实日期跨度计算，日期解析失败时回退到频率乘数法。"""
     if frequency is None:
         frequency = _detect_frequency(dates)
-    n_periods = len(nav)
-    ann_mult = _get_trading_days(frequency)
 
     total_return = nav.iloc[-1] / nav.iloc[0]
     if total_return <= 0:
         return -1.0
-    return float((total_return ** (ann_mult / n_periods)) - 1)
 
+    try:
+        start = pd.Timestamp(dates.iloc[0])
+        end = pd.Timestamp(dates.iloc[-1])
+        years = (end - start).days / 365.25
+        if years > 0:
+            return float((total_return ** (1 / years)) - 1)
+    except Exception:
+        pass
+
+    periods = max(len(nav) - 1, 1)
+    ann_mult = _get_trading_days(frequency)
+    return float((total_return ** (ann_mult / periods)) - 1)
 
 def cumulative_return(nav: pd.Series) -> float:
     """累计收益率 = 期末净值/期初净值 - 1"""

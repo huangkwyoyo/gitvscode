@@ -49,7 +49,7 @@ def explore_data(state: AnalysisState) -> AnalysisState:
 
     date_col, nav_cols, benchmark_col = detect_time_series(df)
     finance_metrics = {}
-    if date_col and nav_cols:
+    if state.analysis_type == "finance" and date_col and nav_cols:
         finance_metrics = compute_finance_metrics(df, date_col, nav_cols, benchmark_col, errors=state.errors)
 
     state.exploration = {
@@ -64,4 +64,3 @@ def explore_data(state: AnalysisState) -> AnalysisState:
     }
     state.finance_metrics = finance_metrics
     return state
-

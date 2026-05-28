@@ -10,8 +10,8 @@ logger = logging.getLogger(__name__)
 @CrewBase
 class SparkBigDataEnterpriseCrew:
     """
-    企业终版Spark大数据多智能体调度核心
-    规范：yaml配置驱动 | 装饰器注册 | 全局LLM绑定 | 顺序流水线 | 全工具白名单调用
+    生产级Spark大数据多智能体调度核心
+    6 Agent | 8 Task + 3 Gate | LangGraph流程编排 | Hive/HDFS数据源
     一套代码通吃：GPT / DeepSeek / Qwen / GLM / Kimi / Ollama / 自定义中转API
     """
     agents_config = "config/agents.yaml"
@@ -23,130 +23,100 @@ class SparkBigDataEnterpriseCrew:
         logger.info("Crew LLM绑定: %s (%s) -> %s", info["provider_name"], info["provider"], info["model"])
 
     # ============================================================
-    # 1. 需求解析智能体：PRD解析、字段抽取、业务规则校验
+    # 1. 需求分析智能体：PRD解析、需求澄清、指标口径、验收条件
     # ============================================================
     @agent
-    def requirement_analyst_agent(self) -> Agent:
+    def requirement_agent(self) -> Agent:
         return Agent(
             llm=self.llm,
             tools=[DemandFieldAnalyzeTool(), BusinessRuleVerifyTool()]
         )
 
     # ============================================================
-    # 2. 数据建模智能体：多源库连接、表结构拉取、元数据同步
+    # 2. 元数据管理智能体：Hive Metastore/HDFS元数据读取、字段校验、血缘约束
     # ============================================================
     @agent
-    def data_modeling_agent(self) -> Agent:
+    def metadata_agent(self) -> Agent:
         return Agent(
             llm=self.llm,
-            tools=[DBConnectionTool(), TableSchemaTool()]
+            tools=[HiveMetastoreTool(), HDFSTool()]
         )
 
     # ============================================================
-    # 3. 架构优化智能体：Spark代码规范、性能预优化、规避数据倾斜
+    # 3. 数仓建模智能体：ODS/DWD/DWS/ADS建模、字段映射、分区和存储设计
     # ============================================================
     @agent
-    def spark_architect_agent(self) -> Agent:
+    def modeling_agent(self) -> Agent:
         return Agent(
             llm=self.llm,
-            tools=[CodeOptimizeTool()]
+            tools=[TableSchemaTool(), HiveMetastoreTool()]
         )
 
     # ============================================================
-    # 4. 代码开发智能体：动态代码生成、版本比对、历史代码记忆、版本迭代
+    # 4. Spark工程智能体：PySpark代码生成、参数化、性能建议、提交脚本
     # ============================================================
     @agent
-    def spark_developer_agent(self) -> Agent:
+    def spark_engineer_agent(self) -> Agent:
         return Agent(
             llm=self.llm,
-            tools=[SparkCodeGenerateTool(), GitCodeCompareTool(), CodeMemoryTool(), GitCodeVersionTool()]
+            tools=[SparkCodeGenerateTool(), CodeOptimizeTool(), GitCodeVersionTool()]
         )
 
     # ============================================================
-    # 5. 单元测试智能体：语法校验、逻辑自检、故障自愈修复
+    # 5. 质量保障智能体：静态检查、单元测试、数据质量规则、运行前校验
     # ============================================================
     @agent
-    def unit_test_agent(self) -> Agent:
+    def quality_agent(self) -> Agent:
         return Agent(
             llm=self.llm,
-            tools=[CodeVerifyTool(), CodeSelfHealTool()]
+            tools=[CodeVerifyTool(), DataQualityTool()]
         )
 
     # ============================================================
-    # 6. 任务提交智能体：任务封装、参数兜底、环境适配、预检校验
+    # 6. 交付归档智能体：文档、版本记录、运行报告、交付物汇总
     # ============================================================
     @agent
-    def job_submit_agent(self) -> Agent:
+    def delivery_agent(self) -> Agent:
         return Agent(
             llm=self.llm,
-            tools=[CodeVerifyTool(), MySQLQueryTool()]
+            tools=[DemandFieldAnalyzeTool(), DataQualityTool(), GitCodeVersionTool()]
         )
 
     # ============================================================
-    # 7. 数据校验智能体：多源数据查询、多源统一数据校验
-    # ============================================================
-    @agent
-    def data_validator_agent(self) -> Agent:
-        return Agent(
-            llm=self.llm,
-            tools=[MySQLQueryTool(), MultiDataVerifyTool()]
-        )
-
-    # ============================================================
-    # 8. 数据巡检智能体：质量复盘、异常汇总、抽样核验
-    # ============================================================
-    @agent
-    def data_inspection_agent(self) -> Agent:
-        return Agent(
-            llm=self.llm,
-            tools=[MultiDataVerifyTool()]
-        )
-
-    # ============================================================
-    # 9. 运维SRE智能体：巡检报告、DevOps交付、生产适配、故障自愈
-    # ============================================================
-    @agent
-    def devops_sre_agent(self) -> Agent:
-        return Agent(
-            llm=self.llm,
-            tools=[CodeSelfHealTool()]
-        )
-
-    # ============================================================
-    # 10. 文档交付智能体：全自动汇总全链路MCP上下文生成交付文档
-    # ============================================================
-    @agent
-    def document_agent(self) -> Agent:
-        return Agent(
-            llm=self.llm,
-            tools=[DemandFieldAnalyzeTool(), MultiDataVerifyTool(), GitCodeCompareTool()]
-        )
-
-    # ============================================================
-    # 任务流水线：11步全链路闭环
+    # 任务流水线：8任务 + 3审批Gate
     # ============================================================
     @task
-    def task_1_source_parse(self): return Task()
+    def task_1_requirement_analysis(self): return Task()
+
     @task
-    def task_2_requirement_analysis(self): return Task()
+    def task_2_metadata_validation(self): return Task()
+
     @task
-    def task_3_data_modeling(self): return Task()
+    def gate_1_requirement_data_confirm(self): return Task()
+
     @task
-    def task_4_spark_architecture(self): return Task()
+    def task_3_field_mapping(self): return Task()
+
+    @task
+    def task_4_data_modeling(self): return Task()
+
+    @task
+    def gate_2_model_confirm(self): return Task()
+
     @task
     def task_5_spark_development(self): return Task()
+
     @task
-    def task_6_unit_test(self): return Task()
+    def task_6_code_quality_check(self): return Task()
+
     @task
-    def task_7_job_submit(self): return Task()
+    def gate_3_code_approval(self): return Task()
+
     @task
-    def task_8_data_validation(self): return Task()
+    def task_7_quality_report(self): return Task()
+
     @task
-    def task_9_data_inspection(self): return Task()
-    @task
-    def task_10_devops_monitor(self): return Task()
-    @task
-    def task_11_document_generate(self): return Task()
+    def task_8_delivery_archive(self): return Task()
 
     @crew
     def crew(self) -> Crew:
@@ -156,3 +126,21 @@ class SparkBigDataEnterpriseCrew:
             process=Process.sequential,
             verbose=True
         )
+
+
+def build_langgraph_workflow():
+    """
+    基于LangGraph构建生产级工作流状态机。
+    在CrewAI任务链之上增加：
+      - 状态持久化（run_id + state manifest + artifact store）
+      - 3道人工审批Gate（条件路由）
+      - 校验失败阻断与回滚路径
+      - 断点续跑支持
+    """
+    try:
+        from src.workflow.graph import create_workflow_graph
+        from src.workflow.state import PipelineState
+        return create_workflow_graph()
+    except ImportError:
+        logger.warning("LangGraph未安装，回退到CrewAI原生顺序流程。安装: pip install langgraph")
+        return None

@@ -1,13 +1,13 @@
 """
-MCP(Model Context Protocol) 企业级模型上下文协议
-全局唯一单例 | 预设上下文KEY防丢失 | 读取带默认值 | 全链路状态穿透
-解决：多Agent上下文割裂、重复推理、参数丢失、空值报错、断点续跑
+MCP(Model Context Protocol) 可选辅助上下文协议
+注意：MCP作为可选辅助模块，不作为项目核心状态中心。
+生产中的核心状态管理由 src/workflow/state.py + src/workflow/checkpoints.py 负责。
 """
 from typing import Dict, Any, Optional
 
 
 class MCPContext:
-    """单例 + 预设上下文 + 安全获取 + 全局共享"""
+    """可选单例上下文（辅助用途，非核心状态中心）"""
     _instance: Optional["MCPContext"] = None
 
     def __new__(cls):
@@ -17,20 +17,17 @@ class MCPContext:
         return cls._instance
 
     def _init_default_context(self):
-        """初始化全流程标准上下文（避免key不存在报错）"""
         self._context: Dict[str, Any] = {
             "user_prd": "",
-            "data_source_type": "mysql",
+            "hive_database": "default",
             "table_list": [],
             "table_schema_info": "",
             "field_analysis_result": "",
             "spark_code_raw": "",
             "spark_code_optimized": "",
             "test_report": "",
-            "data_verify_result": "",
-            "inspection_report": "",
-            "devops_report": "",
-            "final_doc": ""
+            "quality_report": "",
+            "final_doc": "",
         }
 
     def set(self, key: str, value: Any):
@@ -46,5 +43,5 @@ class MCPContext:
         self._init_default_context()
 
 
-# 全局唯一单例（整个项目共用这一个）
+# 全局单例（可选使用）
 mcp = MCPContext()

@@ -14,6 +14,7 @@ class AnalysisState:
     analysis_goal: str
     upload_path: Path
     output_dir: Path
+    analysis_type: str = "general"
     raw_df: pd.DataFrame | None = None
     clean_df: pd.DataFrame | None = None
     schema: dict[str, Any] = field(default_factory=dict)
@@ -32,6 +33,7 @@ class AnalysisState:
             "job_id": self.job_id,
             "filename": self.original_filename,
             "goal": self.analysis_goal,
+            "analysis_type": self.analysis_type,
             "schema": self.schema,
             "cleaning_log": self.cleaning_log,
             "quality": self.quality,
@@ -43,4 +45,3 @@ class AnalysisState:
             "report_url": f"/api/report/{self.job_id}" if self.report_path else None,
             "errors": self.errors,
         }
-

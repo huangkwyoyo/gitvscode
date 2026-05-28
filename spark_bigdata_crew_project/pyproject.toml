@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "spark_bigdata_crew"
-version = "1.0.0"
-description = "Spark全链路多智能体协同研发企业级生产项目"
+version = "2.0.0"
+description = "Spark全链路多智能体协同研发生产级项目｜LangGraph编排｜6 Agent + 8 Task + 3 Gate"
 authors = [
   { name = "Enterprise Developer", email = "dev@example.com" }
 ]
@@ -15,15 +15,13 @@ dependencies = [
   "crewai-tools>=0.10.0",
   "openai>=1.30.0",
   "ollama>=0.4.0",
-  "pymysql>=1.1.0",
+  "langgraph>=0.2.0",
   "pandas>=2.0.0",
   "gradio>=4.0.0",
   "python-dotenv>=1.0.0",
   "pymupdf==1.24.0",
   "python-docx==0.8.11",
   "markdown==3.6",
-  "pyodbc>=5.1.0",
-  "cx-Oracle>=8.3.0",
   "pyhive>=0.7.0"
 ]
 

@@ -1,6 +1,6 @@
 """
 启动前配置校验模块
-校验：.env完整性 | YAML配置有效性 | 工具名对齐 | 输出目录就绪
+校验：.env完整性 | YAML配置有效性 | Hive/Spark环境就绪 | 输出目录就绪
 """
 import os
 import logging
@@ -9,16 +9,21 @@ logger = logging.getLogger(__name__)
 
 REQUIRED_ENV_VARS = {
     "OPENAI_API_KEY": "LLM API密钥",
-    "OPENAI_API_BASE": "LLM API基础URL",
-    "OPENAI_MODEL_NAME": "LLM模型名称",
 }
 
-REQUIRED_DB_VARS = {
-    "MYSQL_HOST": "MySQL主机地址",
-    "MYSQL_PORT": "MySQL端口",
-    "MYSQL_USER": "MySQL用户名",
-    "MYSQL_PASSWORD": "MySQL密码",
-    "MYSQL_DATABASE": "MySQL数据库名",
+OPTIONAL_ENV_VARS = {
+    "OPENAI_API_BASE": "LLM API基础URL",
+    "MODEL_NAME": "LLM模型名称",
+}
+
+HIVE_ENV_VARS = {
+    "HIVE_HOST": "Hive Metastore主机地址",
+    "HIVE_PORT": "Hive Metastore端口",
+    "HIVE_USER": "Hive用户名",
+}
+
+HDFS_ENV_VARS = {
+    "HDFS_NAMENODE": "HDFS NameNode地址",
 }
 
 SPARK_ENV_VARS = {
@@ -32,6 +37,7 @@ OUTPUT_DIRS = [
     "output/docs",
     "output/logs",
     "output/checkpoints",
+    "artifacts",
 ]
 
 
@@ -40,12 +46,19 @@ def validate_env() -> list[str]:
     for var, desc in REQUIRED_ENV_VARS.items():
         if not os.getenv(var):
             warnings.append(f"缺少环境变量: {var} ({desc})")
-    missing_db = [v for v, d in REQUIRED_DB_VARS.items() if not os.getenv(v)]
-    if len(missing_db) == len(REQUIRED_DB_VARS):
-        warnings.append("所有MySQL环境变量均未配置，数据库功能不可用")
-    elif missing_db:
-        for v in missing_db:
-            warnings.append(f"缺少数据库环境变量: {v} ({REQUIRED_DB_VARS[v]})")
+
+    missing_hive = [v for v, d in HIVE_ENV_VARS.items() if not os.getenv(v)]
+    if len(missing_hive) == len(HIVE_ENV_VARS):
+        warnings.append("所有Hive环境变量均未配置，元数据校验功能需配置后使用")
+    elif missing_hive:
+        for v in missing_hive:
+            warnings.append(f"缺少Hive环境变量: {v} ({HIVE_ENV_VARS[v]})")
+
+    missing_hdfs = [v for v, d in HDFS_ENV_VARS.items() if not os.getenv(v)]
+    if missing_hdfs:
+        for v in missing_hdfs:
+            warnings.append(f"缺少HDFS环境变量: {v} ({HDFS_ENV_VARS[v]})")
+
     missing_spark = [v for v, d in SPARK_ENV_VARS.items() if not os.getenv(v)]
     if missing_spark:
         for v in missing_spark:
@@ -60,16 +73,18 @@ def ensure_output_dirs():
 
 def validate_yaml_configs() -> list[str]:
     warnings = []
-    yaml_agents_path = os.path.join(
-        os.path.dirname(os.path.dirname(__file__)), "config", "agents.yaml"
-    )
-    yaml_tasks_path = os.path.join(
-        os.path.dirname(os.path.dirname(__file__)), "config", "tasks.yaml"
-    )
-    if not os.path.exists(yaml_agents_path):
-        warnings.append(f"agent配置文件不存在: {yaml_agents_path}")
-    if not os.path.exists(yaml_tasks_path):
-        warnings.append(f"task配置文件不存在: {yaml_tasks_path}")
+    base_dir = os.path.dirname(os.path.dirname(__file__))
+    required_yamls = [
+        "config/agents.yaml",
+        "config/tasks.yaml",
+        "config/workflow.yaml",
+        "config/hive.yaml",
+        "config/spark.yaml",
+    ]
+    for yaml_path in required_yamls:
+        full_path = os.path.join(base_dir, yaml_path)
+        if not os.path.exists(full_path):
+            warnings.append(f"配置文件不存在: {yaml_path}")
     return warnings
 
 
@@ -88,7 +103,7 @@ def run_startup_validation() -> bool:
     else:
         logger.info("配置校验通过，一切就绪")
 
-    critical_errors = [w for w in all_warnings if w.startswith("缺少环境变量: OPENAI")]
+    critical_errors = [w for w in all_warnings if "OPENAI_API_KEY" in w]
     if critical_errors:
         logger.error("存在关键配置缺失，流水线可能无法正常运行")
         return False
