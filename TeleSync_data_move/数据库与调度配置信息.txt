@@ -1,0 +1,30 @@
+
+#doris连接信息
+mysql -h 127.0.0.1 -P 9030 -u root -p
+或 docker exec -it doris-fe mysql -h 127.0.0.1 -P 9030 -uroot
+
+#doris网页版 Web UI 连接
+访问地址：在浏览器中输入 http://127.0.0.1:8030（即 FE 的 HTTP 端口）。
+登录信息：用户名默认为 root，密码留空，点击登录即可3。
+使用方式：登录后，你可以在左侧库栏随意选择一个数据库，然后在中间的 Playground 区域编写并执行 SQL 语句
+
+
+#WebSQL / 可视化图形界面总结：
+访问 http://localhost/index，默认账号密码为 admin/admin
+配置项	填写内容	备注说明
+Host (主机)	127.0.0.1	若跨机器连接则填对应的 FE IP 地址
+Port (端口)	9030	Doris 的 MySQL 协议监听端口
+User (用户)	root	拥有最高权限的管理员账户
+Password (密码)	(留空)	初始安装后默认无密码
+Driver (驱动)	MySQL Connector/J	选择标准的 MySQL 驱动即可
+
+
+
+    # mysql连接数据库
+    conn = pymysql.connect(
+        host='localhost',
+        user='root',
+        password='123456',
+        database='py_sql',
+        charset='utf8mb4'
+    )

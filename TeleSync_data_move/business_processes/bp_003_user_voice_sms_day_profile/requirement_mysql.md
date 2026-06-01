@@ -1,0 +1,53 @@
+# 03 语音短信行为日画像需求说明书
+
+## 业务目标
+
+按日生成用户语音和短信行为画像，识别高语音用户、短信高频用户、异常沉默用户，并给出用户在同城同套餐人群中的语音排名。
+
+## 源表清单
+
+| 层级 | 表名 | 用途 |
+|---|---|---|
+| DWD | `dwd.fact_usage_daily` | 用户日语音、短信、流量 |
+| DWD | `dwd.dim_user` | 用户城市、套餐、状态 |
+| DWD | `dwd.dim_product` | 套餐类型、月租 |
+
+## 结果表
+
+`dws.dws_user_voice_sms_day_profile`
+
+## 调度周期
+
+每日运行一次，业务日期参数为 `@biz_date`。
+
+## 业务规则
+
+1. 只处理 `fact_usage_daily.data_date = @biz_date` 的数据。
+2. 剔除非活跃用户，但保留当日有使用行为的疑似异常用户。
+3. 按城市、产品类型计算用户语音时长排名和分位。
+4. 语音时长超过同组 P90 的用户标记为 `HIGH_VOICE`。
+5. 短信条数超过同组 P95 的用户标记为 `HIGH_SMS`。
+6. 当日流量、语音、短信均为 0 的用户标记为 `SILENT_DAY`。
+
+## 字段口径
+
+| 字段 | 口径 |
+|---|---|
+| `city_name` | 用户城市 |
+| `product_type` | 产品类型 |
+| `voice_usage_min` | 当日语音分钟数 |
+| `sms_count` | 当日短信条数 |
+| `voice_rank_in_group` | 同城市同产品语音排名 |
+| `behavior_tag` | 行为标签 |
+
+## 迁移测试价值
+
+覆盖窗口排名、分组统计、多条件标签、空值处理、同组行为对比。
+
+
+
+## 标准目录信息
+
+- 业务过程 ID：`bp_003_user_voice_sms_day_profile`
+- MySQL 结果表：`dws.dws_user_voice_sms_day_profile`
+- 标准化日期：2026-06-01

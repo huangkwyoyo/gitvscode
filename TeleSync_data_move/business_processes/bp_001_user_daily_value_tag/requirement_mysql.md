@@ -1,0 +1,61 @@
+# 01 用户日价值分层需求说明书
+
+## 业务目标
+
+按 WebSQL 日批业务日期生成用户当日价值分层结果，综合用户基础属性、当日收入、当日通信行为、近 30 日充值、当月账单欠费等信息，识别高价值、成长型、欠费风险、低活跃等用户标签。
+
+## 源表清单
+
+| 层级 | 表名 | 用途 |
+|---|---|---|
+| DWD | `dwd.dim_user` | 用户基础属性、套餐、入网时间、状态 |
+| DWD | `dwd.dim_product` | 套餐类型、月租 |
+| DWD | `dwd.fact_user_snapshot_daily` | 用户日收入、日活跃快照 |
+| DWD | `dwd.fact_usage_daily` | 流量、语音、短信日行为 |
+| DWD | `dwd.fact_recharge_daily` | 近 30 日充值 |
+| DWD | `dwd.fact_billing_monthly` | 当月账单与欠费 |
+
+## 结果表
+
+`ads.ads_user_daily_value_tag`
+
+## 调度周期
+
+每日运行一次，业务日期参数为 `@biz_date`。
+
+## 业务规则
+
+1. 以 `fact_user_snapshot_daily.data_date = @biz_date` 的用户为日批处理范围。
+2. 当日快照与 `fact_usage_daily` 按 `user_id + data_date` 关联。
+3. 近 30 日充值按 `recharge_date between @biz_date - 29 day and @biz_date` 聚合。
+4. 当月账单按 `billing_month_date = 月初日期` 关联。
+5. 价值评分由收入、充值、套餐月租、流量、语音、欠费等维度计算。
+6. 欠费金额大于 0 且充值覆盖率不足 50% 的用户标记为 `ARREARS_RISK`。
+7. 当日流量、语音、短信均很低且套餐月租低于 40 的用户标记为 `LOW_ACTIVITY`。
+
+## 字段口径
+
+| 字段 | 口径 |
+|---|---|
+| `biz_date` | 业务日期 |
+| `user_id` | 用户 ID |
+| `product_type` | 套餐类型 |
+| `daily_revenue_fee` | 当日收入 |
+| `month_billed_revenue_fee` | 当月出账收入 |
+| `month_outstanding_amount` | 当月欠费 |
+| `last_30d_recharge_amount` | 近 30 日充值金额 |
+| `value_score` | 综合价值评分 |
+| `value_level` | 用户价值层级 |
+| `risk_tag` | 风险标签 |
+
+## 迁移测试价值
+
+覆盖多表 Join、日期窗口、条件评分、`CASE WHEN`、空值处理、月初日期计算、聚合后再关联等典型迁移场景。
+
+
+
+## 标准目录信息
+
+- 业务过程 ID：`bp_001_user_daily_value_tag`
+- MySQL 结果表：`ads.ads_user_daily_value_tag`
+- 标准化日期：2026-06-01
