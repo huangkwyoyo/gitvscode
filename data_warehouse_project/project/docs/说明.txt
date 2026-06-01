@@ -1,0 +1,17 @@
+如果你的目标是：
+
+电信数仓
++
+AI Agent
++
+SQL Agent
++
+指标分析 Agent
+
+那么 docs/business_context.md 不要写技术。
+
+只写：
+
+业务领域
+业务规则
+指标口径

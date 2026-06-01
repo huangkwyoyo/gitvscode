@@ -1,0 +1,10 @@
+[project]
+name = "telecom-dw-agent-lab"
+version = "0.1.0"
+description = "本地电信业务数仓、指标体系、SQL 查询接口、FastAPI、LangGraph Agent 与前端实验室"
+requires-python = ">=3.12"
+dependencies = []
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

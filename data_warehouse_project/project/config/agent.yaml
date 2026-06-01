@@ -1,0 +1,28 @@
+agent:
+  framework: LangGraph
+  default_language: zh-CN
+  max_retry: 2
+  timeout_seconds: 60
+
+tools:
+  metadata_search: true
+  metric_search: true
+  sql_generation: true
+  sql_validation: true
+  sql_execution: true
+  result_explanation: true
+
+workflow:
+  steps:
+    - intent_recognition
+    - metric_or_field_lookup
+    - sql_draft
+    - sql_safety_check
+    - sql_execution
+    - business_explanation
+
+guardrails:
+  allow_dml: false
+  allow_ddl: false
+  require_limit_for_detail_query: true
+  default_limit: 100

@@ -1,0 +1,47 @@
+project:
+  name: telecom-dw-agent-lab
+  description: 本地电信业务数仓、指标体系、SQL 查询接口、FastAPI、LangGraph Agent 与前端实验室
+  timezone: Asia/Shanghai
+
+warehouse:
+  layers:
+    ods:
+      database: ods
+      description: 原始接入层，保留源业务粒度和模拟源数据
+    dwd:
+      database: dwd
+      description: 明细数据层，存放清洗后的维度表和事实表
+    dws:
+      database: dws
+      description: 汇总数据层，面向主题域进行轻度聚合
+    ads:
+      database: ads
+      description: 应用数据层，面向指标、报表和 Agent 查询
+
+data_generation:
+  seed: 20260531
+  period_start: 2025-01-01
+  period_end: 2025-12-31
+  user_count: 100000
+  billing_months: 12
+  batch_size: 50000
+  local_infile: true
+  output_dir: data/generated/mysql_load
+  quality_report: data/logs/data_quality_report.md
+
+quality_rules:
+  enforce_user_lifecycle: true
+  enforce_referential_integrity: true
+  enforce_mobile_number_rule: true
+  enforce_region_hierarchy: true
+  enforce_order_time_seconds: true
+  enforce_ods_ge_dwd: true
+
+paths:
+  docs: docs
+  raw_data: data/raw
+  generated_data: data/generated
+  exports: data/exports
+  logs: data/logs
+  sql: sql
+  source: src/telecom_dw

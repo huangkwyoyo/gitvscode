@@ -1,0 +1,24 @@
+mysql:
+  host: localhost
+  port: 3306
+  user: root
+  password: "123456"
+  charset: utf8mb4
+  local_infile: true
+  databases:
+    ods: ods
+    dwd: dwd
+    dws: dws
+    ads: ads
+
+connection_pool:
+  pool_size: 10
+  max_overflow: 20
+  pool_recycle_seconds: 3600
+  pool_pre_ping: true
+
+security:
+  readonly_user_enabled: false
+  sql_allow_select_only_for_agent: true
+  max_query_seconds: 60
+  max_result_rows: 1000

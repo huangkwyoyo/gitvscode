@@ -1,0 +1,32 @@
+# 本地环境文件
+.env
+
+# Python 运行产物
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Office 临时锁文件
+~$*.xlsx
+~$*.docx
+~$*.pptx
+
+# 业务原始清单和设计工作簿只保留在本地
+docs/telecom_fields.xlsx
+docs/telecom_dw_table_design.xlsx
+docs/telecom_dw_table_design_cn.xlsx
+
+# 可重复生成的数据文件，不进入 Git
+data/generated/**
+data/raw/**
+data/exports/**
+
+# 保留目录占位文件
+!data/generated/.gitkeep
+!data/raw/.gitkeep
+!data/exports/.gitkeep
+
+# 本地日志可按需保留，默认只提交 Markdown 质量报告
+data/logs/*
+!data/logs/.gitkeep
+!data/logs/*.md
