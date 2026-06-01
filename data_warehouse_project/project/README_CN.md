@@ -2,7 +2,7 @@
 
 ## 项目概述
 
-本项目用于模拟一个企业级电信数据仓库。
+本项目用于模拟一个可在个人电脑运行的企业级电信数据仓库，并作为 SQL 查询、指标解释、FastAPI、LangGraph Agent 和前端分析应用的长期实验室。
 
 主要目标：
 
@@ -19,7 +19,7 @@
 
 ## 系统架构
 
-telecom_fields.xlsx
+本地字段清单
 
 ↓
 
@@ -46,7 +46,7 @@ FastAPI + LangGraph Agent
 ## 技术栈
 
 - Python
-- DuckDB
+- MySQL
 - FastAPI
 - LangGraph
 - LangChain
@@ -63,6 +63,17 @@ sql/
 src/
 tests/
 ```
+
+## 知识档案
+
+- [业务背景](docs/business_context.md)
+- [字段字典](docs/data_dictionary.md)
+- [指标字典](docs/metric_dictionary.md)
+- [数据模型](docs/data_model.md)
+- [系统架构](docs/system_architecture.md)
+- [项目状态](docs/project_status.md)
+- [建设过程总结](docs/data_warehouse_build_journey.md)
+- [目录结构说明](docs/project_structure_guide_CN.md)
 
 ------
 
@@ -111,4 +122,4 @@ tests/
 
 ## 运行方式
 
-待实现。
+当前已完成数仓建模、MySQL 建库建表、模拟数据生成、数据质量校验和项目目录归档。后续优先建设指标查询接口、SQL 生成服务和 Agent 工程能力。

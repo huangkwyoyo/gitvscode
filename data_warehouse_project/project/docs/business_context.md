@@ -1,288 +1,59 @@
-# Telecom Business Context
-
-## Overview
-
-This project simulates an enterprise telecom data warehouse.
-
-The purpose is to model realistic telecom business scenarios for:
-
-- Data warehouse development
-- KPI analysis
-- SQL generation
-- AI Agent development
-
-------
-
-# Business Domains
-
-## Customer Domain
-
-Represents subscriber information.
-
-Examples:
-
-- customer_id
-- user_id
-- phone_no
-- gender
-- age
-- city
-- province
-- customer_level
-
-------
-
-## Product Domain
-
-Represents telecom products.
-
-Examples:
-
-- package_id
-- package_name
-- package_fee
-- package_type
-
-Examples:
-
-- 5G Package
-- Data Package
-- Family Package
-
-------
-
-## Subscription Domain
-
-Represents user subscriptions.
-
-Examples:
-
-- subscribe_date
-- unsubscribe_date
-- package_id
-
-A user may subscribe to multiple products.
-
-------
-
-## Billing Domain
-
-Represents billing and charging.
-
-Examples:
-
-- monthly_fee
-- package_fee
-- extra_fee
-- discount_fee
-
-Formula:
-
-bill_amount =
-package_fee
-
-- extra_fee
-
-- discount_fee
-
-------
-
-## Payment Domain
-
-Represents payment activities.
-
-Examples:
-
-- payment_date
-- payment_amount
-- payment_channel
-
-Channels:
-
-- APP
-- WeChat
-- Alipay
-- Bank
-
-------
-
-## Usage Domain
-
-Represents telecom usage.
-
-Examples:
-
-- data_usage_mb
-- voice_usage_min
-- sms_count
-
-------
-
-## Marketing Domain
-
-Represents marketing activities.
-
-Examples:
-
-- campaign_id
-- campaign_name
-- channel
-- conversion_flag
-
-------
-
-# Core Metrics
-
-## Subscriber Count
-
-Definition:
-
-Number of active subscribers.
-
-Formula:
-
-count(distinct user_id)
-
-------
-
-## ARPU
-
-Average Revenue Per User
-
-Formula:
-
-total_revenue / active_users
-
-Unit:
-
-CNY / user
-
-------
-
-## DOU
-
-Data Usage Per User
-
-Formula:
-
-total_data_usage_mb / active_users
-
-Unit:
-
-MB / user
-
-------
-
-## MOU
-
-Minutes Of Usage
-
-Formula:
-
-total_voice_minutes / active_users
-
-Unit:
-
-minutes / user
-
-------
-
-## Churn Rate
-
-Definition:
-
-Percentage of users who leave.
-
-Formula:
-
-lost_users / active_users
-
-Unit:
-
-%
-
-------
-
-## Conversion Rate
-
-Definition:
-
-Marketing conversion rate.
-
-Formula:
-
-converted_users / targeted_users
-
-Unit:
-
-%
-
-------
-
-# Data Warehouse Layers
-
-ODS
-
-Raw source data.
-
-------
-
-DWD
-
-Cleaned detailed data.
-
-------
-
-DWS
-
-Aggregated business subject data.
-
-------
-
-ADS
-
-Business-oriented analytical data.
-
-------
-
-# Naming Convention
-
-Dimension Table:
-
-dim_xxx
-
-Fact Table:
-
-fact_xxx
-
-ODS Table:
-
-ods_xxx
-
-DWD Table:
-
-dwd_xxx
-
-DWS Table:
-
-dws_xxx
-
-ADS Table:
-
-ads_xxx
-
-------
-
-# Important Rules
-
-Do not invent business meanings.
-
-Do not assume metric definitions.
-
-If metric definitions are missing:
-
-1. Explain assumption
-2. Mark assumption explicitly
-3. Ask for confirmation
-
-Metric definitions always override assumptions.
+# 电信业务上下文
+
+## 项目定位
+
+本项目模拟一个企业级电信运营商数据仓库，覆盖客户、用户、账户、套餐、账单、缴费、使用、订单、投诉、渠道、组织和应用流量等核心业务。它的目标不是追求海量数据，而是提供足够真实的业务结构、指标口径和关联关系，支撑 SQL、API、Agent 和前端分析训练。
+
+## 核心业务对象
+
+| 对象 | 说明 | 关键字段 |
+|---|---|---|
+| 客户 | 真实实名主体，可以拥有一个或多个用户号码 | `customer_id`、`customer_name` |
+| 用户 | 电信服务号码或业务使用主体 | `user_id`、`phone_number`、`activation_date` |
+| 账户 | 出账和缴费归集对象 | `account_id`、`account_name` |
+| 产品套餐 | 用户订购的主套餐或增值产品 | `product_id`、`product_name` |
+| 渠道 | 订单、缴费、营销触达来源 | `channel_id`、`channel_name` |
+| 组织 | 地市、区县、营业部等经营归属 | `org_id`、`org_name` |
+
+## 业务主题域
+
+| 主题域 | 业务问题 | 典型分析 |
+|---|---|---|
+| 客户用户 | 用户是谁、在哪里、是否在网、价值如何 | 用户画像、生命周期、地域分布 |
+| 计费账务 | 用户应收多少、实收多少、是否欠费 | 出账收入、缴费回款、欠费治理 |
+| 使用行为 | 用户使用了多少流量、语音和短信 | 套餐匹配、网络资源、行为偏好 |
+| 产品套餐 | 哪些套餐受欢迎、收入贡献如何 | 套餐结构、5G 渗透、产品运营 |
+| 渠道订单 | 哪些渠道带来订单和转化 | 渠道效率、订单支付、营销转化 |
+| 服务投诉 | 哪些问题引发投诉、处理是否及时 | 客诉率、满意度、服务质量 |
+| 应用流量 | 用户流量消耗在哪些应用上 | DPI 应用排行、内容偏好分析 |
+
+## 关键业务规则
+
+- 用户必须先入网后离网，未离网用户可使用远期默认离网日期或空值表达。
+- 用户业务行为必须发生在入网和离网生命周期之间。
+- 账户名称使用客户姓名，不拼接“账户”等冗余后缀。
+- 账单按账户和账期产生，缴费按账户和支付流水产生。
+- 使用行为按用户和日期产生，可进一步拆分流量、语音、短信和 DPI 应用。
+- 欠费用户更容易出现停机、投诉和流失风险。
+- 5G 套餐用户通常流量更高，ARPU 也更高。
+- 一线城市用户消费能力和高价值用户比例通常更高。
+- 营销触达后只有部分用户会形成订单或支付转化。
+
+## Agent 分析场景
+
+| 场景 | 用户问题示例 | 需要的能力 |
+|---|---|---|
+| 查指标 | “上个月上海 5G 用户 ARPU 是多少？” | 指标匹配、SQL 生成、口径解释 |
+| 查原因 | “为什么欠费金额上升？” | 分层下钻、地域和套餐拆解 |
+| 圈人群 | “找出高价值但有流失风险的用户” | 用户标签、风险规则、SQL 过滤 |
+| 做推荐 | “哪些用户适合升级 5G 套餐？” | 套餐匹配、流量行为、消费能力 |
+| 查异常 | “哪些账单金额异常？” | 历史对比、阈值规则、明细追溯 |
+
+## 默认分析口径
+
+- 时间：未指定时默认使用最近一个完整账期。
+- 金额：默认单位为元。
+- 流量：默认单位为 MB。
+- 用户数：默认按 `user_id` 去重。
+- 地域：默认按用户归属地统计。
+- 套餐：默认按当前主套餐统计。

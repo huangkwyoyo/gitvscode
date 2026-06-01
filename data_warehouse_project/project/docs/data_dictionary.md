@@ -15,11 +15,11 @@
 - DWD 层表名格式：`dwd.dim_xxx` 或 `dwd.fact_xxx`，承载清洗后的维度表和明细事实表。
 - DWS 层表名格式：`dws.dws_xxx`，承载按主题、用户、产品、渠道、账期等粒度汇总的数据。
 - ADS 层表名格式：`ads.ads_xxx`，承载指标、报表、Agent 语义查询和业务分析结果。
-- 示例：划分到 ODS 层的用户 360 日视图表应命名为 `ods.ods_user_360_daily`，而不是只写 `ods_user_360_daily`。
+- 示例：划分到 ODS 层的用户画像日表应命名为 `ods.ods_user_profile_daily`，而不是只写 `ods_user_profile_daily`。
 
 | layer | database/schema | table naming pattern | example |
 |---|---|---|---|
-| ODS | `ods` | `ods_xxx` | `ods.ods_user_360_daily` |
+| ODS | `ods` | `ods_xxx` | `ods.ods_user_profile_daily` |
 | DWD | `dwd` | `dim_xxx` / `fact_xxx` | `dwd.fact_user_snapshot_daily` |
 | DWS | `dws` | `dws_xxx` | `dws.dws_user_month_summary` |
 | ADS | `ads` | `ads_xxx` | `ads.ads_kpi_user_overview_monthly` |

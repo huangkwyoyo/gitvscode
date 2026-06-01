@@ -2,7 +2,7 @@
 
 ## Overview
 
-This project simulates an enterprise telecom data warehouse.
+This project simulates a local enterprise-style telecom data warehouse.
 
 The purpose is to practice:
 
@@ -12,6 +12,8 @@ The purpose is to practice:
 - FastAPI services
 - LangGraph agent development
 - AI-assisted analytics
+- Metric explanation
+- SQL query services
 
 The system is designed to run entirely on a personal computer.
 
@@ -19,7 +21,7 @@ The system is designed to run entirely on a personal computer.
 
 ## Architecture
 
-telecom_fields.xlsx
+local field assets
 ↓
 ODS
 ↓
@@ -36,7 +38,7 @@ FastAPI + LangGraph Agent
 ## Tech Stack
 
 - Python
-- DuckDB
+- MySQL
 - FastAPI
 - LangGraph
 - LangChain
@@ -51,6 +53,17 @@ data/
 sql/
 src/
 tests/
+
+------
+
+## Knowledge Base
+
+- `docs/business_context.md`
+- `docs/data_dictionary.md`
+- `docs/metric_dictionary.md`
+- `docs/data_model.md`
+- `docs/system_architecture.md`
+- `docs/project_status.md`
 
 ------
 
@@ -91,4 +104,4 @@ Phase 6
 
 ## Running
 
-Coming soon.
+The warehouse schema, simulated data, quality report, and project archive structure are in place. The next phase is to build metric services, a read-only SQL interface, FastAPI endpoints, and LangGraph Agent workflows.
