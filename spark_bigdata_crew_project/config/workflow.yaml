@@ -1,0 +1,44 @@
+# LangGraph生产级工作流配置
+workflow:
+  name: "spark_bigdata_production_pipeline"
+  version: "2.0.0"
+
+  # 状态持久化
+  state:
+    backend: "json_file"  # json_file | redis | postgres
+    checkpoint_dir: "output/checkpoints"
+    artifact_dir: "artifacts"
+
+  # 人工审批Gate配置
+  gates:
+    - id: "gate_1"
+      name: "需求与数据源确认"
+      after_task: "task_2_metadata_validation"
+      approver_role: "需求负责人/数据owner"
+      timeout_hours: 48
+      auto_reject_on_timeout: true
+    - id: "gate_2"
+      name: "模型与字段映射确认"
+      after_task: "task_4_data_modeling"
+      approver_role: "数仓架构师"
+      timeout_hours: 48
+      auto_reject_on_timeout: true
+    - id: "gate_3"
+      name: "代码执行前确认"
+      after_task: "task_6_code_quality_check"
+      approver_role: "Spark开发负责人"
+      timeout_hours: 24
+      auto_reject_on_timeout: true
+
+  # 校验阻断策略
+  validation:
+    strict_mode: true
+    block_on_field_mismatch: true
+    block_on_schema_error: true
+    require_gate_approval: true
+
+  # 重试与韧性
+  resilience:
+    max_retries_per_task: 2
+    retry_delay_seconds: 10
+    checkpoint_enabled: true

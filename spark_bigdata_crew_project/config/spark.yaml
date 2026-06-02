@@ -1,0 +1,37 @@
+# Spark作业生产级配置
+spark:
+  app_name: "${SPARK_APP_NAME:spark_bigdata_crew_job}"
+  master: "${SPARK_MASTER_URL:yarn}"
+
+  # 资源与并行度
+  executor:
+    instances: 4
+    cores: 4
+    memory: "8g"
+  driver:
+    cores: 2
+    memory: "4g"
+
+  # Shuffle与分区
+  shuffle:
+    partitions: 200
+    max_partition_bytes: 134217728  # 128MB
+    min_coalesce_partitions: 10
+
+  # 自适应查询
+  adaptive:
+    enabled: true
+    coalesce_partitions_enabled: true
+    skew_join_enabled: true
+
+  # 输出配置
+  output:
+    format: "parquet"
+    compression: "snappy"
+    mode: "overwrite"
+
+  # 提交参数
+  submit:
+    deploy_mode: "cluster"
+    max_retries: 2
+    timeout_seconds: 3600

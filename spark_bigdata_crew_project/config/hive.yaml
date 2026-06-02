@@ -1,0 +1,30 @@
+# Hive Metastore 与 HDFS 连接配置
+hive:
+  metastore:
+    host: "${HIVE_HOST:localhost}"
+    port: "${HIVE_PORT:10000}"
+    auth: "${HIVE_AUTH:NONE}"
+    kerberos_principal: "${HIVE_KERBEROS_PRINCIPAL:}"
+  default_database: "${HIVE_DATABASE:default}"
+  storage_format: "parquet"
+  compression: "snappy"
+
+hdfs:
+  namenode: "${HDFS_NAMENODE:hdfs://localhost:8020}"
+  user: "${HDFS_USER:hdfs}"
+  warehouse_dir: "/user/hive/warehouse"
+  data_dirs:
+    - "/user/hive/warehouse"
+    - "/data/ods"
+    - "/data/dwd"
+    - "/data/dws"
+    - "/data/ads"
+
+metadata:
+  fetch_timeout_seconds: 60
+  cache_ttl_minutes: 30
+  max_tables_per_fetch: 500
+  validate:
+    field_existence: true
+    type_compatibility: true
+    partition_coverage: true
