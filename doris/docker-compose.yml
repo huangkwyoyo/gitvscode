@@ -1,0 +1,51 @@
+name: doris-local
+
+networks:
+  doris_net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.80.0/24
+
+services:
+  fe:
+    image: apache/doris:fe-4.0.1
+    container_name: doris-fe
+    hostname: fe
+    environment:
+      - FE_SERVERS=fe1:172.20.80.2:9010
+      - FE_ID=1
+    ports:
+      - "8030:8030"
+      - "9010:9010"
+      - "9020:9020"
+      - "9030:9030"
+    volumes:
+      - "D:/Program Files/gitvscode/doris/data/fe/meta:/opt/apache-doris/fe/doris-meta"
+      - "D:/Program Files/gitvscode/doris/data/fe/log:/opt/apache-doris/fe/log"
+    networks:
+      doris_net:
+        ipv4_address: 172.20.80.2
+    restart: unless-stopped
+
+  be:
+    image: apache/doris:be-4.0.1
+    container_name: doris-be
+    hostname: be
+    environment:
+      - FE_SERVERS=fe1:172.20.80.2:9010
+      - BE_ADDR=172.20.80.3:9050
+    ports:
+      - "8040:8040"
+      - "8060:8060"
+      - "9050:9050"
+      - "9060:9060"
+    volumes:
+      - "D:/Program Files/gitvscode/doris/data/be/storage:/opt/apache-doris/be/storage"
+      - "D:/Program Files/gitvscode/doris/data/be/log:/opt/apache-doris/be/log"
+    depends_on:
+      - fe
+    networks:
+      doris_net:
+        ipv4_address: 172.20.80.3
+    restart: unless-stopped
