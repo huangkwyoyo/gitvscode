@@ -1227,3 +1227,121 @@ MySQL 画像任务完成标准：
 - 已记录执行状态。
 - 已记录成功、失败、阻断原因。
 - 已生成校验报告。
+
+
+
+# Git Workflow
+
+所有开发必须遵循 Feature Branch 工作流。该规则优先于临时使用的 `codex/*` 工作分支；如果当前工作仍在 `codex/*` 分支上，进入正式开发前必须切换到符合规范的 `feature/*` 分支。
+
+## 分支规则
+
+- `main` 是唯一长期存在的稳定分支。
+- 禁止直接修改或直接提交到 `main`。
+- 每个功能、修复或阶段性交付必须创建独立 Feature Branch。
+- 一个 Feature Branch 只承载一个清晰目标，禁止多个功能混用同一分支。
+
+命名规范：
+
+```text
+feature/<feature-name>
+```
+
+命名要求：
+
+- `<feature-name>` 使用英文小写、数字和短横线。
+- 名称必须能表达功能范围。
+- 禁止使用空泛名称，例如 `feature/update`、`feature/test`、`feature/temp`。
+
+示例：
+
+```text
+feature/sql-generator
+feature/rag-knowledgebase
+feature/github-daily-report
+feature/agent-memory
+feature/mysql-profile-docs
+feature/doris-conversion-rules
+```
+
+## 开发流程
+
+1. 从 `main` 创建 Feature Branch。
+
+```bash
+git checkout main
+git pull origin main
+git checkout -b feature/<feature-name>
+```
+
+2. 在当前 Feature Branch 完成功能开发。
+
+3. 提交前检查当前分支和变更范围。
+
+```bash
+git branch --show-current
+git status --short
+```
+
+4. 提交代码。
+
+```bash
+git add <path>
+git commit -m "feat: <feature-name>"
+```
+
+5. 推送远程仓库。
+
+```bash
+git push -u origin feature/<feature-name>
+```
+
+6. 创建 Pull Request。
+
+source:
+
+```text
+feature/<feature-name>
+```
+
+target:
+
+```text
+main
+```
+
+7. Pull Request 描述必须包含：
+
+- 功能说明
+- 修改文件列表
+- 风险分析
+- 测试结果
+- 未执行测试时必须明确说明原因，禁止写“已测试”但没有真实测试记录。
+
+8. Pull Request 合并后删除 Feature Branch。
+
+```bash
+git branch -d feature/<feature-name>
+git push origin --delete feature/<feature-name>
+```
+
+## 禁止事项
+
+- 禁止长期使用单一 `codex/*` 分支承载所有开发。
+- 禁止直接提交到 `main`。
+- 禁止多个功能共用一个 Feature Branch。
+- 禁止在未确认变更范围时执行 `git add .`。
+- 禁止把无关目录、临时文件、依赖缓存、数据库文件一起提交。
+- 禁止提交包含明文密码、Token、API Key 的配置文件。
+
+## Agent 提交流程补充
+
+Agent 执行 Git 操作前必须：
+
+1. 运行 `git status --short --branch` 确认当前分支。
+2. 说明本次计划提交的文件范围。
+3. 只暂存与当前任务相关的文件或目录。
+4. 提交前运行 `git diff --cached --name-status` 核对暂存清单。
+5. 如果发现无关文件已暂存，必须先停止并请求人工确认。
+6. 提交后运行 `git log -1 --oneline` 记录提交号。
+7. 推送后说明远端分支和提交号。
