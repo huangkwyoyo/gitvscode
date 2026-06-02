@@ -131,7 +131,7 @@ def annualized_return(nav: pd.Series, dates: pd.Series, frequency: str | None = 
     try:
         start = pd.Timestamp(dates.iloc[0])
         end = pd.Timestamp(dates.iloc[-1])
-        years = (end - start).days / 365.25
+        years = (end - start).days / 365
         if years > 0:
             return float((total_return ** (1 / years)) - 1)
     except Exception:
@@ -272,7 +272,8 @@ def sharpe_ratio(nav: pd.Series, dates: pd.Series, risk_free_rate: float = RISK_
 def sortino_ratio(nav: pd.Series, dates: pd.Series, risk_free_rate: float = RISK_FREE_RATE, frequency: str | None = None) -> float | None:
     """索提诺比率 = (年化收益率 - 无风险利率) / 下行波动率
 
-    仅考虑负收益率的波动率，更适合评估私募产品的下行风险。
+    下行波动率采用标准定义：将正收益替换为零，对含零的全序列求标准差后年化。
+    这与业界通用做法一致——分子分母使用相同的观测数，避免只取负收益子集导致 std 偏高。
     """
     if frequency is None:
         frequency = _detect_frequency(dates)
@@ -280,11 +281,12 @@ def sortino_ratio(nav: pd.Series, dates: pd.Series, risk_free_rate: float = RISK
 
     ann_ret = annualized_return(nav, dates, frequency)
     rets = calculate_returns(nav)
-    downside_rets = rets[rets < 0]
-    if len(downside_rets) < 2:
+    if len(rets) < 2:
         return None
 
-    downside_std = downside_rets.std() * np.sqrt(ann_mult)
+    # 下行序列：正收益置零，负收益保留原值
+    downside_series = rets.clip(upper=0)
+    downside_std = downside_series.std(ddof=1) * np.sqrt(ann_mult)
     if downside_std == 0:
         return None
     return float((ann_ret - risk_free_rate) / downside_std)

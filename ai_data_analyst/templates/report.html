@@ -67,6 +67,10 @@
           <div class="metric" style="color:var(--danger)">{{ "%.2f"|format(m.get('max_drawdown', 0) * 100) if m.get('max_drawdown') is not none else '--' }}%</div>
         </div>
         <div class="card">
+          <div class="muted">索提诺比率</div>
+          <div class="metric">{{ "%.2f"|format(m.get('sortino_ratio', 0)) if m.get('sortino_ratio') is not none else '--' }}</div>
+        </div>
+        <div class="card">
           <div class="muted">Calmar比率</div>
           <div class="metric">{{ "%.2f"|format(m.get('calmar_ratio', 0)) if m.get('calmar_ratio') is not none else '--' }}</div>
         </div>

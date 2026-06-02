@@ -17,7 +17,7 @@ MAX_JOBS = int(os.getenv("MAX_JOBS", 50))  # 并发任务上限
 
 # 金融分析基准
 TRADING_DAYS = int(os.getenv("TRADING_DAYS", 252))  # 年交易日数
-RISK_FREE_RATE = float(os.getenv("RISK_FREE_RATE", 0.03))  # 无风险利率
+RISK_FREE_RATE = float(os.getenv("RISK_FREE_RATE", 0.015))  # 无风险利率（中国金融市场常用一年期定存利率）
 
 # 滚动收益窗口配置（交易日数）
 ROLLING_WINDOWS = {

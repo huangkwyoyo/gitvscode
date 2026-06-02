@@ -115,6 +115,7 @@ function renderFinanceMetrics(fm) {
       ["年化波动率", m.annualized_volatility, "pct", null],
       ["夏普比率", m.sharpe_ratio, "num", null],
       ["最大回撤", m.max_drawdown, "pct", "dd"],
+      ["索提诺比率", m.sortino_ratio, "num", null],
       ["Calmar比率", m.calmar_ratio, "num", null],
     ];
     if (m.excess_return != null) {
