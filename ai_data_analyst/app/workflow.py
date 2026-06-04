@@ -70,6 +70,8 @@ class AnalysisWorkflow:
                 if node_name in self.CRITICAL_NODES:
                     state.errors.append("分析流程因关键节点失败而终止")
                     break
+        # 释放 DataFrame 内存，后续仅需 preview_rows 和 exploration 等聚合数据
+        state.release_dataframes()
         return state
 
     @staticmethod

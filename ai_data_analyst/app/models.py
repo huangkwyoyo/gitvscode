@@ -45,3 +45,12 @@ class AnalysisState:
             "report_url": f"/api/report/{self.job_id}" if self.report_path else None,
             "errors": self.errors,
         }
+
+    def release_dataframes(self) -> None:
+        """释放 DataFrame 内存，工作流完成后调用。
+
+        工作流完成后仅需聚合数据（preview_rows、exploration、chart_specs 等），
+        原始 DataFrame 应释放以避免大量作业累积时内存超限。
+        """
+        self.raw_df = None
+        self.clean_df = None
