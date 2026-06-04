@@ -10,7 +10,6 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
-from starlette.concurrency import run_in_threadpool
 from starlette.responses import JSONResponse
 
 from app.models import AnalysisState
@@ -108,7 +107,7 @@ async def analyze(
         upload_path=upload_path,
         output_dir=job_output_dir,
     )
-    state = await run_in_threadpool(workflow.run, state)
+    state = workflow.run(state)
     _evict_old_jobs()
     JOBS[job_id] = state
     return state.public_payload()
