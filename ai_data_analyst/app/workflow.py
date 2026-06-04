@@ -36,6 +36,16 @@ class AnalysisWorkflow:
         "generate_report": ["insights"],
     }
 
+    # 各节点的中文标签，用于前端进度展示
+    STEP_LABELS = {
+        "load_data": "加载数据",
+        "clean_data": "清洗数据",
+        "explore_data": "探索分析",
+        "visualize": "生成图表",
+        "generate_insights": "提取洞察",
+        "generate_report": "生成报告",
+    }
+
     def __init__(self) -> None:
         self.nodes: list[tuple[str, WorkflowNode]] = [
             ("load_data", load_data),
@@ -48,8 +58,11 @@ class AnalysisWorkflow:
 
     def run(self, state: AnalysisState) -> AnalysisState:
         failed_nodes: set[str] = set()
+        step_percent = 100 // max(len(self.nodes), 1)  # 每个节点的进度增量
+        completed = 0
         for node_name, node in self.nodes:
             logger.info("执行节点: %s", node_name)
+            state.current_step = self.STEP_LABELS.get(node_name, node_name)
             required = self.REQUIREMENTS[node_name]
             missing = [key for key in required if getattr(state, key) is None and not getattr(state, key, {})]
             # 检查上游依赖节点是否失败
@@ -70,6 +83,10 @@ class AnalysisWorkflow:
                 if node_name in self.CRITICAL_NODES:
                     state.errors.append("分析流程因关键节点失败而终止")
                     break
+            completed += 1
+            state.progress = min(completed * step_percent, 100)
+        state.progress = 100
+        state.current_step = "完成"
         # 释放 DataFrame 内存，后续仅需 preview_rows 和 exploration 等聚合数据
         state.release_dataframes()
         return state

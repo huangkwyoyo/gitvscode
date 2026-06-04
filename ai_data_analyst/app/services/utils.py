@@ -22,3 +22,14 @@ def safe_float(value, decimals: int = 6) -> float | None:
     if isinstance(value, float) and np.isnan(value):
         return None
     return round(float(value), decimals)
+
+
+def build_preview(df: pd.DataFrame, max_rows: int = 25) -> list[dict]:
+    """将 DataFrame 前 N 行转换为 JSON 安全格式的预览列表。
+
+    消除 loader.py 和 cleaning.py 中的重复代码。
+    """
+    return [
+        {k: normalize_preview_value(v) for k, v in row.items()}
+        for row in df.head(max_rows).to_dict(orient="records")
+    ]

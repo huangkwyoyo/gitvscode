@@ -6,22 +6,7 @@ import numpy as np
 import pandas as pd
 
 from app.services.utils import safe_float
-from app.settings import RISK_FREE_RATE, ROLLING_WINDOWS, TRADING_DAYS
-
-# 频率检测的交易日阈值（年交易日数的容忍区间）
-FREQUENCY_THRESHOLDS = {
-    "daily": (200, 260),       # 日频：200-260 天/年
-    "weekly": (40, 60),        # 周频：40-60 天/年
-    "monthly": (10, 14),       # 月频：10-14 天/年
-}
-# 各频率对应的年化乘数
-FREQUENCY_MULTIPLIER = {
-    "daily": 252,
-    "weekly": 52,
-    "monthly": 12,
-    "quarterly": 4,
-    "insufficient": 0,  # 数据不足时不进行年化计算
-}
+from app.settings import FREQUENCY_MULTIPLIER, FREQUENCY_THRESHOLDS, RISK_FREE_RATE, ROLLING_WINDOWS, TRADING_DAYS
 
 
 
@@ -103,8 +88,11 @@ def _prepare_series(df: pd.DataFrame, date_col: str, value_col: str) -> tuple[pd
     """准备按日期排序的净值序列和日期序列，去除缺失值。
 
     净值必须为正数，否则抛出异常（负净值会导致收益率计算完全失真）。
+    日期列存在重复时将抛出异常，避免非唯一索引导致下游计算错误。
     """
     df_sorted = df.sort_values(date_col).copy()
+    if df_sorted[date_col].duplicated().any():
+        raise ValueError(f"日期列 {date_col} 存在重复值，请先按日期去重或聚合")
     nav = df_sorted.set_index(date_col)[value_col].dropna()
     if len(nav) < 5:
         raise ValueError(f"字段 {value_col} 有效数据点不足 (需 >= 5)")
@@ -145,16 +133,29 @@ def cumulative_return(nav: pd.Series) -> float:
     return float(nav.iloc[-1] / nav.iloc[0] - 1)
 
 
-def excess_return(nav: pd.Series, benchmark: pd.Series, dates: pd.Series, frequency: str | None = None) -> float | None:
-    """超额收益率 = 组合年化收益率 - 基准年化收益率"""
+def _align_series(nav: pd.Series, benchmark: pd.Series, min_periods: int = 5) -> tuple[pd.Series, pd.Series] | None:
+    """将基准序列与净值序列对齐，返回 (nav_aligned, benchmark_aligned) 或 None。
+
+    复用此函数避免 excess_return 和 information_ratio 中的重复对齐逻辑。
+    """
     bench_aligned = benchmark.reindex(nav.index).dropna()
-    if len(bench_aligned) < 5:
+    if len(bench_aligned) < min_periods:
         return None
     common_idx = nav.index.intersection(bench_aligned.index)
-    if len(common_idx) < 5:
+    if len(common_idx) < min_periods:
         return None
-    port_ann = annualized_return(nav.loc[common_idx], dates.loc[common_idx], frequency)
-    bench_ann = annualized_return(bench_aligned.loc[common_idx], dates.loc[common_idx], frequency)
+    return nav.loc[common_idx], bench_aligned.loc[common_idx]
+
+
+def excess_return(nav: pd.Series, benchmark: pd.Series, dates: pd.Series, frequency: str | None = None) -> float | None:
+    """超额收益率 = 组合年化收益率 - 基准年化收益率"""
+    aligned = _align_series(nav, benchmark, min_periods=5)
+    if aligned is None:
+        return None
+    nav_common, bench_common = aligned
+    dates_common = dates.loc[nav_common.index]
+    port_ann = annualized_return(nav_common, dates_common, frequency)
+    bench_ann = annualized_return(bench_common, dates_common, frequency)
     return port_ann - bench_ann
 
 
@@ -296,15 +297,10 @@ def information_ratio(nav: pd.Series, benchmark: pd.Series, dates: pd.Series, fr
 
     衡量组合相对基准的主动管理效率。
     """
-    bench_aligned = benchmark.reindex(nav.index).dropna()
-    if len(bench_aligned) < 10:
+    aligned = _align_series(nav, benchmark, min_periods=10)
+    if aligned is None:
         return None
-    common_idx = nav.index.intersection(bench_aligned.index)
-    if len(common_idx) < 10:
-        return None
-
-    nav_common = nav.loc[common_idx]
-    bench_common = bench_aligned.loc[common_idx]
+    nav_common, bench_common = aligned
 
     # 计算每日超额收益
     active_returns = nav_common.pct_change() - bench_common.pct_change()

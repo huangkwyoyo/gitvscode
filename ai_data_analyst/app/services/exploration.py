@@ -5,6 +5,7 @@ import pandas as pd
 from app.models import AnalysisState
 from app.services.finance_metrics import compute_finance_metrics, detect_time_series
 from app.services.utils import safe_float
+from app.settings import MAX_CATEGORY_COLS, MAX_CATEGORY_VALUES, MAX_CORR_MATRIX_COLS, MAX_TOP_CORRELATIONS
 
 
 def explore_data(state: AnalysisState) -> AnalysisState:
@@ -29,15 +30,14 @@ def explore_data(state: AnalysisState) -> AnalysisState:
         }
 
     categorical_summary = {}
-    for col in categorical_cols[:12]:
-        counts = df[col].astype(str).value_counts(dropna=False).head(8)
+    for col in categorical_cols[:MAX_CATEGORY_COLS]:
+        counts = df[col].astype(str).value_counts(dropna=False).head(MAX_CATEGORY_VALUES)
         categorical_summary[col] = [{"label": str(k), "value": int(v)} for k, v in counts.items()]
 
     correlations = []
     if len(numeric_cols) >= 2:
         # 数值列过多时限制计算规模，避免 O(n²) 性能问题
-        MAX_CORR_COLS = 20
-        corr_cols = numeric_cols[:MAX_CORR_COLS]
+        corr_cols = numeric_cols[:MAX_CORR_MATRIX_COLS]
         corr = df[corr_cols].corr(numeric_only=True)
         for row in corr.index:
             for col in corr.columns:
@@ -57,7 +57,7 @@ def explore_data(state: AnalysisState) -> AnalysisState:
         "categorical_columns": categorical_cols,
         "numeric_summary": numeric_summary,
         "categorical_summary": categorical_summary,
-        "top_correlations": correlations[:10],
+        "top_correlations": correlations[:MAX_TOP_CORRELATIONS],
         "date_column": date_col,
         "nav_columns": nav_cols,
         "benchmark_column": benchmark_col,

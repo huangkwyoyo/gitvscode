@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 
 from app.models import AnalysisState
-from app.services.utils import normalize_preview_value
+from app.services.utils import build_preview
 
 
 def _try_datetime(column: str, series: pd.Series) -> pd.Series:
@@ -100,10 +100,7 @@ def clean_data(state: AnalysisState) -> AnalysisState:
         "completeness": round(completeness, 4),
         "outliers": outliers,
     }
-    state.preview_rows = [
-        {k: normalize_preview_value(v) for k, v in row.items()}
-        for row in df.head(25).to_dict(orient="records")
-    ]
+    state.preview_rows = build_preview(df)
 
     clean_path = state.output_dir / "cleaned_data.csv"
     df.to_csv(clean_path, index=False, encoding="utf-8-sig")

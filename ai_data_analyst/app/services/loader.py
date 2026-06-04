@@ -5,7 +5,7 @@ import pandas as pd
 from app.models import AnalysisState
 from app.services.adapters.file_adapter import FileDataSourceAdapter
 from app.services.adapters.sqlite_adapter import SQLiteDataSourceAdapter
-from app.services.utils import normalize_preview_value
+from app.services.utils import build_preview
 
 
 def load_data(state: AnalysisState) -> AnalysisState:
@@ -40,8 +40,5 @@ def load_data(state: AnalysisState) -> AnalysisState:
         "columns": int(len(df.columns)),
         "fields": schema_columns,
     }
-    state.preview_rows = [
-        {k: normalize_preview_value(v) for k, v in row.items()}
-        for row in df.head(25).to_dict(orient="records")
-    ]
+    state.preview_rows = build_preview(df)
     return state

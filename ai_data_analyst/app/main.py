@@ -131,11 +131,14 @@ async def analyze(
         upload_path=upload_path,
         output_dir=job_output_dir,
     )
-    state = await asyncio.to_thread(workflow.run, state)
+    # 提前注册到 JOBS，客户端可立即通过 GET /api/jobs/{job_id} 轮询进度
     with _JOBS_LOCK:
         _evict_old_jobs()
         JOBS[job_id] = state
-    _cleanup_old_files()
+    try:
+        state = await asyncio.to_thread(workflow.run, state)
+    finally:
+        _cleanup_old_files()
     return state.public_payload()
 
 
@@ -155,6 +158,8 @@ def list_jobs():
                 "filename": state.original_filename,
                 "rows": state.schema.get("rows"),
                 "columns": state.schema.get("columns"),
+                "progress": state.progress,
+                "current_step": state.current_step,
                 "errors": state.errors,
                 "report_url": f"/api/report/{state.job_id}" if state.report_path else None,
             }

@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 
 from app.models import AnalysisState
+from app.settings import MAX_VIS_BAR_COLS, MAX_VIS_HISTOGRAM_COLS
 
 
 def _histogram(series: pd.Series, bins: int = 12):
@@ -31,7 +32,7 @@ def build_chart_specs(state: AnalysisState) -> AnalysisState:
     numeric_cols = state.exploration.get("numeric_columns", [])
     categorical_cols = state.exploration.get("categorical_columns", [])
 
-    for col in numeric_cols[:4]:
+    for col in numeric_cols[:MAX_VIS_HISTOGRAM_COLS]:
         chart_specs.append(
             {
                 "id": f"hist-{len(chart_specs)}",
@@ -42,8 +43,8 @@ def build_chart_specs(state: AnalysisState) -> AnalysisState:
             }
         )
 
-    for col in categorical_cols[:4]:
-        counts = df[col].astype(str).value_counts(dropna=False).head(10)
+    for col in categorical_cols[:MAX_VIS_BAR_COLS]:
+        counts = df[col].astype(str).value_counts(dropna=False).head(MAX_CATEGORY_VALUES)
         chart_specs.append(
             {
                 "id": f"bar-{len(chart_specs)}",

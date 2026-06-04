@@ -27,6 +27,8 @@ class AnalysisState:
     report_path: Path | None = None
     preview_rows: list[dict[str, Any]] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
+    progress: int = 0  # 工作流进度百分比 0-100
+    current_step: str = ""  # 当前执行的步骤名称
 
     def public_payload(self) -> dict[str, Any]:
         return {
@@ -44,6 +46,8 @@ class AnalysisState:
             "preview_rows": self.preview_rows,
             "report_url": f"/api/report/{self.job_id}" if self.report_path else None,
             "errors": self.errors,
+            "progress": self.progress,
+            "current_step": self.current_step,
         }
 
     def release_dataframes(self) -> None:

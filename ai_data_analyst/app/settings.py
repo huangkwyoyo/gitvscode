@@ -33,3 +33,37 @@ CHART_DEFAULT_HEIGHT = int(os.getenv("CHART_HEIGHT", 260))
 # 磁盘清理配置
 JOB_RETENTION_HOURS = int(os.getenv("JOB_RETENTION_HOURS", 24))  # 作业文件保留时间
 
+# 数据预览与探索限制
+PREVIEW_MAX_ROWS = int(os.getenv("PREVIEW_MAX_ROWS", 25))  # 预览行数
+MAX_CORR_MATRIX_COLS = int(os.getenv("MAX_CORR_MATRIX_COLS", 20))  # 相关性矩阵最大列数
+MAX_CATEGORY_COLS = int(os.getenv("MAX_CATEGORY_COLS", 12))  # 分类列展示上限
+MAX_CATEGORY_VALUES = int(os.getenv("MAX_CATEGORY_VALUES", 8))  # 分类值展示上限
+MAX_VIS_HISTOGRAM_COLS = int(os.getenv("MAX_VIS_HISTOGRAM_COLS", 4))  # 直方图最大列数
+MAX_VIS_BAR_COLS = int(os.getenv("MAX_VIS_BAR_COLS", 4))  # 条形图最大列数
+MAX_TOP_CORRELATIONS = int(os.getenv("MAX_TOP_CORRELATIONS", 10))  # 展示的最高相关对数
+
+# 频率检测阈值（每年平均数据点数范围）
+FREQUENCY_THRESHOLDS = {
+    "daily": (
+        int(os.getenv("FREQ_DAILY_LOW", 200)),
+        int(os.getenv("FREQ_DAILY_HIGH", 260)),
+    ),
+    "weekly": (
+        int(os.getenv("FREQ_WEEKLY_LOW", 40)),
+        int(os.getenv("FREQ_WEEKLY_HIGH", 60)),
+    ),
+    "monthly": (
+        int(os.getenv("FREQ_MONTHLY_LOW", 10)),
+        int(os.getenv("FREQ_MONTHLY_HIGH", 14)),
+    ),
+}
+
+# 各频率对应的年化乘数
+FREQUENCY_MULTIPLIER = {
+    "daily": int(os.getenv("FREQ_MULT_DAILY", 252)),
+    "weekly": int(os.getenv("FREQ_MULT_WEEKLY", 52)),
+    "monthly": int(os.getenv("FREQ_MULT_MONTHLY", 12)),
+    "quarterly": int(os.getenv("FREQ_MULT_QUARTERLY", 4)),
+    "insufficient": 0,  # 数据不足时不进行年化计算
+}
+
