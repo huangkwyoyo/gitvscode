@@ -24,3 +24,6 @@ llm_config.json
 .agents/skills/
 .claude/
 
+# 本地代码评审报告（不推送）
+**/CODE_REVIEW.md
+
