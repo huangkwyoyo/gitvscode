@@ -33,7 +33,7 @@ def _detect_frequency(dates: pd.Series) -> str:
 
     start = pd.Timestamp(dates.iloc[0])
     end = pd.Timestamp(dates.iloc[-1])
-    years = (end - start).days / 365.25
+    years = (end - start).days / 365
     if years <= 0:
         return "daily"
 

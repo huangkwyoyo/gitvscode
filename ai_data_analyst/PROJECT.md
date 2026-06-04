@@ -571,7 +571,7 @@ frontend/
 | MAX_UPLOAD_BYTES | MAX_UPLOAD_BYTES | 50MB | 上传文件大小限制 |
 | MAX_JOBS | MAX_JOBS | 50 | 内存中最大任务数 |
 | TRADING_DAYS | TRADING_DAYS | 252 | 年交易日数 |
-| RISK_FREE_RATE | RISK_FREE_RATE | 0.03 | 无风险利率（3%） |
+| RISK_FREE_RATE | RISK_FREE_RATE | 0.015 | 无风险利率（1.5%，中国一年期定存利率） |
 | ROLLING_WINDOW_3M | ROLLING_WINDOW_3M | 63 | 3个月滚动窗口交易日数 |
 | ROLLING_WINDOW_6M | ROLLING_WINDOW_6M | 126 | 6个月滚动窗口交易日数 |
 | ROLLING_WINDOW_1Y | ROLLING_WINDOW_1Y | 252 | 1年滚动窗口交易日数 |

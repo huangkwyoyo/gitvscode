@@ -124,7 +124,7 @@ class TestDrawdownDuration:
 
 class TestSharpeRatio:
     def test_positive_sharpe(self, sample_nav, sample_dates):
-        sharpe = sharpe_ratio(sample_nav, sample_dates, risk_free_rate=0.03, frequency="daily")
+        sharpe = sharpe_ratio(sample_nav, sample_dates, risk_free_rate=0.015, frequency="daily")
         assert sharpe is not None
         assert isinstance(sharpe, float)
 
@@ -136,7 +136,7 @@ class TestSharpeRatio:
 
 class TestSortinoRatio:
     def test_sortino_value(self, sample_nav, sample_dates):
-        sortino = sortino_ratio(sample_nav, sample_dates, risk_free_rate=0.03, frequency="daily")
+        sortino = sortino_ratio(sample_nav, sample_dates, risk_free_rate=0.015, frequency="daily")
         assert sortino is not None
 
     def test_no_downside_returns_none(self):
