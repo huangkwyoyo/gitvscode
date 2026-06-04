@@ -15,6 +15,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 
 from app.models import AnalysisState
+from app.services.logger import get_logger
 from app.settings import MAX_JOBS, MAX_UPLOAD_BYTES, OUTPUT_DIR, STATIC_DIR, UPLOAD_DIR
 from app.workflow import AnalysisWorkflow
 
@@ -101,6 +102,9 @@ async def analyze(
     await _save_upload(data_file, upload_path)
     brief_text = await _read_brief(brief_file)
     goal = "\n\n".join(part for part in [analysis_goal.strip(), brief_text.strip()] if part)
+
+    logger = get_logger("app.api")
+    logger.info("收到分析请求: file=%s, type=%s", data_file.filename, analysis_type)
 
     state = AnalysisState(
         job_id=job_id,

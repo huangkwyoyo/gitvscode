@@ -9,6 +9,9 @@ from app.services.insights import generate_insights
 from app.services.loader import load_data
 from app.services.reporting import generate_report
 from app.services.visualization import build_chart_specs
+from app.services.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 WorkflowNode = Callable[[AnalysisState], AnalysisState]
@@ -46,6 +49,7 @@ class AnalysisWorkflow:
     def run(self, state: AnalysisState) -> AnalysisState:
         failed_nodes: set[str] = set()
         for node_name, node in self.nodes:
+            logger.info("执行节点: %s", node_name)
             required = self.REQUIREMENTS[node_name]
             missing = [key for key in required if getattr(state, key) is None and not getattr(state, key, {})]
             # 检查上游依赖节点是否失败
@@ -59,6 +63,7 @@ class AnalysisWorkflow:
                 continue
             try:
                 state = node(state)
+                logger.info("节点完成: %s", node_name)
             except Exception as exc:
                 state.errors.append(f"{node_name}: {exc}")
                 failed_nodes.add(node_name)
