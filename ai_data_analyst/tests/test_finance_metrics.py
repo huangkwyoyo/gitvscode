@@ -224,8 +224,12 @@ class TestInsufficientDataSkipsAnnualization:
         """8 个月度数据点不应使用日频年化乘数 252。"""
         dates = pd.date_range("2023-01-01", periods=8, freq="MS")
         nav = pd.Series([1.0, 1.01, 1.02, 1.03, 1.04, 1.05, 1.06, 1.07], index=dates)
-        df = pd.DataFrame({"date": dates, "nav": nav})
+        bench = pd.Series([1.0, 1.005, 1.01, 1.015, 1.02, 1.025, 1.03, 1.035], index=dates)
+        df = pd.DataFrame({"date": dates, "nav": nav, "bench": bench})
         from app.services.finance_metrics import compute_finance_metrics
-        result = compute_finance_metrics(df, "date", ["nav"])
+        result = compute_finance_metrics(df, "date", ["nav"], benchmark_col="bench")
         assert result["nav"]["annualized_return"] is None
         assert result["nav"]["sharpe_ratio"] is None
+        # benchmark 相关指标在数据不足时也应返回 None
+        assert result["nav"]["excess_return"] is None
+        assert result["nav"]["information_ratio"] is None

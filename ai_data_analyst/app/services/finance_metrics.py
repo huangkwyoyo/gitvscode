@@ -418,17 +418,21 @@ def compute_finance_metrics(
         }
 
         if benchmark_col and benchmark_col in df.columns:
-            try:
-                bench_nav = df.set_index(date_col)[benchmark_col].dropna()
-                excess = excess_return(nav, bench_nav, dates, frequency)
-                metrics["excess_return"] = safe_float(excess) if excess is not None else None
-                metrics["benchmark_field"] = benchmark_col
+            if frequency != "insufficient":
+                try:
+                    bench_nav = df.set_index(date_col)[benchmark_col].dropna()
+                    excess = excess_return(nav, bench_nav, dates, frequency)
+                    metrics["excess_return"] = safe_float(excess) if excess is not None else None
+                    metrics["benchmark_field"] = benchmark_col
 
-                info_ratio = information_ratio(nav, bench_nav, dates, frequency)
-                metrics["information_ratio"] = safe_float(info_ratio) if info_ratio is not None else None
-            except Exception as bench_exc:
-                if errors is not None:
-                    errors.append(f"基准对比 {col}: {bench_exc}")
+                    info_ratio = information_ratio(nav, bench_nav, dates, frequency)
+                    metrics["information_ratio"] = safe_float(info_ratio) if info_ratio is not None else None
+                except Exception as bench_exc:
+                    if errors is not None:
+                        errors.append(f"基准对比 {col}: {bench_exc}")
+            else:
+                metrics["excess_return"] = None
+                metrics["information_ratio"] = None
 
         calmar = None
         if ann_ret is not None and max_dd != 0 and abs(max_dd) > 1e-10:
