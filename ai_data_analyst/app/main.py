@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import shutil
+import threading
 import uuid
 from collections import OrderedDict
 from pathlib import Path
@@ -36,6 +38,7 @@ app.add_middleware(UploadSizeMiddleware)
 
 workflow = AnalysisWorkflow()
 JOBS: OrderedDict[str, AnalysisState] = OrderedDict()
+_JOBS_LOCK = threading.Lock()
 
 
 def _evict_old_jobs() -> None:
@@ -107,30 +110,33 @@ async def analyze(
         upload_path=upload_path,
         output_dir=job_output_dir,
     )
-    state = workflow.run(state)
-    _evict_old_jobs()
-    JOBS[job_id] = state
+    state = await asyncio.to_thread(workflow.run, state)
+    with _JOBS_LOCK:
+        _evict_old_jobs()
+        JOBS[job_id] = state
     return state.public_payload()
 
 
 @app.get("/api/jobs")
 def list_jobs():
-    return [
-        {
-            "job_id": state.job_id,
-            "filename": state.original_filename,
-            "rows": state.schema.get("rows"),
-            "columns": state.schema.get("columns"),
-            "errors": state.errors,
-            "report_url": f"/api/report/{state.job_id}" if state.report_path else None,
-        }
-        for state in JOBS.values()
-    ]
+    with _JOBS_LOCK:
+        return [
+            {
+                "job_id": state.job_id,
+                "filename": state.original_filename,
+                "rows": state.schema.get("rows"),
+                "columns": state.schema.get("columns"),
+                "errors": state.errors,
+                "report_url": f"/api/report/{state.job_id}" if state.report_path else None,
+            }
+            for state in JOBS.values()
+        ]
 
 
 @app.get("/api/jobs/{job_id}")
 def get_job(job_id: str):
-    state = JOBS.get(job_id)
+    with _JOBS_LOCK:
+        state = JOBS.get(job_id)
     if not state:
         raise HTTPException(status_code=404, detail="任务不存在或服务已重启")
     return state.public_payload()
@@ -138,7 +144,8 @@ def get_job(job_id: str):
 
 @app.get("/api/report/{job_id}")
 def get_report(job_id: str):
-    state = JOBS.get(job_id)
+    with _JOBS_LOCK:
+        state = JOBS.get(job_id)
     if not state or not state.report_path or not state.report_path.exists():
         report_path = OUTPUT_DIR / job_id / "analysis_report.html"
         if not report_path.exists():
