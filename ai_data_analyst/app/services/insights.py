@@ -110,7 +110,8 @@ def _llm_insights(state: AnalysisState, base_insights: list[str]) -> list[str]:
             temperature=0.2,
         )
         text = response.choices[0].message.content or ""
-        llm_lines = [line.strip(" -0123456789.、") for line in text.splitlines() if line.strip()]
+        # 注意：strip() 参数中 - 在字符中间会形成 ASCII 范围，必须放在开头或末尾
+        llm_lines = [line.strip(" 0123456789.、-") for line in text.splitlines() if line.strip()]
         return llm_lines[:8] or base_insights
     except Exception as exc:
         base_insights.append(f"LLM 洞察调用失败，已保留本地规则洞察：{exc}")
