@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import json
-
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from app.models import AnalysisState
@@ -17,7 +15,6 @@ def generate_report(state: AnalysisState) -> AnalysisState:
     html = template.render(
         title=f"{state.original_filename} 分析报告",
         state=state.public_payload(),
-        state_json=json.dumps(state.public_payload(), ensure_ascii=False),
     )
     report_path = state.output_dir / "analysis_report.html"
     report_path.write_text(html, encoding="utf-8")

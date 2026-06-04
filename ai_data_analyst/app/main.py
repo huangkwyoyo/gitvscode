@@ -121,6 +121,13 @@ async def analyze(
     return state.public_payload()
 
 
+@app.get("/api/health")
+def health():
+    """健康检查端点，返回服务状态。"""
+    with _JOBS_LOCK:
+        return {"status": "ok", "jobs_count": len(JOBS)}
+
+
 @app.get("/api/jobs")
 def list_jobs():
     with _JOBS_LOCK:
