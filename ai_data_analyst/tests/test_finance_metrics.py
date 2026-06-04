@@ -169,7 +169,12 @@ class TestDetectFrequency:
 
     def test_few_data_points(self):
         dates = pd.Series(pd.date_range("2023-01-01", periods=5, freq="B"))
-        assert _detect_frequency(dates) == "daily"  # 数据少时默认日频
+        assert _detect_frequency(dates) == "insufficient"  # 数据不足时返回 insufficient
+
+    def test_insufficient_data_points(self):
+        """测试数据不足 10 个点时返回 'insufficient' 而非武断默认日频。"""
+        dates = pd.Series(pd.date_range("2023-01-01", periods=5, freq="MS"))
+        assert _detect_frequency(dates) == "insufficient"
 
 
 class TestExcessReturn:
@@ -210,3 +215,17 @@ class TestRollingReturns:
         dates = pd.Series(pd.date_range("2023-01-01", periods=5, freq="B"))
         result = rolling_returns(nav, dates, frequency="daily")
         assert result == {}  # 数据太少无滚动收益
+
+
+class TestInsufficientDataSkipsAnnualization:
+    """数据不足时跳过所有年化计算，避免失真。"""
+
+    def test_short_series_skips_annualized_return(self):
+        """8 个月度数据点不应使用日频年化乘数 252。"""
+        dates = pd.date_range("2023-01-01", periods=8, freq="MS")
+        nav = pd.Series([1.0, 1.01, 1.02, 1.03, 1.04, 1.05, 1.06, 1.07], index=dates)
+        df = pd.DataFrame({"date": dates, "nav": nav})
+        from app.services.finance_metrics import compute_finance_metrics
+        result = compute_finance_metrics(df, "date", ["nav"])
+        assert result["nav"]["annualized_return"] is None
+        assert result["nav"]["sharpe_ratio"] is None

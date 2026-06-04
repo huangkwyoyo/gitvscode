@@ -19,6 +19,8 @@ FREQUENCY_MULTIPLIER = {
     "daily": 252,
     "weekly": 52,
     "monthly": 12,
+    "quarterly": 4,
+    "insufficient": 0,  # 数据不足时不进行年化计算
 }
 
 
@@ -29,7 +31,7 @@ def _detect_frequency(dates: pd.Series) -> str:
     通过计算平均每年的有效数据点数来区分日频/周频/月频。
     """
     if len(dates) < 10:
-        return "daily"  # 数据太少时默认日频
+        return "insufficient"  # 数据不足，保守处理以避免年化失真
 
     start = pd.Timestamp(dates.iloc[0])
     end = pd.Timestamp(dates.iloc[-1])
@@ -53,10 +55,7 @@ def _detect_frequency(dates: pd.Series) -> str:
 
 def _get_trading_days(frequency: str) -> int:
     """根据频率返回对应的年化交易日乘数。"""
-    if frequency in FREQUENCY_MULTIPLIER:
-        return FREQUENCY_MULTIPLIER[frequency]
-    # 季度频等特殊频率使用 4 次/年
-    return 4
+    return FREQUENCY_MULTIPLIER.get(frequency, 4)
 
 
 def detect_time_series(df: pd.DataFrame) -> tuple[str | None, list[str], str | None]:
@@ -374,15 +373,24 @@ def compute_finance_metrics(
         frequency = _detect_frequency(dates)
 
         returns = calculate_returns(nav)
-        ann_ret = annualized_return(nav, dates, frequency)
         cum_ret = cumulative_return(nav)
-        ann_vol = annualized_volatility(nav, frequency)
         max_dd, dd_series = max_drawdown(nav)
         dd_info = drawdown_duration(nav, dd_series)
-        sharpe = sharpe_ratio(nav, dates, frequency=frequency)
-        sortino = sortino_ratio(nav, dates, frequency=frequency)
-        rolling = rolling_returns(nav, dates, frequency)
         win_stats = win_rate_stats(nav, frequency)
+
+        if frequency == "insufficient":
+            # 数据不足时不计算年化指标，避免失真
+            ann_ret = None
+            ann_vol = None
+            sharpe = None
+            sortino = None
+            rolling = {}
+        else:
+            ann_ret = annualized_return(nav, dates, frequency)
+            ann_vol = annualized_volatility(nav, frequency)
+            sharpe = sharpe_ratio(nav, dates, frequency=frequency)
+            sortino = sortino_ratio(nav, dates, frequency=frequency)
+            rolling = rolling_returns(nav, dates, frequency)
 
         metrics = {
             "field": col,
