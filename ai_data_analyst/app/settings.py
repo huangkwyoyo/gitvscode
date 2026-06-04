@@ -30,3 +30,6 @@ ROLLING_WINDOWS = {
 CHART_DEFAULT_WIDTH = int(os.getenv("CHART_WIDTH", 520))
 CHART_DEFAULT_HEIGHT = int(os.getenv("CHART_HEIGHT", 260))
 
+# 磁盘清理配置
+JOB_RETENTION_HOURS = int(os.getenv("JOB_RETENTION_HOURS", 24))  # 作业文件保留时间
+

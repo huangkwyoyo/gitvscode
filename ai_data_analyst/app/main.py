@@ -47,6 +47,19 @@ def _evict_old_jobs() -> None:
         JOBS.popitem(last=False)
 
 
+def _cleanup_old_files() -> None:
+    """清理超出保留时间的上传和输出文件。"""
+    import time
+    from app.settings import JOB_RETENTION_HOURS
+    cutoff = time.time() - JOB_RETENTION_HOURS * 3600
+    for dir_path in [UPLOAD_DIR, OUTPUT_DIR]:
+        if not dir_path.exists():
+            continue
+        for job_dir in dir_path.iterdir():
+            if job_dir.is_dir() and job_dir.stat().st_mtime < cutoff:
+                shutil.rmtree(job_dir, ignore_errors=True)
+
+
 def _safe_name(filename: str) -> str:
     name = Path(filename).name.replace(" ", "_")
     # strip path-traversal sequences like "../" or "..\"
@@ -57,12 +70,16 @@ def _safe_name(filename: str) -> str:
 
 
 async def _save_upload(file: UploadFile, target: Path) -> None:
+    """流式保存上传文件，边写边检查大小，避免先写完整文件再校验的TOCTOU窗口。"""
+    written = 0
     with target.open("wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
-    saved = target.stat().st_size
-    if saved > MAX_UPLOAD_BYTES:
-        target.unlink()
-        raise HTTPException(status_code=413, detail="上传文件超过 50MB 限制")
+        while chunk := await file.read(1024 * 1024):  # 每次读 1MB
+            written += len(chunk)
+            if written > MAX_UPLOAD_BYTES:
+                buffer.close()
+                target.unlink()
+                raise HTTPException(status_code=413, detail="上传文件超过 50MB 限制")
+            buffer.write(chunk)
 
 
 async def _read_brief(brief_file: UploadFile | None) -> str:
@@ -118,6 +135,7 @@ async def analyze(
     with _JOBS_LOCK:
         _evict_old_jobs()
         JOBS[job_id] = state
+    _cleanup_old_files()
     return state.public_payload()
 
 
