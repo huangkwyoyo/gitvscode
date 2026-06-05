@@ -62,6 +62,7 @@ tests/
 - `docs/data_dictionary.md`
 - `docs/metric_dictionary.md`
 - `docs/data_model.md`
+- `docs/mock_data_generation_standard.md`
 - `docs/system_architecture.md`
 - `docs/project_status.md`
 

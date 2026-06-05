@@ -27,7 +27,6 @@ CREATE TABLE IF NOT EXISTS `ods`.`ods_user_profile_daily` (
   `customer_id` TEXT NULL COMMENT '客户编号?客户编号；由源表达式进行空值处理、截取或单位换算后形成',
   `customer_name` TEXT NULL COMMENT '客户名称?客户名称',
   `data_source_name` TEXT NULL COMMENT '数据来源?数据来源',
-  `data_time` DATETIME NULL COMMENT '数据日期?数据日期',
   `ict_income_class_amount` DECIMAL(18,2) NULL COMMENT 'ICT收入分类?ICT收入分类',
   `inc_fee` DECIMAL(18,2) NULL COMMENT '本月实际应收(总账)?本月实际应收(总账)；由源表达式进行空值处理、截取或单位换算后形成',
   `is_digital_channel_line` TINYINT(1) NULL COMMENT '电渠条线标识?电渠条线标识',
@@ -50,9 +49,10 @@ CREATE TABLE IF NOT EXISTS `ods`.`ods_user_profile_daily` (
   `state_status` TEXT NULL COMMENT '用户状态?用户状态',
   `tax_fee` DECIMAL(18,2) NULL COMMENT '税金?税金',
   `tax_rate` DECIMAL(9,6) NULL COMMENT '税率?税率',
-  `user_id` BIGINT NULL COMMENT '出帐用户数?出帐用户数',
+  `user_id` VARCHAR(32) NULL COMMENT '用户ID?用户唯一标识',
   `zhetno_code` TEXT NULL COMMENT '合同编码?合同编码',
-  `zictno_code` TEXT NULL COMMENT '项目编码?项目编码'
+  `zictno_code` TEXT NULL COMMENT '项目编码?项目编码',
+  `data_time` DATE NULL COMMENT '??????'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci ROW_FORMAT=DYNAMIC COMMENT='用户画像日快照表?ODS原始接入表?????账户收入域????按来源业务视图的明细粒度保留';
 
 CREATE TABLE IF NOT EXISTS `ods`.`ods_user_profile_monthly` (
@@ -74,7 +74,6 @@ CREATE TABLE IF NOT EXISTS `ods`.`ods_user_profile_monthly` (
   `customer_manager_department_level2_name` TEXT NULL COMMENT '客户经理二级部门?客户经理二级部门',
   `customer_manager_department_name` TEXT NULL COMMENT '客户经理部门?客户经理部门',
   `customer_name` TEXT NULL COMMENT '客户名称?客户名称',
-  `data_time` DATETIME NULL COMMENT '数据日期?数据日期',
   `exp_date` DATE NULL COMMENT '免催停失效时期?免催停失效时期',
   `first_lease_plan_id` TEXT NULL COMMENT '入网时租机资费?入网时租机资费',
   `get_fee` DECIMAL(18,2) NULL COMMENT '有效欠费（元）?有效欠费（元）；由源表达式进行空值处理、截取或单位换算后形成',
@@ -115,7 +114,8 @@ CREATE TABLE IF NOT EXISTS `ods`.`ods_user_profile_monthly` (
   `user_date_status` TEXT NULL COMMENT '当前状态时间?当前状态时间',
   `user_id` TEXT NULL COMMENT '用户编号?用户编号',
   `user_id_status` TEXT NULL COMMENT '用户状态?用户状态',
-  `vir_grp_customer_name` TEXT NULL COMMENT '圈集团客户名称?圈集团客户名称'
+  `vir_grp_customer_name` TEXT NULL COMMENT '圈集团客户名称?圈集团客户名称',
+  `data_time` DATE NULL COMMENT '??????'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci ROW_FORMAT=DYNAMIC COMMENT='用户画像月快照表?ODS原始接入表?????账务欠费域????按来源业务视图的明细粒度保留';
 
 CREATE TABLE IF NOT EXISTS `ods`.`ods_arrears_billing_monthly` (
@@ -133,7 +133,6 @@ CREATE TABLE IF NOT EXISTS `ods`.`ods_arrears_billing_monthly` (
   `customer_manager_department_level2_name` TEXT NULL COMMENT '客户经理二级部门?客户经理二级部门',
   `customer_manager_department_name` TEXT NULL COMMENT '客户经理部门?客户经理部门',
   `customer_name` TEXT NULL COMMENT '客户名称?客户名称',
-  `data_time` DATETIME NULL COMMENT '数据日期?数据日期',
   `exp_date` DATE NULL COMMENT '免催停失效时期?免催停失效时期',
   `first_lease_plan_id` TEXT NULL COMMENT '入网时租机资费?入网时租机资费',
   `initial_primary_price_plan_id` TEXT NULL COMMENT '入网时主资费?入网时主资费',
@@ -175,7 +174,8 @@ CREATE TABLE IF NOT EXISTS `ods`.`ods_arrears_billing_monthly` (
   `valid_outstanding_fee` DECIMAL(18,2) NULL COMMENT '有效欠费（元）?有效欠费（元）；由源表达式进行空值处理、截取或单位换算后形成',
   `vir_grp_customer_name` TEXT NULL COMMENT '圈集团客户名称?圈集团客户名称',
   `zhetno_code` TEXT NULL COMMENT '合同编码?合同编码',
-  `zictno_code` TEXT NULL COMMENT '项目编码?项目编码'
+  `zictno_code` TEXT NULL COMMENT '项目编码?项目编码',
+  `data_time` DATE NULL COMMENT '??????'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci ROW_FORMAT=DYNAMIC COMMENT='用户账期欠费月表?ODS原始接入表?????账务欠费域????按来源业务视图的明细粒度保留';
 
 CREATE TABLE IF NOT EXISTS `ods`.`ods_recharge_daily` (
@@ -198,7 +198,6 @@ CREATE TABLE IF NOT EXISTS `ods`.`ods_recharge_daily` (
   `credit_value_name` TEXT NULL COMMENT '信用度值?信用度值',
   `customer_id` TEXT NULL COMMENT '客户编码?客户编码',
   `customer_name` TEXT NULL COMMENT '客户姓名?客户姓名',
-  `data_time` DATETIME NULL COMMENT '数据日期?数据日期',
   `final_credit_value_name` TEXT NULL COMMENT '最总信用度值?最总信用度值',
   `hb_user_credit_value_name` TEXT NULL COMMENT '计费信用度?计费信用度',
   `is_gj_roam_score` TINYINT(1) NULL COMMENT '国际漫游得分?国际漫游得分',
@@ -227,7 +226,8 @@ CREATE TABLE IF NOT EXISTS `ods`.`ods_recharge_daily` (
   `up_star_level_name` TEXT NULL COMMENT '评级后星级?评级后星级',
   `up_sxxs_idx_name` TEXT NULL COMMENT '评级后授信系数?评级后授信系数',
   `user_id` BIGINT NULL COMMENT '用户数?用户数',
-  `vip_card_type` TEXT NULL COMMENT 'VIP标示?VIP标示；由源表达式进行空值处理、截取或单位换算后形成'
+  `vip_card_type` TEXT NULL COMMENT 'VIP标示?VIP标示；由源表达式进行空值处理、截取或单位换算后形成',
+  `data_time` DATE NULL COMMENT '??????'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci ROW_FORMAT=DYNAMIC COMMENT='用户充值日明细表?ODS原始接入表?????信用风险域????按来源业务视图的明细粒度保留';
 
 CREATE TABLE IF NOT EXISTS `ods`.`ods_arrears_daily_part1` (
@@ -424,7 +424,6 @@ CREATE TABLE IF NOT EXISTS `ods`.`ods_arrears_daily_part1` (
   `daily_uplink_usage_mb` DECIMAL(18,3) NULL COMMENT '>本日上网总上行流量?>本日上网总上行流量；由源表达式进行空值处理、截取或单位换算后形成',
   `daily_voice_call_count` BIGINT NULL COMMENT '本日通话次数?本日通话次数；由源表达式进行空值处理、截取或单位换算后形成',
   `daily_voice_call_usage_min` DECIMAL(18,3) NULL COMMENT '本日通话时长?本日通话时长；由源表达式进行空值处理、截取或单位换算后形成',
-  `data_time` DATETIME NULL COMMENT '数据日期?数据日期',
   `decimal_count` BIGINT NULL COMMENT '性别?性别；由源表达式进行空值处理、截取或单位换算后形成',
   `delivery_method_code` TEXT NULL COMMENT '订单配送方式?订单配送方式',
   `delivery_time` DATETIME NULL COMMENT '配送时间?配送时间；由源表达式进行空值处理、截取或单位换算后形成',
@@ -482,6 +481,7 @@ CREATE TABLE IF NOT EXISTS `ods`.`ods_arrears_daily_part1` (
   `fc_zxtc_name` TEXT NULL COMMENT '预估-专线摊出?预估-专线摊出；由源表达式进行空值处理、截取或单位换算后形成',
   `fc_zxtr_name` TEXT NULL COMMENT '预估-专线摊入?预估-专线摊入；由源表达式进行空值处理、截取或单位换算后形成',
   `first_active_date` DATE NULL COMMENT '日激活用户数?日激活用户数；由源表达式进行空值处理、截取或单位换算后形成',
+  `data_time` DATE NULL COMMENT '??????',
   PRIMARY KEY (`synthetic_row_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci ROW_FORMAT=DYNAMIC COMMENT='用户欠费日明细表?ODS原始接入表?????客户用户域????按来源业务视图的明细粒度保留';
 
@@ -1123,7 +1123,6 @@ CREATE TABLE IF NOT EXISTS `ods`.`ods_combo_product_monthly_part1` (
   `customer_user_amount` DECIMAL(18,2) NULL COMMENT '本月缴费金额?本月缴费金额；由源表达式进行空值处理、截取或单位换算后形成',
   `customername_name` TEXT NULL COMMENT '入网人姓名?入网人姓名',
   `data_fee` DECIMAL(18,2) NULL COMMENT '>本月数据费（元）?>本月数据费（元）；由源表达式进行空值处理、截取或单位换算后形成',
-  `data_time` DATETIME NULL COMMENT '数据日期?数据日期',
   `decimal_count` BIGINT NULL COMMENT '性别?性别；由源表达式进行空值处理、截取或单位换算后形成',
   `delivery_method_code` TEXT NULL COMMENT '订单配送方式?订单配送方式',
   `delivery_time` DATETIME NULL COMMENT '配送时间?配送时间；由源表达式进行空值处理、截取或单位换算后形成',
@@ -1192,6 +1191,7 @@ CREATE TABLE IF NOT EXISTS `ods`.`ods_combo_product_monthly_part1` (
   `g3_dura_duration` BIGINT NULL COMMENT '本月3G上网时长?本月3G上网时长；由源表达式进行空值处理、截取或单位换算后形成',
   `g3_flux_usage_mb` DECIMAL(18,3) NULL COMMENT '本月3G上网流量?本月3G上网流量；由源表达式进行空值处理、截取或单位换算后形成',
   `g3_to_g4_name` TEXT NULL COMMENT '3转4?3转4；由源表达式进行空值处理、截取或单位换算后形成',
+  `data_time` DATE NULL COMMENT '??????',
   PRIMARY KEY (`synthetic_row_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci ROW_FORMAT=DYNAMIC COMMENT='组合产品月快照表?ODS原始接入表?????客户用户域????按来源业务视图的明细粒度保留';
 
@@ -2017,7 +2017,6 @@ CREATE TABLE IF NOT EXISTS `ods`.`ods_complaint_daily` (
   `customer_card_type` TEXT NULL COMMENT '入网人证件类型?入网人证件类型',
   `customer_phone_id` TEXT NULL COMMENT '入网人号码?入网人号码',
   `customername_name` TEXT NULL COMMENT '入网人姓名?入网人姓名',
-  `data_time` DATETIME NULL COMMENT '数据账期?数据账期',
   `delivery_method_code` TEXT NULL COMMENT '订单配送方式?订单配送方式',
   `delivery_time` DATETIME NULL COMMENT '配送时间?配送时间；由源表达式进行空值处理、截取或单位换算后形成',
   `digital_order_code` TEXT NULL COMMENT '订单编码?订单编码',
@@ -2038,7 +2037,8 @@ CREATE TABLE IF NOT EXISTS `ods`.`ods_complaint_daily` (
   `recommend_user_name` TEXT NULL COMMENT '订单推荐人?订单推荐人',
   `sales_product_id` TEXT NULL COMMENT '销售品ID?销售品ID',
   `sales_product_name` TEXT NULL COMMENT '销售品名称?销售品名称',
-  `user_id` TEXT NULL COMMENT '用户编码?用户编码'
+  `user_id` TEXT NULL COMMENT '用户编码?用户编码',
+  `data_time` DATE NULL COMMENT '??????'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci ROW_FORMAT=DYNAMIC COMMENT='客户投诉日事件表?ODS原始接入表?????电子渠道订单域????按来源业务视图的明细粒度保留';
 
 CREATE TABLE IF NOT EXISTS `ods`.`ods_real_name_compliance_daily` (
@@ -2048,7 +2048,6 @@ CREATE TABLE IF NOT EXISTS `ods`.`ods_real_name_compliance_daily` (
   `customer_card_type` TEXT NULL COMMENT '入网人证件类型?入网人证件类型',
   `customer_phone_id` TEXT NULL COMMENT '入网人号码?入网人号码',
   `customername_name` TEXT NULL COMMENT '入网人姓名?入网人姓名',
-  `data_time` DATETIME NULL COMMENT '数据账期?数据账期',
   `delivery_method_code` TEXT NULL COMMENT '订单配送方式?订单配送方式',
   `delivery_time` DATETIME NULL COMMENT '配送时间?配送时间；由源表达式进行空值处理、截取或单位换算后形成',
   `digital_order_code` TEXT NULL COMMENT '订单编码?订单编码',
@@ -2070,7 +2069,8 @@ CREATE TABLE IF NOT EXISTS `ods`.`ods_real_name_compliance_daily` (
   `recommend_user_name` TEXT NULL COMMENT '订单推荐人?订单推荐人',
   `sales_product_id` TEXT NULL COMMENT '销售品ID?销售品ID',
   `sales_product_name` TEXT NULL COMMENT '销售品名称?销售品名称',
-  `user_id` TEXT NULL COMMENT '用户编码?用户编码'
+  `user_id` TEXT NULL COMMENT '用户编码?用户编码',
+  `data_time` DATE NULL COMMENT '??????'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci ROW_FORMAT=DYNAMIC COMMENT='用户实名合规日表?ODS原始接入表?????电子渠道订单域????按来源业务视图的明细粒度保留';
 
 CREATE TABLE IF NOT EXISTS `ods`.`ods_user_price_subscription_daily` (
@@ -2079,7 +2079,6 @@ CREATE TABLE IF NOT EXISTS `ods`.`ods_user_price_subscription_daily` (
   `application_level3_type` TEXT NULL COMMENT '应用三级?应用三级',
   `application_usage_mb` DECIMAL(18,3) NULL COMMENT '流量?流量；由源表达式进行空值处理、截取或单位换算后形成',
   `application_visit_type` TEXT NULL COMMENT '分类?分类',
-  `data_time` DATETIME NULL COMMENT '数据日期?数据日期',
   `is_ww_photo` TINYINT(1) NULL COMMENT '维挽拍照标识?维挽拍照标识',
   `keyword_name` TEXT NULL COMMENT '搜索关键字?搜索关键字',
   `month_to_date_application_usage_mb` DECIMAL(18,3) NULL COMMENT '累计到本日流量?累计到本日流量；由源表达式进行空值处理、截取或单位换算后形成',
@@ -2092,7 +2091,8 @@ CREATE TABLE IF NOT EXISTS `ods`.`ods_user_price_subscription_daily` (
   `name_level6_type` TEXT NULL COMMENT '六级分类?六级分类',
   `page_view_count` BIGINT NULL COMMENT '点击次数?点击次数',
   `phone_id` TEXT NULL COMMENT '服务号码?服务号码',
-  `user_id` TEXT NULL COMMENT '用户ID?用户ID'
+  `user_id` TEXT NULL COMMENT '用户ID?用户ID',
+  `data_time` DATE NULL COMMENT '??????'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci ROW_FORMAT=DYNAMIC COMMENT='用户资费订购日表?ODS原始接入表?????网络应用使用域????按来源业务视图的明细粒度保留';
 
 CREATE TABLE IF NOT EXISTS `ods`.`ods_user_price_subscription_monthly` (
@@ -2131,7 +2131,6 @@ CREATE TABLE IF NOT EXISTS `ods`.`ods_user_price_subscription_monthly` (
   `customer_order_id` TEXT NULL COMMENT '订单数?订单数',
   `customer_order_status` TEXT NULL COMMENT '客户订单状态?客户订单状态',
   `customer_order_type` TEXT NULL COMMENT '客户订单类型?客户订单类型',
-  `data_time` DATETIME NULL COMMENT '账期?账期',
   `dev_staff_name` TEXT NULL COMMENT '关联代理商?关联代理商',
   `grp_order_number_id` TEXT NULL COMMENT '集团订单号?集团订单号',
   `ict_items_number_name` TEXT NULL COMMENT '集团ICT项目号?集团ICT项目号',
@@ -2160,7 +2159,8 @@ CREATE TABLE IF NOT EXISTS `ods`.`ods_user_price_subscription_monthly` (
   `service_offer_id_type` TEXT NULL COMMENT '业务处理类型?业务处理类型',
   `service_offer_nameaaa_name` TEXT NULL COMMENT '服务提供名称?服务提供名称',
   `service_product_inst_id` TEXT NULL COMMENT '产品实例ID（用户ID）?产品实例ID（用户ID）',
-  `start_date` DATE NULL COMMENT '起租操作日期?起租操作日期；由源表达式进行空值处理、截取或单位换算后形成'
+  `start_date` DATE NULL COMMENT '起租操作日期?起租操作日期；由源表达式进行空值处理、截取或单位换算后形成',
+  `data_time` DATE NULL COMMENT '??????'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci ROW_FORMAT=DYNAMIC COMMENT='用户资费订购月表?ODS原始接入表?????订单渠道域????按来源业务视图的明细粒度保留';
 
 CREATE TABLE IF NOT EXISTS `ods`.`ods_terminal_sales_daily` (
@@ -2173,7 +2173,6 @@ CREATE TABLE IF NOT EXISTS `ods`.`ods_terminal_sales_daily` (
   `activation_time` DATETIME NULL COMMENT '入网时间?入网时间',
   `base_duration` BIGINT NULL COMMENT '本月累计基本计费时长?本月累计基本计费时长',
   `customer_name` TEXT NULL COMMENT '客户名称?客户名称',
-  `data_time` DATETIME NULL COMMENT '数据日期?数据日期',
   `first_active_date_time` DATETIME NULL COMMENT '首次激活时间?首次激活时间',
   `is_active_subscriber` TINYINT(1) NULL COMMENT '标志_当日用户在网?标志_当日用户在网',
   `is_active_usage` TINYINT(1) NULL COMMENT '本月是否活跃?本月是否活跃',
@@ -2210,14 +2209,14 @@ CREATE TABLE IF NOT EXISTS `ods`.`ods_terminal_sales_daily` (
   `termination_time` DATETIME NULL COMMENT '离网时间?离网时间',
   `user_date_status` TEXT NULL COMMENT '用户状态时间?用户状态时间',
   `user_id` BIGINT NULL COMMENT '充值次数?充值次数',
-  `user_id_status` TEXT NULL COMMENT '用户状态?用户状态'
+  `user_id_status` TEXT NULL COMMENT '用户状态?用户状态',
+  `data_time` DATE NULL COMMENT '??????'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci ROW_FORMAT=DYNAMIC COMMENT='终端销售日表?ODS原始接入表?????支付充值域????按来源业务视图的明细粒度保留';
 
 CREATE TABLE IF NOT EXISTS `ods`.`ods_terminal_presale_daily` (
   `after_balance_amount` DECIMAL(18,2) NULL COMMENT '交易后余额?交易后余额',
   `before_balance_amount` DECIMAL(18,2) NULL COMMENT '交易前余额?交易前余额',
   `brand_name` TEXT NULL COMMENT '商户 品牌?商户 品牌',
-  `data_time` DATETIME NULL COMMENT '数据日期?数据日期',
   `invoices_org_name` TEXT NULL COMMENT '交易出单机构?交易出单机构',
   `invoices_recharge_amount` DECIMAL(18,2) NULL COMMENT '出单机构手续费金额?出单机构手续费金额',
   `out_transaction_type` TEXT NULL COMMENT '外部交易类型?外部交易类型',
@@ -2236,7 +2235,8 @@ CREATE TABLE IF NOT EXISTS `ods`.`ods_terminal_presale_daily` (
   `transaction_org_date` DATE NULL COMMENT '受理机构交易日期?受理机构交易日期',
   `transaction_org_name` TEXT NULL COMMENT '交易受理机构?交易受理机构',
   `transaction_status` TEXT NULL COMMENT '交易流水类型?交易流水类型',
-  `transaction_type` TEXT NULL COMMENT '交易类型?交易类型'
+  `transaction_type` TEXT NULL COMMENT '交易类型?交易类型',
+  `data_time` DATE NULL COMMENT '??????'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci ROW_FORMAT=DYNAMIC COMMENT='终端预售日表?ODS原始接入表?????支付交易域????按来源业务视图的明细粒度保留';
 
 CREATE TABLE IF NOT EXISTS `ods`.`ods_account_income_monthly` (
@@ -2275,7 +2275,6 @@ CREATE TABLE IF NOT EXISTS `ods`.`ods_account_income_monthly` (
   `create_dt_date` DATE NULL COMMENT '资费创建日期?资费创建日期；由源表达式进行空值处理、截取或单位换算后形成',
   `customer_id` TEXT NULL COMMENT '客户编号?客户编号；由源表达式进行空值处理、截取或单位换算后形成',
   `customer_name` TEXT NULL COMMENT '客户名称?客户名称',
-  `data_time` DATETIME NULL COMMENT '数据日期?数据日期',
   `department_level2_id` TEXT NULL COMMENT '受理二级部门?受理二级部门',
   `department_level3_id` TEXT NULL COMMENT '受理三级部门?受理三级部门',
   `department_level4_id` TEXT NULL COMMENT '受理四级部门?受理四级部门',
@@ -2339,7 +2338,8 @@ CREATE TABLE IF NOT EXISTS `ods`.`ods_account_income_monthly` (
   `user_id` TEXT NULL COMMENT '用户编号?用户编号',
   `user_id_status` TEXT NULL COMMENT '用户状态?用户状态',
   `wp_coupon_id` TEXT NULL COMMENT '库存物品?库存物品',
-  `zf_card_change_id_type` TEXT NULL COMMENT '主转副类型?主转副类型'
+  `zf_card_change_id_type` TEXT NULL COMMENT '主转副类型?主转副类型',
+  `data_time` DATE NULL COMMENT '??????'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci ROW_FORMAT=DYNAMIC COMMENT='用户账目收入月表?ODS原始接入表?????产品订购域????按来源业务视图的明细粒度保留';
 
 CREATE TABLE IF NOT EXISTS `ods`.`ods_cart_order_daily` (
@@ -2376,7 +2376,6 @@ CREATE TABLE IF NOT EXISTS `ods`.`ods_cart_order_daily` (
   `create_dt_date` DATE NULL COMMENT '资费创建日期?资费创建日期；由源表达式进行空值处理、截取或单位换算后形成',
   `customer_id` TEXT NULL COMMENT '客户编号?客户编号；由源表达式进行空值处理、截取或单位换算后形成',
   `customer_name` TEXT NULL COMMENT '客户名称?客户名称',
-  `data_time` DATETIME NULL COMMENT '数据日期?数据日期',
   `device_model_id` TEXT NULL COMMENT '自注册终端机型?自注册终端机型',
   `discount_count` BIGINT NULL COMMENT '折扣数?折扣数',
   `discount_rate` DECIMAL(9,6) NULL COMMENT '折扣率?折扣率',
@@ -2433,7 +2432,8 @@ CREATE TABLE IF NOT EXISTS `ods`.`ods_cart_order_daily` (
   `user_develop_department_4_name` TEXT NULL COMMENT '发展四级部门?发展四级部门',
   `user_id` TEXT NULL COMMENT '用户编号?用户编号',
   `user_id_status` TEXT NULL COMMENT '用户状态?用户状态',
-  `zf_card_change_id_type` TEXT NULL COMMENT '主转副类型?主转副类型'
+  `zf_card_change_id_type` TEXT NULL COMMENT '主转副类型?主转副类型',
+  `data_time` DATE NULL COMMENT '??????'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci ROW_FORMAT=DYNAMIC COMMENT='购物车订单日表?ODS原始接入表?????产品订购域????按来源业务视图的明细粒度保留';
 
 CREATE TABLE IF NOT EXISTS `ods`.`ods_user_credit_monthly` (
@@ -2481,7 +2481,6 @@ CREATE TABLE IF NOT EXISTS `ods`.`ods_user_credit_monthly` (
   `create_dt_time` DATETIME NULL COMMENT '成员创建时间?成员创建时间；由源表达式进行空值处理、截取或单位换算后形成',
   `customer_id` TEXT NULL COMMENT '成员客户编码?成员客户编码',
   `customer_name` TEXT NULL COMMENT '成员客户名称?成员客户名称',
-  `data_time` DATETIME NULL COMMENT '数据日期?数据日期',
   `dt_status` TEXT NULL COMMENT '成员状态变更时间?成员状态变更时间；由源表达式进行空值处理、截取或单位换算后形成',
   `end_dt_time` DATETIME NULL COMMENT '成员失效时间?成员失效时间；由源表达式进行空值处理、截取或单位换算后形成',
   `is_active_subscriber` TINYINT(1) NULL COMMENT '子用户在网标识?子用户在网标识',
@@ -2517,7 +2516,8 @@ CREATE TABLE IF NOT EXISTS `ods`.`ods_user_credit_monthly` (
   `user_count` BIGINT NULL COMMENT '用户数?用户数',
   `user_id` TEXT NULL COMMENT '成员id?成员id',
   `user_id_status` TEXT NULL COMMENT '用户状态?用户状态',
-  `ypay_primary_price_plan_id` TEXT NULL COMMENT '子用户年付资费?子用户年付资费'
+  `ypay_primary_price_plan_id` TEXT NULL COMMENT '子用户年付资费?子用户年付资费',
+  `data_time` DATE NULL COMMENT '??????'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci ROW_FORMAT=DYNAMIC COMMENT='用户信用度月表?ODS原始接入表?????产品订购域????按来源业务视图的明细粒度保留';
 
 CREATE TABLE IF NOT EXISTS `ods`.`ods_bestpay_transaction_monthly` (
@@ -2527,7 +2527,6 @@ CREATE TABLE IF NOT EXISTS `ods`.`ods_bestpay_transaction_monthly` (
   `addval_yuan_avg_before_fee` DECIMAL(18,2) NULL COMMENT '迁转前3月的增值业务类账目项平均收入?迁转前3月的增值业务类账目项平均收入',
   `certificate_split_type` TEXT NULL COMMENT '证件类型?证件类型',
   `change_reason_name` TEXT NULL COMMENT '迁转原因?迁转原因',
-  `data_time` DATETIME NULL COMMENT '账期?账期',
   `fk_count` BIGINT NULL COMMENT '副卡数?副卡数',
   `highclub_yuan_avg_before_fee` DECIMAL(18,2) NULL COMMENT '迁转前3月的High会员类账目项平均收入?迁转前3月的High会员类账目项平均收入',
   `if_order_add_pkg_department_level2_name` TEXT NULL COMMENT '包办理2级部门?包办理2级部门',
@@ -2584,7 +2583,8 @@ CREATE TABLE IF NOT EXISTS `ods`.`ods_bestpay_transaction_monthly` (
   `val_before_amount` DECIMAL(18,2) NULL COMMENT '办理前3个月的融合摊分前平均收入（剔除后）?办理前3个月的融合摊分前平均收入（剔除后）',
   `val_before_ori_amount` DECIMAL(18,2) NULL COMMENT '办理前3个月的融合摊分前平均收入（剔除前）?办理前3个月的融合摊分前平均收入（剔除前）',
   `val_change_amount` DECIMAL(18,2) NULL COMMENT '迁转收入差异（迁转后-迁转前）?迁转收入差异（迁转后-迁转前）',
-  `val_change_direction_type` TEXT NULL COMMENT '迁转类型（高低平）?迁转类型（高低平）'
+  `val_change_direction_type` TEXT NULL COMMENT '迁转类型（高低平）?迁转类型（高低平）',
+  `data_time` DATE NULL COMMENT '??????'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci ROW_FORMAT=DYNAMIC COMMENT='翼支付交易明细月表?ODS原始接入表?????产品价值变更域????按来源业务视图的明细粒度保留';
 
 CREATE TABLE IF NOT EXISTS `ods`.`ods_settlement_allocation_daily` (
@@ -2594,7 +2594,6 @@ CREATE TABLE IF NOT EXISTS `ods`.`ods_settlement_allocation_daily` (
   `addval_yuan_avg_before_fee` DECIMAL(18,2) NULL COMMENT '迁转前3月的增值业务类账目项平均收入?迁转前3月的增值业务类账目项平均收入',
   `certificate_split_type` TEXT NULL COMMENT '证件类型?证件类型',
   `change_reason_name` TEXT NULL COMMENT '迁转原因?迁转原因',
-  `data_time` DATETIME NULL COMMENT '账期?账期',
   `fk_count` BIGINT NULL COMMENT '副卡数?副卡数',
   `highclub_yuan_avg_before_fee` DECIMAL(18,2) NULL COMMENT '迁转前3月的High会员类账目项平均收入?迁转前3月的High会员类账目项平均收入',
   `if_order_add_pkg_department_level2_name` TEXT NULL COMMENT '包办理2级部门?包办理2级部门',
@@ -2652,7 +2651,8 @@ CREATE TABLE IF NOT EXISTS `ods`.`ods_settlement_allocation_daily` (
   `val_before_amount` DECIMAL(18,2) NULL COMMENT '办理前3个月的融合摊分前平均收入（剔除后）?办理前3个月的融合摊分前平均收入（剔除后）',
   `val_before_ori_amount` DECIMAL(18,2) NULL COMMENT '办理前3个月的融合摊分前平均收入（剔除前）?办理前3个月的融合摊分前平均收入（剔除前）',
   `val_change_amount` DECIMAL(18,2) NULL COMMENT '迁转收入差异（迁转后-迁转前）?迁转收入差异（迁转后-迁转前）',
-  `val_change_direction_type` TEXT NULL COMMENT '迁转类型（高低平）?迁转类型（高低平）'
+  `val_change_direction_type` TEXT NULL COMMENT '迁转类型（高低平）?迁转类型（高低平）',
+  `data_time` DATE NULL COMMENT '??????'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci ROW_FORMAT=DYNAMIC COMMENT='结算摊分日表?ODS原始接入表?????产品价值变更域????按来源业务视图的明细粒度保留';
 
 CREATE TABLE IF NOT EXISTS `ods`.`ods_settlement_allocation_monthly` (
@@ -2666,7 +2666,6 @@ CREATE TABLE IF NOT EXISTS `ods`.`ods_settlement_allocation_monthly` (
   `certificate_id_type` TEXT NULL COMMENT '证件类型?证件类型',
   `customer_id` TEXT NULL COMMENT '客户数?客户数',
   `customer_name` TEXT NULL COMMENT '客户名称?客户名称',
-  `data_time` DATETIME NULL COMMENT '数据日期?数据日期',
   `is_active_subscriber` TINYINT(1) NULL COMMENT '标志_当日用户在网?标志_当日用户在网',
   `is_bill` TINYINT(1) NULL COMMENT '是否月出账?是否月出账',
   `is_bill_sy` TINYINT(1) NULL COMMENT '上月是否出账?上月是否出账',
@@ -2691,7 +2690,8 @@ CREATE TABLE IF NOT EXISTS `ods`.`ods_settlement_allocation_monthly` (
   `service_number_id` TEXT NULL COMMENT '移动号码?移动号码',
   `stop_date_time` DATETIME NULL COMMENT '停机时间?停机时间；由源表达式进行空值处理、截取或单位换算后形成',
   `user_id` TEXT NULL COMMENT '用户编号?用户编号',
-  `user_id_status` TEXT NULL COMMENT '用户状态?用户状态'
+  `user_id_status` TEXT NULL COMMENT '用户状态?用户状态',
+  `data_time` DATE NULL COMMENT '??????'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci ROW_FORMAT=DYNAMIC COMMENT='结算摊分月表?ODS原始接入表?????实名合规域????按来源业务视图的明细粒度保留';
 
 CREATE TABLE IF NOT EXISTS `ods`.`ods_post_settlement_allocation_daily` (
@@ -2711,7 +2711,6 @@ CREATE TABLE IF NOT EXISTS `ods`.`ods_post_settlement_allocation_daily` (
   `customer_contact_people_name` TEXT NULL COMMENT '客户联系人?客户联系人',
   `customer_contact_phone_name` TEXT NULL COMMENT '客户联系电话?客户联系电话',
   `customer_satisfy_code` TEXT NULL COMMENT '回访结单工单量?回访结单工单量',
-  `data_time` DATETIME NULL COMMENT '数据日期?数据日期',
   `duty_department_id` TEXT NULL COMMENT '接单部门?接单部门',
   `dz_department_level2_name` TEXT NULL COMMENT '定责部门（2级）?定责部门（2级）',
   `dz_department_level3_name` TEXT NULL COMMENT '定责部门（3级）?定责部门（3级）',
@@ -2783,7 +2782,8 @@ CREATE TABLE IF NOT EXISTS `ods`.`ods_post_settlement_allocation_daily` (
   `user_id` TEXT NULL COMMENT '用户编码?用户编码',
   `visit_count` BIGINT NULL COMMENT '一次回访办结工单量?一次回访办结工单量',
   `visit_count_rate` DECIMAL(9,6) NULL COMMENT '工单一次回访结单率?工单一次回访结单率',
-  `voice_call_appeal_number_count` BIGINT NULL COMMENT '总工单量?总工单量'
+  `voice_call_appeal_number_count` BIGINT NULL COMMENT '总工单量?总工单量',
+  `data_time` DATE NULL COMMENT '??????'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci ROW_FORMAT=DYNAMIC COMMENT='结算后摊分日表?ODS原始接入表?????服务投诉域????按来源业务视图的明细粒度保留';
 
 CREATE TABLE IF NOT EXISTS `ods`.`ods_post_settlement_allocation_monthly` (
@@ -2803,7 +2803,6 @@ CREATE TABLE IF NOT EXISTS `ods`.`ods_post_settlement_allocation_monthly` (
   `building_id` TEXT NULL COMMENT '楼宇?楼宇',
   `customer_id` TEXT NULL COMMENT '客户ID?客户ID',
   `customer_name` TEXT NULL COMMENT '客户名称?客户名称',
-  `data_time` DATETIME NULL COMMENT '账期?账期',
   `is_settlement_allocation` TINYINT(1) NULL COMMENT '摊分标识?摊分标识',
   `pre_allocation_tax_fee` DECIMAL(18,2) NULL COMMENT '摊分前税金?摊分前税金；由源表达式进行空值处理、截取或单位换算后形成',
   `previous_10_fee` DECIMAL(18,2) NULL COMMENT '最近10月考核收入?最近10月考核收入；由源表达式进行空值处理、截取或单位换算后形成',
@@ -2828,7 +2827,8 @@ CREATE TABLE IF NOT EXISTS `ods`.`ods_post_settlement_allocation_monthly` (
   `settlement_allocation_fee` DECIMAL(18,2) NULL COMMENT '摊分前收入?摊分前收入；由源表达式进行空值处理、截取或单位换算后形成',
   `settlement_allocation_nkh_department_level2_id` TEXT NULL COMMENT '摊分前新考核二级部门?摊分前新考核二级部门',
   `settlement_allocation_rate` DECIMAL(9,6) NULL COMMENT '摊分比率?摊分比率',
-  `tax_fee` DECIMAL(18,2) NULL COMMENT '税金?税金；由源表达式进行空值处理、截取或单位换算后形成'
+  `tax_fee` DECIMAL(18,2) NULL COMMENT '税金?税金；由源表达式进行空值处理、截取或单位换算后形成',
+  `data_time` DATE NULL COMMENT '??????'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci ROW_FORMAT=DYNAMIC COMMENT='结算后摊分月表?ODS原始接入表?????结算摊分域????按来源业务视图的明细粒度保留';
 
 CREATE TABLE IF NOT EXISTS `ods`.`ods_price_plan_change_daily` (
@@ -2848,7 +2848,6 @@ CREATE TABLE IF NOT EXISTS `ods`.`ods_price_plan_change_daily` (
   `building_id` TEXT NULL COMMENT '楼宇?楼宇',
   `customer_id` TEXT NULL COMMENT '客户ID?客户ID',
   `customer_name` TEXT NULL COMMENT '客户名称?客户名称',
-  `data_time` DATETIME NULL COMMENT '账期?账期',
   `is_settlement_allocation` TINYINT(1) NULL COMMENT '摊分标识?摊分标识',
   `pre_allocation_tax_fee` DECIMAL(18,2) NULL COMMENT '摊分前税金?摊分前税金；由源表达式进行空值处理、截取或单位换算后形成',
   `previous_10_fee` DECIMAL(18,2) NULL COMMENT '最近10月考核收入?最近10月考核收入；由源表达式进行空值处理、截取或单位换算后形成',
@@ -2873,7 +2872,8 @@ CREATE TABLE IF NOT EXISTS `ods`.`ods_price_plan_change_daily` (
   `settlement_allocation_fee` DECIMAL(18,2) NULL COMMENT '摊分前收入?摊分前收入；由源表达式进行空值处理、截取或单位换算后形成',
   `settlement_allocation_nkh_department_level2_id` TEXT NULL COMMENT '摊分前新考核二级部门?摊分前新考核二级部门',
   `settlement_allocation_rate` DECIMAL(9,6) NULL COMMENT '摊分比率?摊分比率',
-  `tax_fee` DECIMAL(18,2) NULL COMMENT '税金?税金；由源表达式进行空值处理、截取或单位换算后形成'
+  `tax_fee` DECIMAL(18,2) NULL COMMENT '税金?税金；由源表达式进行空值处理、截取或单位换算后形成',
+  `data_time` DATE NULL COMMENT '??????'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci ROW_FORMAT=DYNAMIC COMMENT='套餐升降档日表?ODS原始接入表?????结算摊分域????按来源业务视图的明细粒度保留';
 
 CREATE TABLE IF NOT EXISTS `ods`.`ods_price_plan_change_monthly` (
@@ -2890,7 +2890,6 @@ CREATE TABLE IF NOT EXISTS `ods`.`ods_price_plan_change_monthly` (
   `building_district_id` TEXT NULL COMMENT '楼宇区局细类（摊分后）?楼宇区局细类（摊分后）',
   `customer_id` TEXT NULL COMMENT '客户编号?客户编号',
   `customer_name` TEXT NULL COMMENT '客户名称?客户名称',
-  `data_time` DATETIME NULL COMMENT '数据日期?数据日期',
   `revenue_fee` DECIMAL(18,2) NULL COMMENT '摊分前收入?摊分前收入；由源表达式进行空值处理、截取或单位换算后形成',
   `service_number_id` TEXT NULL COMMENT '服务号码?服务号码',
   `settlement_allocation_blag_id` TEXT NULL COMMENT '摊分标识?摊分标识',
@@ -2906,7 +2905,8 @@ CREATE TABLE IF NOT EXISTS `ods`.`ods_price_plan_change_monthly` (
   `settlement_allocation_nkh_department_level2_id` TEXT NULL COMMENT '摊出方新考核二级部门?摊出方新考核二级部门',
   `settlement_allocation_nkh_department_level3_id` TEXT NULL COMMENT '摊出方新考核三级部门?摊出方新考核三级部门',
   `settlement_allocation_rate` DECIMAL(9,6) NULL COMMENT '摊分比例?摊分比例',
-  `user_id` TEXT NULL COMMENT '用户编号?用户编号'
+  `user_id` TEXT NULL COMMENT '用户编号?用户编号',
+  `data_time` DATE NULL COMMENT '??????'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci ROW_FORMAT=DYNAMIC COMMENT='套餐升降档月表?ODS原始接入表?????结算摊分域????按来源业务视图的明细粒度保留';
 
 CREATE TABLE IF NOT EXISTS `ods`.`ods_digital_channel_order_daily` (
@@ -2924,7 +2924,6 @@ CREATE TABLE IF NOT EXISTS `ods`.`ods_digital_channel_order_daily` (
   `building_name` TEXT NULL COMMENT '楼宇名称?楼宇名称',
   `customer_id` TEXT NULL COMMENT '客户编号?客户编号',
   `customer_name` TEXT NULL COMMENT '客户名称?客户名称',
-  `data_time` DATETIME NULL COMMENT '数据日期?数据日期',
   `pre_allocation_tax_fee` DECIMAL(18,2) NULL COMMENT '摊分前税金?摊分前税金；由源表达式进行空值处理、截取或单位换算后形成',
   `revenue_fee` DECIMAL(18,2) NULL COMMENT '摊分前收入?摊分前收入；由源表达式进行空值处理、截取或单位换算后形成',
   `service_number_id` TEXT NULL COMMENT '服务号码?服务号码',
@@ -2943,12 +2942,12 @@ CREATE TABLE IF NOT EXISTS `ods`.`ods_digital_channel_order_daily` (
   `settlement_allocation_nkh_department_level3_id` TEXT NULL COMMENT '新考核三级部门（摊分后）?新考核三级部门（摊分后）',
   `settlement_allocation_rate` DECIMAL(9,6) NULL COMMENT '摊分比例?摊分比例',
   `tax_fee` DECIMAL(18,2) NULL COMMENT '税金?税金；由源表达式进行空值处理、截取或单位换算后形成',
-  `user_id` TEXT NULL COMMENT '用户编号?用户编号'
+  `user_id` TEXT NULL COMMENT '用户编号?用户编号',
+  `data_time` DATE NULL COMMENT '??????'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci ROW_FORMAT=DYNAMIC COMMENT='电子渠道订单日表?ODS原始接入表?????结算摊分域????按来源业务视图的明细粒度保留';
 
 CREATE TABLE IF NOT EXISTS `ods`.`ods_digital_channel_order_monthly` (
   `activation_time` DATETIME NULL COMMENT '租机用户入网时间?租机用户入网时间；由源表达式进行空值处理、截取或单位换算后形成',
-  `data_time` DATETIME NULL COMMENT '数据日期?数据日期',
   `is_bq` TINYINT(1) NULL COMMENT '标签_实际与租机是否匹配?标签_实际与租机是否匹配',
   `is_name` TEXT NULL COMMENT '标签_注册用户为空?标签_注册用户为空',
   `lease_price_plan_order_date_time` DATETIME NULL COMMENT '租机办理时间?租机办理时间；由源表达式进行空值处理、截取或单位换算后形成',
@@ -2971,7 +2970,8 @@ CREATE TABLE IF NOT EXISTS `ods`.`ods_digital_channel_order_monthly` (
   `terminal_goods_id` TEXT NULL COMMENT '终端串码_id?终端串码_id',
   `terminal_model_id` TEXT NULL COMMENT '终端型号?终端型号',
   `terminal_serial_code` TEXT NULL COMMENT '终端串码?终端串码',
-  `user_id` TEXT NULL COMMENT '用户编码?用户编码'
+  `user_id` TEXT NULL COMMENT '用户编码?用户编码',
+  `data_time` DATE NULL COMMENT '??????'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci ROW_FORMAT=DYNAMIC COMMENT='电子渠道订单月表?ODS原始接入表?????终端设备域????按来源业务视图的明细粒度保留';
 
 CREATE TABLE IF NOT EXISTS `ods`.`ods_dpi_usage_daily` (
@@ -2982,7 +2982,6 @@ CREATE TABLE IF NOT EXISTS `ods`.`ods_dpi_usage_daily` (
   `acquisition_department_level5_id` TEXT NULL COMMENT '预约门店发展五级部门?预约门店发展五级部门',
   `busi_type` TEXT NULL COMMENT '业务类型?业务类型',
   `customer_name` TEXT NULL COMMENT '客户名称?客户名称',
-  `data_time` DATETIME NULL COMMENT '数据日期?数据日期',
   `dragon_id` TEXT NULL COMMENT '预定订单ID?预定订单ID',
   `dragon_number_id` TEXT NULL COMMENT '预定流水号?预定流水号',
   `ident_code_type` TEXT NULL COMMENT '证件类型?证件类型',
@@ -3010,7 +3009,8 @@ CREATE TABLE IF NOT EXISTS `ods`.`ods_dpi_usage_daily` (
   `terminal_count` BIGINT NULL COMMENT '预定终端数量?预定终端数量',
   `terminal_type` TEXT NULL COMMENT '终端型号?终端型号',
   `transaction_status` TEXT NULL COMMENT '处理状态?处理状态',
-  `user_id` TEXT NULL COMMENT '用户编码?用户编码'
+  `user_id` TEXT NULL COMMENT '用户编码?用户编码',
+  `data_time` DATE NULL COMMENT '??????'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci ROW_FORMAT=DYNAMIC COMMENT='DPI应用使用日表?ODS原始接入表?????终端预售域????按来源业务视图的明细粒度保留';
 
 CREATE TABLE IF NOT EXISTS `dwd`.`dim_user` (

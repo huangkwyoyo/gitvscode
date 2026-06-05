@@ -123,3 +123,5 @@ tests/
 ## 运行方式
 
 当前已完成数仓建模、MySQL 建库建表、模拟数据生成、数据质量校验和项目目录归档。后续优先建设指标查询接口、SQL 生成服务和 Agent 工程能力。
+
+- [????????](docs/mock_data_generation_standard.md)
