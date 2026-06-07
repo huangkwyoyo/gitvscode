@@ -70,6 +70,43 @@ DANGEROUS_PATTERNS: list[dict] = [
     },
 ]
 
+DEFAULT_SCAN_DIRS = [
+    "docs/silver",
+    "scripts/silver",
+    "sql",
+    "docs/warehouse/database_design",
+]
+
+EXCLUDED_DIR_PARTS = {
+    ".git",
+    ".claude",
+    ".pytest_cache",
+    "__pycache__",
+    "docs/memory",
+}
+
+EXCLUDED_FILES = {
+    "Agent Memory + Warehouse Harness统一体系方案.md",
+    "AGENTS.md",
+    "PROJECT_STATUS.md",
+}
+
+NEGATIVE_CONTEXT_KEYWORDS = [
+    "禁用",
+    "禁止",
+    "不得",
+    "不支持",
+    "不可用",
+    "避免",
+    "危险",
+    "反例",
+    "经验复盘",
+    "已修复",
+    "不包含",
+    "不含",
+    "无金额字段",
+]
+
 
 def scan_file(filepath: Path, pattern_def: dict) -> list[dict]:
     """扫描单个文件中的危险模式"""
@@ -80,6 +117,8 @@ def scan_file(filepath: Path, pattern_def: dict) -> list[dict]:
         return hits
 
     for i, line in enumerate(content.split("\n"), 1):
+        if should_ignore_line(line):
+            continue
         match = pattern_def["pattern"].search(line)
         if match:
             hits.append({
@@ -93,6 +132,12 @@ def scan_file(filepath: Path, pattern_def: dict) -> list[dict]:
                 "lesson": pattern_def["lesson"],
             })
     return hits
+
+
+def should_ignore_line(line: str) -> bool:
+    """跳过规则说明、反例说明和已知禁止项说明"""
+    stripped = line.strip()
+    return any(keyword in stripped for keyword in NEGATIVE_CONTEXT_KEYWORDS)
 
 
 def should_scan(filepath: Path, pattern_def: dict) -> bool:
@@ -111,6 +156,27 @@ def should_scan(filepath: Path, pattern_def: dict) -> bool:
     return True
 
 
+def collect_scan_files(root: Path) -> list[Path]:
+    """收集正式设计和实现目录中的 Markdown / SQL 文件"""
+    files: list[Path] = []
+    for rel_dir in DEFAULT_SCAN_DIRS:
+        scan_root = root / rel_dir
+        if not scan_root.exists():
+            continue
+        files.extend(scan_root.rglob("*.md"))
+        files.extend(scan_root.rglob("*.sql"))
+
+    result: list[Path] = []
+    for f in files:
+        path_text = str(f).replace("\\", "/")
+        if any(part in path_text for part in EXCLUDED_DIR_PARTS):
+            continue
+        if f.name in EXCLUDED_FILES:
+            continue
+        result.append(f)
+    return result
+
+
 def main():
     parser = argparse.ArgumentParser(description="危险模式扫描")
     parser.add_argument(
@@ -127,14 +193,8 @@ def main():
     root = Path(args.dir)
     all_hits: list[dict] = []
 
-    # 收集要扫描的文件
-    md_files = list(root.rglob("*.md"))
-    sql_files = list(root.rglob("*.sql"))
-    all_files = md_files + sql_files
-
-    # 排除 .git 和 .claude 目录
-    all_files = [f for f in all_files
-                 if ".git" not in str(f) and ".claude" not in str(f)]
+    # 只扫描正式设计与实现目录，避免规则说明文档中的反例造成误报
+    all_files = collect_scan_files(root)
 
     for pattern_def in DANGEROUS_PATTERNS:
         for filepath in all_files:

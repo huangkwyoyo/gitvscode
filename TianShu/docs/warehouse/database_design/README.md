@@ -11,14 +11,14 @@
 
 | 文档 | 说明 | 状态 |
 |---|---|---|
-| `bronze_database_design.md` | Bronze 层 16 张表的正式设计 | 待创建 |
-| `silver_database_design.md` | Silver 层 11 张表的正式设计 | 待创建 |
-| `gold_database_design.md` | Gold 层星型模型正式设计 | 待创建 |
+| `bronze_database_design.md` | Bronze 层 16 张表的正式设计 | 已创建 |
+| `silver_database_design.md` | Silver 层 11 张表的正式设计 | 已创建 |
+| `gold_database_design.md` | Gold 层星型模型正式设计入口 | 已创建，待详细设计 |
 
 ## 变更流程
 
 每次 schema 变更必须：
 1. 更新对应层的 database_design 文档
 2. 更新 data_dictionary 字段字典
-3. 通过一致性检查
+3. 运行 `python scripts/quality/run_all_checks.py` 通过一致性检查
 4. PR Review 后才能合入

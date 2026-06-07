@@ -26,10 +26,22 @@ BRONZE_DB = r"D:\ProgramData\Datawarehouse\纽约市城市交通\nyc_transport.d
 SILVER_XLSX = r"D:\ProgramData\Datawarehouse\纽约市城市交通\分析报告\Silver层数据字典.xlsx"
 
 TABLE_BRONZE_MAP = {
-    "trip_detail": "yellow_tripdata_2026q1",
+    "trip_detail": [
+        "yellow_tripdata_2026q1",
+        "green_tripdata_2026q1",
+        "fhv_tripdata_2026q1",
+        "fhvhv_tripdata_2026q1",
+    ],
     "taxi_zone": "taxi_zone_lookup",
-    "vehicle_detail": "active_vehicles",
-    "driver_detail": "fhv_active_drivers",
+    "vehicle_detail": [
+        "active_vehicles",
+        "fhv_active_vehicles",
+        "medallion_authorized_vehicles",
+    ],
+    "driver_detail": [
+        "fhv_active_drivers",
+        "shl_active_drivers",
+    ],
     "base_detail": "fhv_base_aggregate_report",
     "driver_application_detail": "new_driver_applications",
     "parking_violation_detail": "parking_violations_all",
@@ -82,14 +94,26 @@ def test_parking_violation_no_fake_amount_fields(silver_dict):
 # ============================================================
 # 经验复盘 2026-06-07-2：所有 Silver 字段必须有三类来源标注
 # ============================================================
-@pytest.mark.skip(reason="source_type 列待加入 _gen_xlsx.py 后启用。当前仅 MD 文档中有。")
 def test_all_fields_have_source_type(silver_dict):
     """
     经验复盘 2026-06-07：
     每个 Silver 字段必须标注来源类型（direct/standardized/derived）。
-    当前 xlsx 尚未包含此列，待 _gen_xlsx.py 更新后启用。
+    xlsx 必须包含字段来源类型，避免 Silver 字段不可追溯。
     """
-    pass
+    valid_types = {"direct", "standardized", "derived"}
+    violations: list[str] = []
+    for table_name, fields in silver_dict.items():
+        for f in fields:
+            field_en = f.get("英文字段名", "")
+            source_type = f.get("字段来源类型", "")
+            if source_type not in valid_types:
+                violations.append(
+                    f"[{table_name}] {field_en}: 字段来源类型={source_type or '空'}"
+                )
+    if violations:
+        pytest.fail(
+            "以下字段缺少有效字段来源类型:\n" + "\n".join(violations[:30])
+        )
 
 
 # ============================================================

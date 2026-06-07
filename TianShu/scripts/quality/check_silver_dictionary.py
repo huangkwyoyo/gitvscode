@@ -92,16 +92,48 @@ def load_silver_xlsx(xlsx_path: str) -> dict[str, list[dict]]:
     return result
 
 
+def split_source_items(value: str) -> list[str]:
+    """拆分字段字典中可能包含多个来源字段的文本"""
+    if not value:
+        return []
+    cleaned = (
+        value.replace("`", "")
+        .replace("，", ",")
+        .replace("、", ",")
+        .replace("/", ",")
+        .replace("；", ";")
+        .replace(";", ",")
+    )
+    result: list[str] = []
+    for item in cleaned.split(","):
+        item = item.strip()
+        if not item:
+            continue
+        item = re.split(r"[（(]", item, maxsplit=1)[0].strip()
+        if item and item not in ("无", "详见单表规划文档"):
+            result.append(item)
+    return result
+
+
+def normalize_source_tables(value: str | list[str]) -> list[str]:
+    """统一把来源表配置转成列表"""
+    if isinstance(value, list):
+        return value
+    if not value:
+        return []
+    return [v.strip() for v in value.split(",") if v.strip()]
+
+
 def check_source_fields(
     silver_dict: dict[str, list[dict]],
     bronze_cols: dict[str, set[str]],
-    table_bronze_map: dict[str, str],
+    table_bronze_map: dict[str, str | list[str]],
 ) -> list[str]:
     """检查 direct/standardized 字段的来源是否存在于 Bronze"""
     violations: list[str] = []
     for table_name, fields in silver_dict.items():
-        bronze_table = table_bronze_map.get(table_name, "")
-        bronze_set = bronze_cols.get(bronze_table, set())
+        bronze_tables = normalize_source_tables(table_bronze_map.get(table_name, ""))
+        bronze_sets = {t: bronze_cols.get(t, set()) for t in bronze_tables}
 
         for f in fields:
             field_en = f.get("英文字段名", "")
@@ -119,11 +151,19 @@ def check_source_fields(
                 )
 
             if source_type in ("direct", "standardized"):
-                if source_col and source_col not in bronze_set:
+                source_items = split_source_items(source_col)
+                if source_items and bronze_sets:
+                    found = any(
+                        col in cols
+                        for col in source_items
+                        for cols in bronze_sets.values()
+                    )
+                    if found:
+                        continue
                     violations.append(
                         f"[{table_name}] 字段 '{field_en}' 标注为 {source_type}，"
-                        f"声称来源于 '{bronze_table}.{source_col}'，"
-                        f"但 DESCRIBE 结果中不存在此列。"
+                        f"声称来源于 '{source_col}'，"
+                        f"但来源 Bronze 表 {bronze_tables} 的 DESCRIBE 结果中均不存在这些列。"
                     )
             elif source_type == "derived":
                 if not derivation:
@@ -214,11 +254,23 @@ def main():
 
     # Silver 表名 → Bronze 来源表名 映射
     table_bronze_map = {
-        "trip_detail": "yellow_tripdata_2026q1",  # 主来源
+        "trip_detail": [
+            "yellow_tripdata_2026q1",
+            "green_tripdata_2026q1",
+            "fhv_tripdata_2026q1",
+            "fhvhv_tripdata_2026q1",
+        ],
         "taxi_zone": "taxi_zone_lookup",
         "dim_date": "",  # 全部派生，无直接Bronze来源
-        "vehicle_detail": "active_vehicles",
-        "driver_detail": "fhv_active_drivers",
+        "vehicle_detail": [
+            "active_vehicles",
+            "fhv_active_vehicles",
+            "medallion_authorized_vehicles",
+        ],
+        "driver_detail": [
+            "fhv_active_drivers",
+            "shl_active_drivers",
+        ],
         "base_detail": "fhv_base_aggregate_report",
         "driver_application_detail": "new_driver_applications",
         "parking_violation_detail": "parking_violations_all",
@@ -238,28 +290,28 @@ def main():
     all_violations.extend(v1)
     print(f"\n[1] 字段来源检查: {len(v1)} 个违规")
     for v in v1:
-        print(f"  ❌ {v}")
+            print(f"  [FAIL] {v}")
 
     # 检查2：危险模式
     v2 = check_dangerous_patterns(silver_dict)
     all_violations.extend(v2)
     print(f"\n[2] 危险模式扫描: {len(v2)} 个违规")
     for v in v2:
-        print(f"  ⚠️  {v}")
+            print(f"  [WARN] {v}")
 
     # 检查3：字段数一致性
     v3 = check_field_count_consistency(silver_dict, args.plan_dir)
     all_violations.extend(v3)
     print(f"\n[3] 字段数一致性: {len(v3)} 个违规")
     for v in v3:
-        print(f"  ❌ {v}")
+            print(f"  [FAIL] {v}")
 
     print(f"\n{'=' * 60}")
     if all_violations:
-        print(f"❌ 共发现 {len(all_violations)} 个违规。请修复后重新检查。")
+        print(f"[FAIL] 共发现 {len(all_violations)} 个违规。请修复后重新检查。")
         sys.exit(1)
     else:
-        print("✅ 全部检查通过。")
+        print("[OK] 全部检查通过。")
         sys.exit(0)
 
 

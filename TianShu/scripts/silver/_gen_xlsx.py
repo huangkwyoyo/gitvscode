@@ -1,4 +1,7 @@
 """生成 Silver 层数据字典 xlsx"""
+import re
+from pathlib import Path
+
 import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 
@@ -27,15 +30,15 @@ for col, h in enumerate(overview_headers, 1):
 overview = [
     ['P0', 'silver.dim_date', '日期维表', '通用', '维表', 10, '~90', 'date_key', '从 trip_detail 日期范围生成'],
     ['P0', 'silver.taxi_zone', '出租车区域标准维表', '空间地理域', '维表', 5, '265', 'location_id', 'bronze.taxi_zone_lookup'],
-    ['P0', 'silver.trip_detail', '行程明细标准表', '出行域', '事实表', 42, '8,032万', 'trip_id（代理键）', '四类TLC行程表 UNION ALL'],
+    ['P0', 'silver.trip_detail', '行程明细标准表', '出行域', '事实表', 39, '8,032万', 'trip_id（代理键）', '四类TLC行程表 UNION ALL'],
     ['P1', 'silver.vehicle_detail', '车辆明细标准表', '资产域', '维表', 25, '~12万', 'vehicle_id（代理键）', 'active_vehicles + fhv_active_vehicles + medallion_authorized_vehicles'],
     ['P1', 'silver.driver_detail', '司机明细标准表', '供给域', '维表', 11, '~36万', 'license_number + driver_type', 'fhv_active_drivers + shl_active_drivers'],
     ['P1', 'silver.base_detail', '基地月度明细标准表', '供给域', '事实表', 12, '~5.9万', 'composite_key', 'bronze.fhv_base_aggregate_report'],
     ['P1', 'silver.driver_application_detail', '司机申请明细标准表', '监管合规域', '事实表', 14, '4,076', 'app_no', 'bronze.new_driver_applications'],
-    ['P2', 'silver.parking_violation_detail', '停车罚单明细标准表', '监管合规域', '事实表', 36, '958万', 'violation_id（代理键）', 'bronze.parking_violations_all'],
+    ['P2', 'silver.parking_violation_detail', '停车罚单明细标准表', '监管合规域', '事实表', 32, '958万', 'violation_id（代理键）', 'bronze.parking_violations_all'],
     ['P2', 'silver.tif_payment_detail', 'TIF支付明细标准表', '监管合规域', '事实表', 11, '~4.8万', 'composite_key', 'bronze.tif_medallion_payments'],
-    ['P2', 'silver.crash_detail', '事故明细标准表', '安全域', '事实表', 22, '166万', 'collision_id', 'bronze.crash_merged'],
-    ['P2', 'silver.crash_person_detail', '事故人员明细标准表', '安全域', '事实表', 20, '533万', 'unique_id', 'bronze.crash_person_all'],
+    ['P2', 'silver.crash_detail', '事故明细标准表', '安全域', '事实表', 25, '166万', 'collision_id', 'bronze.crash_merged'],
+    ['P2', 'silver.crash_person_detail', '事故人员明细标准表', '安全域', '事实表', 22, '533万', 'unique_id', 'bronze.crash_person_all'],
 ]
 
 fill_map = {'P0': p0_fill, 'P1': p1_fill, 'P2': p2_fill}
@@ -57,7 +60,129 @@ ws0.column_dimensions['H'].width = 28
 ws0.column_dimensions['I'].width = 48
 
 # ===== 辅助函数 =====
-FIELD_HEADERS = ['英文表名', '中文表名', '英文字段名', '中文字段名', '数据类型', '字段层级', '业务含义', '治理备注']
+FIELD_HEADERS = [
+    '英文表名', '中文表名', '英文字段名', '中文字段名', '数据类型', '字段层级',
+    '业务含义', '治理备注', '字段来源类型', '来源Bronze表', '来源Bronze字段',
+    '派生逻辑', '可信等级', '审核状态'
+]
+
+SOURCE_TABLES = {
+    'dim_date': '无，按日期范围派生',
+    'taxi_zone': 'bronze.taxi_zone_lookup',
+    'trip_detail': 'bronze.yellow_tripdata_2026q1 / bronze.green_tripdata_2026q1 / bronze.fhv_tripdata_2026q1 / bronze.fhvhv_tripdata_2026q1',
+    'vehicle_detail': 'bronze.active_vehicles / bronze.fhv_active_vehicles / bronze.medallion_authorized_vehicles',
+    'driver_detail': 'bronze.fhv_active_drivers / bronze.shl_active_drivers',
+    'base_detail': 'bronze.fhv_base_aggregate_report',
+    'driver_application_detail': 'bronze.new_driver_applications',
+    'parking_violation_detail': 'bronze.parking_violations_all',
+    'tif_payment_detail': 'bronze.tif_medallion_payments',
+    'crash_detail': 'bronze.crash_merged',
+    'crash_person_detail': 'bronze.crash_person_all',
+}
+
+SOURCE_TABLE_ALIAS = {
+    'active_vehicles': 'bronze.active_vehicles',
+    'fhv_active_vehicles': 'bronze.fhv_active_vehicles',
+    'medallion': 'bronze.medallion_authorized_vehicles',
+    'medallion_authorized_vehicles': 'bronze.medallion_authorized_vehicles',
+    'fhv_active_drivers': 'bronze.fhv_active_drivers',
+    'shl_active_drivers': 'bronze.shl_active_drivers',
+}
+
+
+def parse_source_rules(sheet_name):
+    """从单表规划文档读取字段来源分类表"""
+    md_path = Path(__file__).with_name(f'{sheet_name}.md')
+    if not md_path.exists():
+        return {}
+
+    content = md_path.read_text(encoding='utf-8')
+    marker = '## 字段来源分类'
+    if marker not in content:
+        return {}
+
+    section = content.split(marker, 1)[1]
+    next_heading = re.search(r'\n##\s+', section)
+    if next_heading:
+        section = section[:next_heading.start()]
+
+    rules = {}
+    source_col_idx = 2
+    source_table_idx = None
+    for raw_line in section.splitlines():
+        line = raw_line.strip()
+        if not line.startswith('|') or line.startswith('|---'):
+            continue
+        cells = [c.strip() for c in line.strip('|').split('|')]
+        if len(cells) < 3:
+            continue
+        if cells[0] in ('字段', '英文字段名'):
+            source_col_idx = 3 if len(cells) > 3 and '优先来源' in cells[2] else 2
+            source_table_idx = 2 if len(cells) > 3 and '优先来源' in cells[2] else None
+            continue
+        field_name = cells[0].strip('` ')
+        source_type = cells[1].strip('` ')
+        source_table = cells[source_table_idx].strip('` ') if source_table_idx is not None and source_table_idx < len(cells) else ''
+        logic = cells[source_col_idx].strip() if source_col_idx < len(cells) else ''
+        rules[field_name] = {
+            'source_type': source_type,
+            'source_table': source_table,
+            'logic': logic.replace('<br>', '；'),
+        }
+    return rules
+
+
+def extract_source_field(logic):
+    """从来源说明中提取 Bronze 字段名"""
+    if not logic:
+        return ''
+    code_values = re.findall(r'`([^`]+)`', logic)
+    if code_values:
+        return ' / '.join(code_values)
+    if any(word in logic for word in ('自增', 'MD5', '派生', '组合', '范围生成', '重复检查')):
+        return ''
+    return logic.split('（', 1)[0].strip()
+
+
+def fallback_source_type(field_name, field_level):
+    """在规划文档缺少来源分类时给出保守兜底分类"""
+    if field_level in ('主键', '质量标记', '溯源字段', '派生字段', '退化维度'):
+        return 'derived'
+    if field_level in ('时间字段', '空间字段', '金额', '度量'):
+        return 'standardized'
+    return 'direct'
+
+
+def enrich_field(sheet_name, field):
+    """补齐字段来源、可信等级和审核状态"""
+    field_name, field_zh, data_type, field_level, meaning, note = field
+    source_rules = SOURCE_RULES.get(sheet_name, {})
+    rule = source_rules.get(field_name, {})
+    source_type = rule.get('source_type') or fallback_source_type(field_name, field_level)
+    logic = rule.get('logic') or ''
+    source_table = rule.get('source_table') or SOURCE_TABLES.get(sheet_name, '')
+    source_table = SOURCE_TABLE_ALIAS.get(source_table, source_table)
+    source_field = extract_source_field(logic)
+
+    if source_type == 'derived':
+        derivation = logic or note or meaning
+        source_field = ''
+    else:
+        derivation = ''
+        if not source_field:
+            source_field = field_name
+
+    confidence = '高' if source_type in ('direct', 'standardized', 'derived') else '待确认'
+    review_status = '已审核' if confidence == '高' else 'Human Review'
+
+    return (
+        field_name, field_zh, data_type, field_level, meaning, note,
+        source_type, source_table, source_field,
+        derivation, confidence, review_status
+    )
+
+
+SOURCE_RULES = {}
 
 def make_sheet(wb, sheet_name, table_en, table_zh, fields):
     """创建一个表的字段字典 sheet"""
@@ -67,7 +192,7 @@ def make_sheet(wb, sheet_name, table_en, table_zh, fields):
         c.font = header_font; c.fill = header_fill; c.alignment = header_align; c.border = thin_border
 
     for r, f in enumerate(fields, 2):
-        row_data = [table_en, table_zh] + list(f)
+        row_data = [table_en, table_zh] + list(enrich_field(sheet_name, f))
         for c, val in enumerate(row_data, 1):
             cell = ws.cell(row=r, column=c, value=val)
             cell.alignment = cell_align; cell.border = thin_border
@@ -80,9 +205,20 @@ def make_sheet(wb, sheet_name, table_en, table_zh, fields):
     ws.column_dimensions['F'].width = 14
     ws.column_dimensions['G'].width = 48
     ws.column_dimensions['H'].width = 36
+    ws.column_dimensions['I'].width = 16
+    ws.column_dimensions['J'].width = 46
+    ws.column_dimensions['K'].width = 36
+    ws.column_dimensions['L'].width = 46
+    ws.column_dimensions['M'].width = 12
+    ws.column_dimensions['N'].width = 14
     ws.freeze_panes = 'A2'
 
 # ===== 各表字段数据 =====
+
+SOURCE_RULES = {
+    sheet: parse_source_rules(sheet)
+    for sheet in SOURCE_TABLES
+}
 
 make_sheet(wb, 'dim_date', 'silver.dim_date', '日期维表', [
     ('date_key', '日期键', 'INTEGER', '主键', 'YYYYMMDD 格式整数，如 20260115', '不允许为空，必须唯一'),

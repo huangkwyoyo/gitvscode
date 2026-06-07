@@ -35,4 +35,4 @@
 1. 更新 `_gen_xlsx.py` 中的字段定义
 2. 运行 `python scripts/silver/_gen_xlsx.py` 重新生成 xlsx
 3. 确认 xlsx 与 Markdown 规划文档的字段数一致
-4. 通过 `check_schema_consistency.py` 检查
+4. 通过 `python scripts/quality/run_all_checks.py` 检查
