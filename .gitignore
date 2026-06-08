@@ -1,29 +1,59 @@
-# Python bytecode
+# Python
 __pycache__/
-*.pyc
-*.pyo
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
 
 # Environment files
 .env
 .env.local
+*.env.local
 
 # Virtual environments
 venv/
 .venv/
+env/
+ENV/
 
 # Node
 node_modules/
 .next/
 dist/
+build/
 *.tsbuildinfo
 
 # 忽略大模型配置文件（包含密钥，不能上传）
 llm_config.json
+*_config.local.json
+secrets.*
 
 # 本地 skill 配置（不推送至远程）
 .agents/skills/
 .claude/
+.codex/
 
 # 本地代码评审报告（不推送）
 **/CODE_REVIEW.md
+
+# 本地数据仓库和大文件数据
+*.duckdb
+*.duckdb.wal
+*.parquet
+*.csv
+*.jsonl
+*.sqlite
+*.db
+
+# 本地生成的样本表格，避免误提交分析中间产物
+ai_data_analyst/samples/*.xlsx
+ai_data_analyst/samples/*.xls
+
+# 系统和编辑器缓存
+.DS_Store
+Thumbs.db
+.ipynb_checkpoints/
 
