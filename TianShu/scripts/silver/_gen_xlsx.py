@@ -28,7 +28,7 @@ for col, h in enumerate(overview_headers, 1):
     c.font = header_font; c.fill = header_fill; c.alignment = header_align; c.border = thin_border
 
 overview = [
-    ['P0', 'silver.dim_date', '日期维表', '通用', '维表', 10, '~90', 'date_key', '从 trip_detail 日期范围生成'],
+    ['P0', 'silver.dim_date', '日期维表', '通用', '维表', 10, '~90', 'date_key', '固定生成2026Q1日期范围，后续由批次参数控制'],
     ['P0', 'silver.taxi_zone', '出租车区域标准维表', '空间地理域', '维表', 5, '265', 'location_id', 'bronze.taxi_zone_lookup'],
     ['P0', 'silver.trip_detail', '行程明细标准表', '出行域', '事实表', 39, '8,032万', 'trip_id（代理键）', '四类TLC行程表 UNION ALL'],
     ['P1', 'silver.vehicle_detail', '车辆明细标准表', '资产域', '维表', 25, '~12万', 'vehicle_id（代理键）', 'active_vehicles + fhv_active_vehicles + medallion_authorized_vehicles'],

@@ -2,27 +2,25 @@
 
 ## 当前阶段
 
-Agent Memory + Warehouse Harness 最小闭环已完成，准备进入 Silver 建表阶段。
+Silver 层 11 张表全部建成（P0/P1/P2），~9,700 万行，质量门禁通过。准备进入 Gold 层。
 
 ## 最近完成
 
+- [x] **Silver 层 11 张表全部建成**（`scripts/silver/build_silver_duckdb.py`）
+- [x] Silver P0：dim_date(90行) + taxi_zone(265行) + trip_detail(8,032万行)
+- [x] Silver P1：vehicle_detail(12万) + driver_detail(36万) + base_detail(5.9万) + driver_application_detail(4,076)
+- [x] Silver P2：parking_violation_detail(958万) + tif_payment_detail(4.8万) + crash_detail(166万) + crash_person_detail(533万)
+- [x] Meta 中文注释已写入：11 条表级 + 201 条字段级
+- [x] Silver 层构建耗时 464 秒（trip_detail 466s，其余表均 < 5s）
+- [x] Bronze 枚举值字典已完善（95 项 ✅，6 项 ⚠️，5 项 NYPD 遗留）
+- [x] 枚举值识别方法论已建立（`docs/warehouse/data_dictionary/枚举值识别方法论.md`）
+- [x] MV-104AN 编码手册 PDF 已验证（EasyOCR）
+- [x] VEH 字段映射分析已完成
+- [x] 质量门禁：字典一致性 ✅、危险模式 ✅、回归测试 6/6 ✅
 - [x] Bronze 16 张表已导入 DuckDB（`nyc_transport.duckdb`）
-- [x] Meta 元数据已生成（5 张物理表 + 3 个视图）
-- [x] 全表数据字典已生成（15 张 Bronze 表 + Meta 层 8 个对象）
-- [x] 指标口径定义已完成（出行/供给/安全/监管合规 4 大类）
+- [x] Meta 元数据已生成（5 张物理表 + 3 个视图，table/column_comments 已写入）
 - [x] Silver 层 11 张表规划文档已完成（`docs/silver/Silver白银层规划.md`）
-- [x] Silver 层 11 张表详细设计文档已完成（`scripts/silver/`）
-- [x] Silver 层数据字典 xlsx 已生成（12 sheet）
-- [x] 全局 AGENTS.md 已升级至 v2（12 个规范章节 + 第一原则）
-- [x] 6 个分层 AGENTS.md 已创建（warehouse/bronze/silver/gold + text2sql/review）
-- [x] 发现并修复停车罚单虚构金额字段问题（6 个不存在的字段）
-- [x] 发现并修复 dim_date DuckDB SQL 兼容问题（DATE::INT → strftime）
-- [x] 发现并修复 trip_id 无序 ROW_NUMBER 问题（→ MD5 稳定哈希）
-- [x] 发现并修复 driver_application 硬编码枚举问题（4 种 → 5 种实际值）
-- [x] 发现并修复 crash_detail 弃用字段数错误（8 个 → 7 个）
-- [x] 记忆系统三篇认知文档已输出到 Obsidian 知识库
-- [x] `docs/memory/` 记忆层已落地（经验复盘、风险清单、规则来源索引、变更复盘模板）
-- [x] Silver 数据字典 xlsx 已扩展字段来源列（字段来源类型、来源 Bronze 表、来源 Bronze 字段、派生逻辑、可信等级、审核状态）
+- [x] 全局 AGENTS.md + 6 个分层 AGENTS.md 已创建
 - [x] `scripts/quality/check_schema_consistency.py` 已实现
 - [x] `scripts/quality/run_all_checks.py` 统一 Harness 检查入口已实现
 - [x] `docs/warehouse/database_design/gold_database_design.md` 已创建为 Gold 设计入口
@@ -33,6 +31,7 @@ Agent Memory + Warehouse Harness 最小闭环已完成，准备进入 Silver 建
 - [x] 字段字典规范已补充枚举值（状态码/标志位/分类代码）中文含义要求
 - [x] `harness/` 工程执行入口已建立（README、检查清单、配置、报告入口、lessons 路由）
 - [x] `Agent Memory + Warehouse Harness统一体系方案.md` 已补充“从散落脚本到 Harness 工程入口”的认知提升
+- [x] Silver 实施前审查已完成：同步 `dim_date` 为固定生成 2026Q1 日期范围，重新生成 Silver 数据字典 xlsx，并通过 Harness 全量检查
 
 ## 下一步
 

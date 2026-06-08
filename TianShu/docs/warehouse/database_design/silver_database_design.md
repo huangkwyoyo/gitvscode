@@ -21,10 +21,10 @@
 | P1 | `driver_detail` | 司机明细标准表 | 供给域 | 维表 | 11 | ~36万 | `license_number`+`driver_type` |
 | P1 | `base_detail` | 基地月度明细标准表 | 供给域 | 事实表 | 12 | ~5.9万 | `composite_key` |
 | P1 | `driver_application_detail` | 司机申请明细标准表 | 监管合规域 | 事实表 | 14 | 4,076 | `app_no` |
-| P2 | `parking_violation_detail` | 停车罚单明细标准表 | 监管合规域 | 事实表 | 32 | 958万 | `violation_id`（代理键） |
-| P2 | `tif_payment_detail` | TIF支付明细标准表 | 监管合规域 | 事实表 | 11 | ~4.8万 | `composite_key` |
-| P2 | `crash_detail` | 事故明细标准表 | 安全域 | 事实表 | 25 | 166万 | `collision_id` |
-| P2 | `crash_person_detail` | 事故人员明细标准表 | 安全域 | 事实表 | 22 | 533万 | `unique_id` |
+| P2 | `parking_violation_detail` | 停车罚单明细标准表 | 监管合规域 | 事实表 | 30 | 958万 | `violation_id`（代理键） |
+| P2 | `tif_payment_detail` | TIF支付明细标准表 | 监管合规域 | 事实表 | 12 | ~4.8万 | `composite_key` |
+| P2 | `crash_detail` | 事故明细标准表 | 安全域 | 事实表 | 26 | 166万 | `collision_id` |
+| P2 | `crash_person_detail` | 事故人员明细标准表 | 安全域 | 事实表 | 23 | 533万 | `unique_id` |
 
 ## 表间关联关系
 

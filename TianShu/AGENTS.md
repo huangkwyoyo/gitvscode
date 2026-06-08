@@ -341,6 +341,79 @@ Gold 建模业务。
 Agent 不得创造事实。
 
 
+## 13. 变更传播规则
+
+每次执行以下操作时，必须同步扫描并更新受影响的所有项目文件：
+
+### 13.1 触发条件
+
+| 操作类型 | 触发条件 |
+|---|---|
+| **建表/改表** | 新建或修改 Silver/Gold/Meta 层的表结构、字段、行数 |
+| **新建脚本** | 新增 `scripts/` 下的构建或质量检查脚本 |
+| **新发现** | 发现并确认的枚举值含义、数据质量问题、编码手册验证结果 |
+| **阶段完成** | 一个构建批次（P0/P1/P2）或里程碑完成 |
+
+### 13.2 传播清单
+
+操作完成后，必须逐项检查以下文件是否需要更新：
+
+| 文件 | 何时更新 |
+|---|---|
+| `docs/warehouse/database_design/` | 表结构、字段数、主键变更时 |
+| `docs/warehouse/data_dictionary/bronze_enum_values.md` | Bronze 枚举值新增或确认时 |
+| `sql/{schema}/README.md` | 该 schema 的表清单、行数、构建方式变更时 |
+| `sql/README.md` | 目录结构新增或调整时 |
+| `docs/silver/Silver白银层规划.md` | 规划与实建不一致时 |
+| `scripts/silver/_gen_xlsx.py` | 字段定义变更时（需重新生成 xlsx） |
+| `PROJECT_STATUS.md` | 阶段完成或重大变更时 |
+| `docs/memory/` | 新的经验复盘、分析报告、验证记录产生时 |
+| `harness/checklists/` | 新增质量检查或门禁规则时 |
+| `AGENTS.md`（本文件） | 新规则或流程变更时 |
+
+### 13.3 执行顺序
+
+1. 完成核心操作（建表/修字段/确认枚举值）
+2. 更新最高事实源（`docs/warehouse/database_design/`）
+3. 更新字段字典（`docs/warehouse/data_dictionary/`）
+4. 更新 SQL 目录说明（`sql/{schema}/README.md`）
+5. 更新项目状态（`PROJECT_STATUS.md`）
+6. 运行质量门禁（`python scripts/quality/run_all_checks.py`）
+7. 将分析过程写入 `docs/memory/`（如适用）
+
+### 13.4 输出要求
+
+禁止只说"已完成"。变更完成后必须列出：
+- 更新了哪些文件
+- 每处改了什么（一行说明）
+
+### 13.5 设计原则
+
+- `docs/standards/` 只做索引路由，不复制具体规范。
+- `docs/warehouse/database_design/` 是唯一事实源，其他文档必须与之对齐。
+- `docs/warehouse/data_dictionary/` 维护字段中文名和枚举值含义。
+- `sql/` 的 README.md 是给开发者看的快速索引，不是事实源。
+- `PROJECT_STATUS.md` 是项目进度快照。
+- `docs/memory/` 是分析过程归档，不是规范。
+
+### 13.6 强制质量门禁
+
+任何涉及以下操作的动作完成后，**必须立即运行质量门禁**，检查不通过则不得进入下一步：
+
+| 操作 | 必须运行的检查 | 不通过时的处理 |
+|---|---|---|
+| `CREATE TABLE`（任何 schema） | `python scripts/quality/run_all_checks.py` | 修到通过为止，不得跳过 |
+| 修改已有表的字段定义 | 同上 + `check_schema_consistency.py --require-silver-tables`（如适用） | 对齐设计文档后重跑 |
+| 新增/修改 `_gen_xlsx.py` 字段定义 | 重新生成 xlsx + `run_all_checks.py` | 确认字段数一致 |
+| Bronze 枚举值新增 | `check_silver_dictionary.py` | 确认枚举值来源可追溯 |
+
+**禁止行为**：
+- 禁止在检查失败后直接进入下一张表的构建。
+- 禁止用 `--dry-run` 绕过检查。
+- 禁止在检查失败后只报告不修复。
+
+这条规则是 Harness 工程的执行保障——Harness 提供了检查脚本，本条规则确保它们**一定会被执行**。
+
 
 ## 代码规范
 
