@@ -15,6 +15,8 @@ import re
 from pathlib import Path
 from typing import Optional
 
+from harness_config import load_harness_config
+
 try:
     import duckdb
 except ImportError:
@@ -226,28 +228,29 @@ def check_field_count_consistency(
 
 
 def main():
+    config = load_harness_config()
     parser = argparse.ArgumentParser(description="Silver 数据字典一致性检查")
     parser.add_argument(
         "--xlsx",
-        default=r"D:\ProgramData\Datawarehouse\纽约市城市交通\分析报告\Silver层数据字典.xlsx",
+        default=str(config.silver_dictionary_xlsx),
         help="Silver 数据字典 xlsx 路径",
     )
     parser.add_argument(
         "--bronze-db",
-        default=r"D:\ProgramData\Datawarehouse\纽约市城市交通\nyc_transport.duckdb",
+        default=str(config.duckdb_path),
         help="DuckDB 数据库路径",
     )
     parser.add_argument(
         "--plan-dir",
-        default=r"D:\Program Files\gitvscode\TianShu\scripts\silver",
+        default=str(config.project_root / "scripts" / "silver"),
         help="Silver 规划文档目录",
     )
     args = parser.parse_args()
 
     if not Path(args.xlsx).exists():
-        print(f"[SKIP] xlsx 文件不存在: {args.xlsx}")
+        print(f"[FAIL] Silver xlsx 不存在: {args.xlsx}")
         print("请先运行 scripts/silver/_gen_xlsx.py 生成数据字典")
-        return
+        sys.exit(1)
 
     bronze_cols = load_bronze_columns(args.bronze_db)
     silver_dict = load_silver_xlsx(args.xlsx)

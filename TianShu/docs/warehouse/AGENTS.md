@@ -8,6 +8,8 @@
 
 当以下内容发生冲突时，以数据库设计文档为准：SQL 建表脚本、DuckDB 实际 schema、Excel 字段字典、Markdown 规划文档、Agent 生成的任何内容。
 
+`docs/standards/` 只做规范索引入口，不是第二事实源。字段字典、枚举值（状态码/标志位/分类代码）的含义统一维护在 `docs/warehouse/data_dictionary/`。
+
 ## 2. 分层规则
 
 | 层 | Schema | 中文名 | 职责 | 规则文件 |
@@ -33,6 +35,8 @@
 4. 数据画像结果
 5. 人工确认结果
 
+字段值如果是代码、缩写或状态标识，必须在字段字典中补充中文含义。无法确认时进入 `Human Review`。
+
 ## 5. 零幻觉建模
 
 禁止编造：表名、字段名、字段含义、主键、外键、Join关系、金额、指标、KPI、业务规则、地理归属、业务口径。禁止根据xlsx推断Bronze表包含某字段。
@@ -44,3 +48,5 @@
 - Gold层 → [gold/AGENTS.md](gold/AGENTS.md)
 - Text2SQL Agent → `../../agents/text2sql/AGENTS.md`
 - Review Agent → `../../agents/review/AGENTS.md`
+- 规范索引 → `../standards/`
+- 字段字典与枚举值 → `data_dictionary/`

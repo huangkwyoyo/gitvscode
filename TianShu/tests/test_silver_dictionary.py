@@ -20,10 +20,12 @@ from check_silver_dictionary import (
     check_dangerous_patterns,
     FORBIDDEN_DIRECT_FIELDS,
 )
+from harness_config import load_harness_config
 
-# 路径配置
-BRONZE_DB = r"D:\ProgramData\Datawarehouse\纽约市城市交通\nyc_transport.duckdb"
-SILVER_XLSX = r"D:\ProgramData\Datawarehouse\纽约市城市交通\分析报告\Silver层数据字典.xlsx"
+# 路径配置来自 Harness，避免测试和脚本各自硬编码
+HARNESS_CONFIG = load_harness_config()
+BRONZE_DB = str(HARNESS_CONFIG.duckdb_path)
+SILVER_XLSX = str(HARNESS_CONFIG.silver_dictionary_xlsx)
 
 TABLE_BRONZE_MAP = {
     "trip_detail": [

@@ -9,7 +9,7 @@
 | 数据域 | 通用 |
 | 数据角色 | 维表（Dimension） |
 | 批次 | P0（第一批） |
-| 来源 | 从 `silver.trip_detail.pickup_at` 的日期范围自动生成 |
+| 来源 | 固定生成 2026Q1 日期范围，后续年度扩展时由批次参数控制 |
 | 预计行数 | ~90（2026-01-01 至 2026-03-31） |
 | 主键 | `date_key`（INTEGER，YYYYMMDD 格式） |
 
@@ -19,7 +19,7 @@
 
 1. **Gold 层所有汇总表都需要时间维度**。日期维表是公共基础，放在 Silver 层供所有下游表复用，避免每张 Gold 汇总表重复生成日期逻辑。
 2. **NYC 财年不是自然年**。NYC 财年从 7 月 1 日到次年 6 月 30 日，这个逻辑需要在维表中预计算，不能靠 SQL 临时算。
-3. **构建顺序**：`dim_date` 应在 `trip_detail` 之前构建，这样 `trip_detail` 可以通过 `pickup_date = dim_date.date` 建立外键关联。
+3. **构建顺序**：`dim_date` 应在 `trip_detail` 之前构建，因此不能依赖 `silver.trip_detail` 取日期范围。本批次先固定生成 2026-01-01 至 2026-03-31，后续年度扩展时再改为参数化。
 
 ### 为什么用 INTEGER 而非 DATE 做主键
 
@@ -49,13 +49,6 @@
 ## 生成逻辑
 
 ```sql
--- 从 trip_detail 的日期范围动态生成
-WITH date_range AS (
-    SELECT
-        MIN(pickup_at::DATE) AS start_date,
-        MAX(pickup_at::DATE) AS end_date
-    FROM silver.trip_detail
-)
 INSERT INTO silver.dim_date
 SELECT
     strftime(d, '%Y%m%d')::INTEGER AS date_key,        -- DuckDB 中 DATE::INT 不可用，必须用 strftime
@@ -71,13 +64,11 @@ SELECT
          THEN EXTRACT(YEAR FROM d) + 1
          ELSE EXTRACT(YEAR FROM d)
     END AS fiscal_year
-FROM date_range, LATERAL (
-    SELECT (start_date + INTERVAL (n - 1) DAY) AS d
-    FROM generate_series(
-        1,
-        (end_date - start_date)::INTEGER + 1
-    ) AS t(n)
-);
+FROM generate_series(
+    DATE '2026-01-01',
+    DATE '2026-03-31',
+    INTERVAL 1 DAY
+) AS t(d);
 ```
 
 ## 质量规则
@@ -91,7 +82,7 @@ FROM date_range, LATERAL (
 | 字段 | 来源类型 | 说明 |
 |---|---|---|
 | `date_key` | derived | `strftime(d, '%Y%m%d')::INTEGER` |
-| `date` | derived | `d::DATE` |
+| `date` | derived | `generate_series(DATE '2026-01-01', DATE '2026-03-31', INTERVAL 1 DAY)` |
 | `year` | derived | `EXTRACT(YEAR FROM d)` |
 | `quarter` | derived | `EXTRACT(QUARTER FROM d)` |
 | `month` | derived | `EXTRACT(MONTH FROM d)` |

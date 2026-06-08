@@ -185,7 +185,7 @@ Codex 给出的三层建议是：
   ├─────────────────────────────────────────┼─────────────────────────────────────────────────────────────────┤
   │ TianShu/docs/modeling/                  │ ER 模型、星型模型、维度建模方法论                               │
   ├─────────────────────────────────────────┼─────────────────────────────────────────────────────────────────┤
-  │ TianShu/docs/standards/                 │ 命名规范、建表规范、中文注释规范                                │
+  │ TianShu/docs/standards/                 │ 规范索引入口，指向 database_design、data_dictionary 等事实源       │
   ├─────────────────────────────────────────┼─────────────────────────────────────────────────────────────────┤
   │ TianShu/docs/meta/                      │ 元数据设计、中文语义层设计说明                                  │
   └─────────────────────────────────────────┴─────────────────────────────────────────────────────────────────┘
@@ -532,6 +532,180 @@ docs/decisions/
 
 加上 `decisions/` 后，TianShu 的文档体系才真正完整——从决策理由到设计执行，从规则约束到经验沉淀，每一层都有明确归属，不再依赖对话上下文或口头传承。任何未来的维护者（包括一年后的自己）都能从 `decisions/` 快速理解项目的关键设计意图。
 
+## 6.8 第五次认知提升：从散落脚本到 Harness 工程入口
+
+在前面的设计中，Harness 的能力已经存在：
+
+- `scripts/quality/` 有检查脚本。
+- `tests/` 有回归测试。
+- `docs/memory/` 有经验复盘。
+- `docs/warehouse/database_design/` 有数据库设计事实源。
+- `docs/warehouse/data_dictionary/` 有字段字典和枚举值说明。
+
+但继续审查后发现一个新问题：
+
+```text
+Harness 的能力存在，但 Harness 自己没有工程入口。
+```
+
+如果没有独立入口，后续 Agent 需要在多个目录之间猜：
+
+- 检查命令在哪里？
+- 检查前置条件是什么？
+- PR 前应该看哪份清单？
+- Schema 变更应该走什么审核步骤？
+- 检查报告应该放哪里？
+- Harness 的配置目标在哪里？
+
+这会让 Harness 本身变成“散落的脚本和规则”，降低可维护性。
+
+因此，项目需要新增一个 `harness/` 目录，作为 Harness 的工程执行入口。
+
+但这一步必须明确边界：
+
+```text
+harness/ 是执行入口，不是第二事实源。
+```
+
+它不能复制数据库设计文档，不能复制字段字典，不能复制经验复盘。它只能引用这些事实源，并组织如何执行检查。
+
+新的职责划分是：
+
+| 目录 | 职责 |
+|---|---|
+| `docs/warehouse/database_design/` | 表结构、字段、主键、类型的最高事实源 |
+| `docs/warehouse/data_dictionary/` | 字段字典、枚举值（状态码/标志位/分类代码）中文含义 |
+| `docs/memory/` | 经验复盘、风险清单、规则来源 |
+| `docs/standards/` | 规范索引入口，不重复维护具体规范 |
+| `scripts/quality/` | 具体质量检查脚本 |
+| `tests/` | 回归测试 |
+| `harness/` | Harness 运行说明、检查清单、配置和报告入口 |
+
+这次认知提升的核心是：
+
+```text
+docs/ 负责事实、规则、记忆和方法论。
+scripts/quality/ 负责具体检查实现。
+tests/ 负责回归保护。
+harness/ 负责把这些能力组织成可执行工程流程。
+```
+
+这样设计后，Agent 进入项目时可以先读：
+
+1. `AGENTS.md`：知道不能做什么。
+2. `PROJECT_STATUS.md`：知道项目做到哪里。
+3. `harness/README.md`：知道如何运行检查和走审核流程。
+4. `docs/warehouse/database_design/`：确认正式 schema。
+5. `docs/warehouse/data_dictionary/`：确认字段和枚举值含义。
+
+这比把所有说明继续堆在 `docs/` 或 `scripts/quality/` 更清晰。
+
+#### 6.8.1 Harness 不是复制目录，而是编排边界
+
+进一步思考后，还需要防止另一个误区：
+
+```text
+每新增一种治理能力，就再建一个 harness_xx 文件夹。
+```
+
+这种做法表面上看像是“模块化”，但如果没有清晰边界，很容易变成新的混乱来源。
+
+例如：
+
+```text
+harness/
+harness_silver/
+harness_gold/
+harness_text2sql/
+harness_review/
+harness_memory/
+```
+
+如果每个目录都各自维护入口、规则、配置、检查脚本、报告说明，问题会很快出现：
+
+1. Agent 不知道应该先读哪个 Harness 入口。
+2. 同一个检查规则可能被复制到多个目录。
+3. 数据库设计和字段字典可能被某个 harness_xx 目录局部复制。
+4. 同一条经验可能在 `docs/memory/` 和 `harness_memory/` 中重复维护。
+5. PR 审核时难以判断哪个 Harness 是当前有效门禁。
+
+因此，`harness/` 不应该被理解为“把所有能力搬进一个新目录”，也不应该被理解为“每类能力都新建一个 harness_xx”。
+
+更合理的理解是：
+
+```text
+harness/ 是治理工程的控制面。
+```
+
+它负责组织和编排项目中已经存在的能力：
+
+- 检查脚本仍然在 `scripts/quality/`。
+- 回归测试仍然在 `tests/`。
+- 经验复盘仍然在 `docs/memory/`。
+- 数据库设计仍然在 `docs/warehouse/database_design/`。
+- 字段字典和枚举说明仍然在 `docs/warehouse/data_dictionary/`。
+- 分层规则仍然在 `docs/warehouse/*/AGENTS.md`。
+
+`harness/` 只负责回答：
+
+```text
+这些能力如何组合起来执行？
+什么时候执行？
+执行前看什么清单？
+执行失败如何判断是规则问题还是环境问题？
+PR 前需要哪些证据？
+```
+
+所以，Harness 的能力不是集中在 `harness/` 一个目录里，也不是无序散落在项目各处，而是：
+
+```text
+能力分布在正确的职责目录中；
+harness/ 负责把这些能力组织成流程。
+```
+
+这是一种“分布式能力 + 中央编排入口”的结构。
+
+它和“只建索引”的区别在于：
+
+| 方案 | 特点 | 风险 |
+|---|---|---|
+| 只建索引 | 只告诉人去哪里找文件 | 没有运行流程，Agent 仍需自己拼步骤 |
+| 把能力全部搬进 harness/ | 入口统一 | 复制事实源，形成第二套规范 |
+| 每类能力新建 harness_xx | 看似模块化 | 入口泛滥，规则重复，边界不清 |
+| 单一 harness/ 编排入口 | 保持事实源归位，同时统一执行流程 | 需要维护清单和配置的一致性 |
+
+因此，当前最合适的方案是：
+
+```text
+只保留一个顶层 harness/。
+```
+
+当未来需要扩展 Harness 能力时，应优先在 `harness/` 内部增加子目录或配置项，而不是在项目根目录新增多个并列的 `harness_xx/`。
+
+例如：
+
+```text
+harness/checklists/text2sql_review.md
+harness/checklists/gold_model_review.md
+harness/config/harness_targets.yml
+harness/reports/local/
+```
+
+如果某一类 Harness 能力发展到非常复杂，确实需要独立工程，也应该先满足三个条件：
+
+1. 它有独立生命周期。
+2. 它有独立依赖和运行环境。
+3. 它不会复制数据库设计、字段字典和经验复盘。
+
+否则，就继续留在统一 `harness/` 下，由 `harness/README.md` 作为唯一入口。
+
+这次认知提升可以概括为：
+
+```text
+Harness 不是文件夹越多越强。
+Harness 的强度来自边界清楚、事实源唯一、执行路径稳定。
+```
+
 ---
 
 ## 7. 本项目为什么尤其需要这个体系
@@ -652,10 +826,10 @@ D:\Program Files\gitvscode\TianShu
 │  │  │  └─ gold_database_design.md
 │  │  └─ data_dictionary
 │  │     ├─ README.md
-│  │     ├─ bronze_data_dictionary.xlsx
-│  │     ├─ silver_data_dictionary.xlsx
-│  │     └─ gold_data_dictionary.xlsx
+│  │     ├─ 枚举值识别方法论.md
+│  │     └─ bronze_enum_values.md
 │  ├─ standards
+│  │  ├─ README.md
 │  │  └─ 数据仓库文档规范.md
 │  ├─ meta
 │  ├─ modeling
@@ -678,6 +852,18 @@ D:\Program Files\gitvscode\TianShu
 │  ├─ silver
 │  ├─ gold
 │  └─ meta
+├─ harness
+│  ├─ README.md
+│  ├─ checklists
+│  │  ├─ pre_silver_build.md
+│  │  ├─ schema_change_review.md
+│  │  └─ pr_review.md
+│  ├─ config
+│  │  └─ harness_targets.yml
+│  ├─ reports
+│  │  └─ README.md
+│  └─ lessons
+│     └─ README.md
 ├─ sql
 │  ├─ bronze
 │  ├─ silver
@@ -821,7 +1007,33 @@ Bronze、Silver、Gold 各层允许什么？
 - `docs/warehouse/database_design` 是最高事实源目录。
 - `docs/warehouse/data_dictionary` 是字段字典目录。
 
-### 9.6 scripts/quality：规则执行层
+### 9.6 docs/standards：规范索引层
+
+`docs/standards` 是规范入口和路由层。
+
+它回答：
+
+```text
+某类规范应该去哪里看？
+哪个目录维护正式规则？
+发生冲突时以哪里为准？
+```
+
+它不应该：
+
+- 维护正式数据库设计。
+- 维护字段字典。
+- 维护枚举值（状态码/标志位/分类代码）含义。
+- 复制 `docs/warehouse/*/AGENTS.md` 的分层规则。
+
+具体规范必须下沉到对应事实源：
+
+- 表结构、字段、主键、类型：`docs/warehouse/database_design/`
+- 字段字典、枚举值（状态码/标志位/分类代码）含义：`docs/warehouse/data_dictionary/`
+- 分层规则：`docs/warehouse/*/AGENTS.md`
+- 经验复盘：`docs/memory/`
+
+### 9.7 scripts/quality：检查脚本实现层
 
 `scripts/quality` 是 Harness 的执行核心。
 
@@ -839,7 +1051,38 @@ Bronze、Silver、Gold 各层允许什么？
 - 是否出现危险 SQL 模式
 - Gold 是否跳过 Silver 直接引用 Bronze
 
-### 9.7 tests：回归保护层
+### 9.8 harness：工程执行入口
+
+`harness/` 是 Agent Memory + Warehouse Harness 的工程入口。
+
+它回答：
+
+```text
+怎么运行 Harness？
+运行前要检查什么？
+PR 前看哪份清单？
+Schema 变更怎么审核？
+检查目标路径在哪里登记？
+检查报告怎么管理？
+```
+
+它应该包含：
+
+- `README.md`：Harness 总入口。
+- `checklists/`：Silver 建表前、Schema 变更、PR 审核清单。
+- `config/`：Harness 检查目标路径。
+- `reports/`：检查报告目录说明。
+- `lessons/`：说明如何引用 `docs/memory/`，不重复记录经验。
+
+它不应该：
+
+- 定义正式表结构。
+- 复制字段字典。
+- 复制经验复盘。
+- 替代 `docs/warehouse/database_design/`。
+- 替代 `docs/warehouse/data_dictionary/`。
+
+### 9.9 tests：回归保护层
 
 `tests` 是经验固化后的回归保护。
 
@@ -861,7 +1104,7 @@ Bronze、Silver、Gold 各层允许什么？
 
 这样下一次同类问题会被自动拦截。
 
-### 9.8 agents/text2sql：问数 Agent 规则
+### 9.10 agents/text2sql：问数 Agent 规则
 
 Text2SQL Agent 必须比普通数据开发 Agent 更保守。
 
@@ -875,7 +1118,7 @@ Text2SQL Agent 必须比普通数据开发 Agent 更保守。
 - 无法确认字段和 Join 时必须反问或提示无法生成。
 - SQL 输出必须基于已审核语义层和数据库设计文档。
 
-### 9.9 agents/review：审核 Agent 规则
+### 9.11 agents/review：审核 Agent 规则
 
 审核 Agent 是 Harness 的守门人。
 
@@ -1162,6 +1405,7 @@ Agent 必须执行：
 - SQL 建表脚本
 - DuckDB schema
 - Agent 规则文件
+- Harness 检查清单和配置
 
 ---
 
@@ -1182,11 +1426,28 @@ docs/memory/规则来源索引.md
 docs/warehouse/database_design/README.md
 docs/warehouse/data_dictionary/README.md
 PROJECT_STATUS.md
+harness/README.md
 ```
 
-目标是让记忆、事实源和状态有固定位置。
+目标是让记忆、事实源、状态和 Harness 执行入口都有固定位置。
 
-### 13.2 第二阶段：第一批检查脚本
+### 13.2 第二阶段：Harness 工程入口
+
+建立：
+
+```text
+harness/README.md
+harness/checklists/pre_silver_build.md
+harness/checklists/schema_change_review.md
+harness/checklists/pr_review.md
+harness/config/harness_targets.yml
+harness/reports/README.md
+harness/lessons/README.md
+```
+
+这一阶段只定义运行入口和检查清单，不复制 `database_design/`、`data_dictionary/` 和 `docs/memory/` 的内容。
+
+### 13.3 第三阶段：第一批检查脚本
 
 先实现：
 
@@ -1204,7 +1465,7 @@ scripts/quality/check_schema_consistency.py
 - 文档字段数与 Excel 字典字段数不一致
 - 英文名缺少中文名
 
-### 13.3 第三阶段：测试固化
+### 13.4 第四阶段：测试固化
 
 建立：
 
@@ -1216,7 +1477,7 @@ tests/test_schema_consistency.py
 
 目标不是测试业务结果，而是测试项目规则是否被执行。
 
-### 13.4 第四阶段：PR 审核流程
+### 13.5 第五阶段：PR 审核流程
 
 后续再把 Harness 接入 PR 流程。
 

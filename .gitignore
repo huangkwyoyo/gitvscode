@@ -52,6 +52,9 @@ secrets.*
 ai_data_analyst/samples/*.xlsx
 ai_data_analyst/samples/*.xls
 
+# 本地 Harness 检查报告
+TianShu/harness/reports/local/
+
 # 系统和编辑器缓存
 .DS_Store
 Thumbs.db

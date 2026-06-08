@@ -467,8 +467,7 @@ bronze.crash_merged  -- 1,655,065 行，29 列，全部 VARCHAR
 
 | 英文字段名 | 中文字段名 | 类型 | 来源字段 | 说明 |
 |---|---|---|---|---|
-| `crash_id` | 事故代理主键 | BIGINT | 生成 | PK，自增 |
-| `collision_id` | 事故编号 | BIGINT | `collision_id` | 候选键，VARCHAR→BIGINT |
+| `collision_id` | 事故编号 | BIGINT | `collision_id` | PK，VARCHAR→BIGINT |
 | `crash_at` | 事故时间 | TIMESTAMP | `crash_date` + `crash_time` | VARCHAR 合并→TIMESTAMP |
 | `borough` | 行政区 | VARCHAR | `borough` | 缺失率 30.4% |
 | `zip_code` | 邮政编码 | VARCHAR | `zip_code` | 缺失率 30.4% |
@@ -506,6 +505,7 @@ bronze.crash_merged  -- 1,655,065 行，29 列，全部 VARCHAR
 |---|---|---|---|
 | `is_duplicate_collision` | 是否重复事故 | BOOLEAN | `collision_id` 出现 > 1 次时为 TRUE |
 | `is_location_missing` | 是否位置缺失 | BOOLEAN | `latitude` 或 `longitude` IS NULL 时为 TRUE |
+| `source_table` | 来源表 | VARCHAR | 固定值 `crash_merged` |
 | `source_row_hash` | 来源行哈希 | VARCHAR(64) | MD5 溯源 |
 
 质量规则：
@@ -530,8 +530,7 @@ bronze.crash_person_all  -- 5,333,042 行，21 列，全部 VARCHAR
 
 | 英文字段名 | 中文字段名 | 类型 | 来源字段 | 说明 |
 |---|---|---|---|---|
-| `crash_person_id` | 事故人员代理主键 | BIGINT | 生成 | PK，自增 |
-| `unique_id` | 人员记录编号 | BIGINT | `unique_id` | 候选键，VARCHAR→BIGINT |
+| `unique_id` | 人员记录编号 | BIGINT | `unique_id` | PK，VARCHAR→BIGINT |
 | `collision_id` | 事故编号 | BIGINT | `collision_id` | 外键，关联 `silver.crash_detail.collision_id` |
 | `crash_date` | 事故日期 | DATE | `crash_date` | VARCHAR→DATE |
 | `crash_time` | 事故时间 | VARCHAR | `crash_time` | HH:MM 格式 |
@@ -566,6 +565,7 @@ bronze.crash_person_all  -- 5,333,042 行，21 列，全部 VARCHAR
 | `is_duplicate_person` | 是否重复记录 | BOOLEAN | `unique_id` 出现 > 1 次时为 TRUE |
 | `is_orphan_record` | 是否孤立记录 | BOOLEAN | `collision_id` 在 `silver.crash_detail` 中不存在时为 TRUE |
 | `has_missing_aux` | 是否缺失辅助字段 | BOOLEAN | 6 个辅助字段全部为 NULL 时为 TRUE |
+| `source_table` | 来源表 | VARCHAR | 固定值 `crash_person_all` |
 | `source_row_hash` | 来源行哈希 | VARCHAR(64) | MD5 溯源 |
 
 质量规则：

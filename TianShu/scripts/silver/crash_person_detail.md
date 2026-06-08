@@ -11,7 +11,7 @@
 | 批次 | P2（第三批） |
 | 来源 | `bronze.crash_person_all`（5,333,042 行，21 列，全部 VARCHAR） |
 | 预计行数 | 533 万 |
-| 主键 | `crash_person_id`（BIGINT，代理键），`unique_id`（候选键） |
+| 主键 | `unique_id`（BIGINT，自然键） |
 | 字段数 | 22 |
 
 ## 设计理由
@@ -82,8 +82,7 @@ LEFT JOIN silver.crash_detail cd
 
 | 字段 | 来源类型 | 来源字段/逻辑 |
 |---|---|---|
-| `crash_person_id` | derived | 自增代理键 |
-| `unique_id` | standardized | `unique_id`（VARCHAR→BIGINT） |
+| `unique_id` | standardized | `unique_id`（VARCHAR→BIGINT，主键） |
 | `collision_id` | standardized | `collision_id`（VARCHAR→BIGINT） |
 | `crash_date` | standardized | `crash_date`（VARCHAR→DATE） |
 | `crash_time` | direct | `crash_time` |
@@ -103,4 +102,5 @@ LEFT JOIN silver.crash_detail cd
 | `is_duplicate_person` | derived | unique_id重复检查 |
 | `is_orphan_record` | derived | collision_id外键覆盖检查 |
 | `has_missing_aux` | derived | 6个辅助字段全NULL检查 |
+| `source_table` | derived | 固定值 `crash_person_all` |
 | `source_row_hash` | derived | MD5溯源 |

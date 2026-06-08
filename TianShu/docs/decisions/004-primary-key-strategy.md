@@ -26,7 +26,7 @@ Silver 层 11 张表各自有不同的来源特征，不能使用统一的主键
 
 ## Decision（决策）
 
-**采用分级主键策略，根据来源表特征选择不同方案，并在项目中明确记录每张表的选择理由。**
+**采用分级主键策略，根据来源表特征选择不同方案，并在项目中明确记录每张表的选择理由。具体落库主键以 `docs/warehouse/database_design/silver_database_design.md` 为唯一事实源；本文只解释策略依据。**
 
 ### 策略一：自然键直接使用（Natural Key）
 
@@ -36,6 +36,8 @@ Silver 层 11 张表各自有不同的来源特征，不能使用统一的主键
 |---|---|---|
 | `taxi_zone` | `location_id`（INTEGER） | `SELECT COUNT(*) = COUNT(DISTINCT location_id)` |
 | `driver_application_detail` | `app_no`（VARCHAR） | 同上 |
+| `crash_detail` | `collision_id`（BIGINT） | 同上 |
+| `crash_person_detail` | `unique_id`（BIGINT） | 同上 |
 
 规则：
 - 自然键不能为空
@@ -67,8 +69,6 @@ Silver 层 11 张表各自有不同的来源特征，不能使用统一的主键
 | `trip_detail` | `trip_id`（VARCHAR） | `MD5(trip_source + 原始行所有字段拼接)`，确定性哈希 |
 | `vehicle_detail` | `vehicle_id`（BIGINT） | 自增序列（单表场景，行数 ~12 万） |
 | `parking_violation_detail` | `violation_id`（BIGINT） | 自增序列（单表场景） |
-| `crash_detail` | `crash_id`（BIGINT） | 自增序列（单表场景） |
-| `crash_person_detail` | `crash_person_id`（BIGINT） | 自增序列（单表场景） |
 
 关键规则（从踩坑中提炼）：
 - **禁止使用 `ROW_NUMBER() OVER ()`** 作为代理键生成方式——该写法无序，重跑后主键不稳定

@@ -12,6 +12,8 @@ import re
 import sys
 from pathlib import Path
 
+from harness_config import load_harness_config
+
 try:
     import duckdb
 except ImportError:
@@ -53,6 +55,26 @@ def load_bronze_field_counts(db_path: Path) -> dict[str, int]:
             WHERE table_schema = 'bronze'
             GROUP BY table_name
         """).fetchall()
+        return {table: count for table, count in rows}
+    finally:
+        conn.close()
+
+
+def load_schema_field_counts(db_path: Path, schema_name: str) -> dict[str, int]:
+    """读取指定 schema 的实际字段数"""
+    if duckdb is None:
+        raise RuntimeError("duckdb 未安装，无法检查实际 schema")
+    conn = duckdb.connect(str(db_path), read_only=True)
+    try:
+        rows = conn.execute(
+            """
+            SELECT table_name, count(*) AS field_count
+            FROM information_schema.columns
+            WHERE table_schema = ?
+            GROUP BY table_name
+            """,
+            [schema_name],
+        ).fetchall()
         return {table: count for table, count in rows}
     finally:
         conn.close()
@@ -154,10 +176,16 @@ def compare_counts(label: str, left: dict[str, int], right: dict[str, int]) -> l
 
 
 def main() -> int:
+    config = load_harness_config()
     parser = argparse.ArgumentParser(description="schema 一致性检查")
-    parser.add_argument("--project-root", default=r"D:\Program Files\gitvscode\TianShu")
-    parser.add_argument("--db", default=r"D:\ProgramData\Datawarehouse\纽约市城市交通\nyc_transport.duckdb")
-    parser.add_argument("--silver-xlsx", default=r"D:\ProgramData\Datawarehouse\纽约市城市交通\分析报告\Silver层数据字典.xlsx")
+    parser.add_argument("--project-root", default=str(config.project_root))
+    parser.add_argument("--db", default=str(config.duckdb_path))
+    parser.add_argument("--silver-xlsx", default=str(config.silver_dictionary_xlsx))
+    parser.add_argument(
+        "--require-silver-tables",
+        action="store_true",
+        help="启用 Silver 实表强校验，缺表或字段数不一致时失败",
+    )
     args = parser.parse_args()
 
     project_root = Path(args.project_root)
@@ -192,7 +220,15 @@ def main() -> int:
     else:
         violations.append(f"Silver xlsx 不存在: {xlsx_path}")
 
-    warnings.append("Silver 实表尚未建设，已跳过 silver schema 与设计文档一致性检查。")
+    if db_path.exists() and xlsx_path.exists():
+        silver_actual = load_schema_field_counts(db_path, "silver")
+        if silver_actual:
+            violations.extend(compare_counts("Silver设计文档 vs DuckDB", silver_design, silver_actual))
+        elif args.require_silver_tables:
+            for table_name in silver_design:
+                violations.append(f"[Silver schema 缺少表] {table_name}")
+        else:
+            warnings.append("Silver 实表尚未建设，已跳过 silver schema 与设计文档一致性检查。")
 
     for warning in warnings:
         print(f"[WARN] {warning}")

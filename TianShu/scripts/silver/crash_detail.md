@@ -11,7 +11,7 @@
 | 批次 | P2（第三批） |
 | 来源 | `bronze.crash_merged`（1,655,065 行，29 列，全部 VARCHAR） |
 | 预计行数 | 166 万 |
-| 主键 | `crash_id`（BIGINT，代理键），`collision_id`（候选键） |
+| 主键 | `collision_id`（BIGINT，自然键） |
 | 字段数 | 25 |
 
 ## 设计理由
@@ -74,8 +74,7 @@ Bronze 层有按人员类型细分的伤亡统计：
 
 | 字段 | 来源类型 | 来源字段/逻辑 |
 |---|---|---|
-| `crash_id` | derived | 自增代理键 |
-| `collision_id` | standardized | `collision_id`（VARCHAR→BIGINT） |
+| `collision_id` | standardized | `collision_id`（VARCHAR→BIGINT，主键） |
 | `crash_at` | derived | `crash_date + ' ' + crash_time`（VARCHAR合并→TIMESTAMP） |
 | `borough` | direct | `borough` |
 | `zip_code` | direct | `zip_code` |
@@ -98,4 +97,5 @@ Bronze 层有按人员类型细分的伤亡统计：
 | `contributing_factor_2` | direct | `contributing_factor_vehicle_2`（重命名） |
 | `is_duplicate_collision` | derived | collision_id重复检查 |
 | `is_location_missing` | derived | latitude/longitude为NULL检查 |
+| `source_table` | derived | 固定值 `crash_merged` |
 | `source_row_hash` | derived | MD5溯源 |

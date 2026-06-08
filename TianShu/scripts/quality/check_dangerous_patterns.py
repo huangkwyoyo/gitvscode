@@ -16,6 +16,8 @@ import re
 import sys
 from pathlib import Path
 
+from harness_config import load_harness_config
+
 
 # (模式, 严重度, 消息, 来源经验)
 DANGEROUS_PATTERNS: list[dict] = [
@@ -178,10 +180,11 @@ def collect_scan_files(root: Path) -> list[Path]:
 
 
 def main():
+    config = load_harness_config()
     parser = argparse.ArgumentParser(description="危险模式扫描")
     parser.add_argument(
         "--dir",
-        default=r"D:\Program Files\gitvscode\TianShu",
+        default=str(config.project_root),
         help="扫描根目录",
     )
     parser.add_argument(

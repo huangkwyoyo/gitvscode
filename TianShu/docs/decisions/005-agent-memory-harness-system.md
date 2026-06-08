@@ -31,9 +31,11 @@ Agent Memory（经验沉淀层）
 
 Warehouse Harness（规则执行层）
   ├── docs/warehouse/              ← 分层规则 + 数据库设计（最高事实源）
+  ├── docs/standards/              ← 规范索引入口，不重复维护具体规范
   ├── docs/decisions/              ← 架构决策记录（为什么这么做）
   ├── scripts/quality/             ← 自动检查脚本
   ├── tests/                       ← 回归测试
+  ├── harness/                     ← Harness 工程入口、检查清单、配置和报告入口
   ├── agents/review/               ← 审核 Agent 守门
   └── agents/text2sql/             ← 问数 Agent 规则
 ```
@@ -63,7 +65,9 @@ agents/review 在审核阶段拦截
 1. **数据库设计文档是最高事实源**——代码、SQL、Excel、Markdown 冲突时，以数据库设计文档为准
 2. **Agent 只能整理事实，不能创造事实**——所有字段必须可追溯到 Bronze 或 Meta
 3. **AGENTS.md 是规则入口，不是知识垃圾桶**——详细规则拆分到对应文档
-4. **经验必须转化为规则，规则必须转化为检查**——只写复盘而不补检查的闭环是断的
+4. **standards/ 只做规范索引，不做第二事实源**——具体规范维护在 `database_design/`、`data_dictionary/`、分层 `AGENTS.md`
+5. **harness/ 只做工程执行入口，不做第二事实源**——检查清单和配置可以放在 Harness，但 schema 和字典仍归属 `docs/warehouse/`
+6. **经验必须转化为规则，规则必须转化为检查**——只写复盘而不补检查的闭环是断的
 
 ## Alternatives（替代方案）
 

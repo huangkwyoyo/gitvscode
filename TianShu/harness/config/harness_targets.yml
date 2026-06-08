@@ -1,0 +1,29 @@
+﻿# TianShu Harness 检查目标配置
+#
+# 说明：
+# - 本文件只登记 Harness 运行目标，不定义正式 schema。
+# - 正式表结构以 docs/warehouse/database_design/ 为准。
+# - 字段字典和枚举值说明以 docs/warehouse/data_dictionary/ 为准。
+
+project:
+  root: "D:\\Program Files\\gitvscode\\TianShu"
+
+warehouse:
+  duckdb_path: "D:\\ProgramData\\Datawarehouse\\纽约市城市交通\\nyc_transport.duckdb"
+  silver_dictionary_xlsx: "D:\\ProgramData\\Datawarehouse\\纽约市城市交通\\分析报告\\Silver层数据字典.xlsx"
+  official_dictionary_dir: "D:\\ProgramData\\Datawarehouse\\纽约市城市交通\\官方数据字典"
+
+facts:
+  database_design_dir: "docs/warehouse/database_design"
+  data_dictionary_dir: "docs/warehouse/data_dictionary"
+  memory_dir: "docs/memory"
+  standards_index_dir: "docs/standards"
+
+checks:
+  silver_dictionary: "scripts/quality/check_silver_dictionary.py"
+  dangerous_patterns: "scripts/quality/check_dangerous_patterns.py"
+  schema_consistency: "scripts/quality/check_schema_consistency.py"
+  all_checks: "scripts/quality/run_all_checks.py"
+
+tests:
+  silver_dictionary: "tests/test_silver_dictionary.py"

@@ -8,15 +8,15 @@
 |---|---|---|---|---|
 | P0 | `silver.dim_date` | 日期维表 | [dim_date.md](dim_date.md) | 10 |
 | P0 | `silver.taxi_zone` | 出租车区域标准维表 | [taxi_zone.md](taxi_zone.md) | 5 |
-| P0 | `silver.trip_detail` | 行程明细标准表 | [trip_detail.md](trip_detail.md) | 42 |
+| P0 | `silver.trip_detail` | 行程明细标准表 | [trip_detail.md](trip_detail.md) | 39 |
 | P1 | `silver.vehicle_detail` | 车辆明细标准表 | [vehicle_detail.md](vehicle_detail.md) | 25 |
 | P1 | `silver.driver_detail` | 司机明细标准表 | [driver_detail.md](driver_detail.md) | 11 |
 | P1 | `silver.base_detail` | 基地月度明细标准表 | [base_detail.md](base_detail.md) | 12 |
 | P1 | `silver.driver_application_detail` | 司机申请明细标准表 | [driver_application_detail.md](driver_application_detail.md) | 14 |
-| P2 | `silver.parking_violation_detail` | 停车罚单明细标准表 | [parking_violation_detail.md](parking_violation_detail.md) | 36 |
+| P2 | `silver.parking_violation_detail` | 停车罚单明细标准表 | [parking_violation_detail.md](parking_violation_detail.md) | 32 |
 | P2 | `silver.tif_payment_detail` | TIF支付明细标准表 | [tif_payment_detail.md](tif_payment_detail.md) | 11 |
-| P2 | `silver.crash_detail` | 事故明细标准表 | [crash_detail.md](crash_detail.md) | 22 |
-| P2 | `silver.crash_person_detail` | 事故人员明细标准表 | [crash_person_detail.md](crash_person_detail.md) | 20 |
+| P2 | `silver.crash_detail` | 事故明细标准表 | [crash_detail.md](crash_detail.md) | 25 |
+| P2 | `silver.crash_person_detail` | 事故人员明细标准表 | [crash_person_detail.md](crash_person_detail.md) | 22 |
 
 ## 数据字典
 
@@ -26,7 +26,7 @@
 
 ## 通用设计原则
 
-1. **代理键统一**：除维表外，所有事实表使用自增 BIGINT 代理键，避免依赖 Bronze 层自然键。
+1. **主键策略服从正式设计文档**：每张表的主键以 `docs/warehouse/database_design/silver_database_design.md` 为准；可使用自然键、复合键或确定性代理键，不再默认所有事实表自增。
 2. **类型强制转换**：Bronze 层 CSV 导入的全 VARCHAR 字段必须转为目标类型（DATE、INTEGER、BIGINT、DECIMAL、DOUBLE）。
 3. **金额 DECIMAL**：所有货币字段统一 DECIMAL(12,2)，避免浮点精度问题。
 4. **质量标记不丢弃**：异常数据标记但不删除，下游可自行决定是否过滤。

@@ -8,6 +8,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from harness_config import load_harness_config
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
@@ -29,12 +31,38 @@ def run_step(name: str, command: list[str]) -> int:
 
 def main() -> int:
     """运行全部 Harness 检查"""
+    config = load_harness_config()
     python = sys.executable
     steps = [
-        ("Silver 数据字典一致性", [python, "scripts/quality/check_silver_dictionary.py"]),
-        ("危险模式扫描", [python, "scripts/quality/check_dangerous_patterns.py"]),
-        ("schema 一致性", [python, "scripts/quality/check_schema_consistency.py"]),
+        (
+            "Silver 数据字典一致性",
+            [
+                python,
+                "scripts/quality/check_silver_dictionary.py",
+                "--xlsx",
+                str(config.silver_dictionary_xlsx),
+                "--bronze-db",
+                str(config.duckdb_path),
+                "--plan-dir",
+                str(config.project_root / "scripts" / "silver"),
+            ],
+        ),
+        ("危险模式扫描", [python, "scripts/quality/check_dangerous_patterns.py", "--dir", str(config.project_root)]),
+        (
+            "schema 一致性",
+            [
+                python,
+                "scripts/quality/check_schema_consistency.py",
+                "--project-root",
+                str(config.project_root),
+                "--db",
+                str(config.duckdb_path),
+                "--silver-xlsx",
+                str(config.silver_dictionary_xlsx),
+            ],
+        ),
         ("Silver 数据字典回归测试", [python, "-m", "pytest", "tests/test_silver_dictionary.py", "-v"]),
+        ("Harness 自检回归测试", [python, "-m", "pytest", "tests/test_harness_quality.py", "-v"]),
     ]
 
     failed = 0
