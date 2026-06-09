@@ -73,6 +73,12 @@ def main() -> int:
         ]),
         ("Gold 设计门禁", [python, "scripts/quality/check_gold_design.py"]),
         ("Gold 物理表门禁", [python, "scripts/quality/check_gold_physical.py", "--batches", "G0,G1"]),
+        ("Gold 空值画像", [
+            python,
+            "scripts/quality/check_gold_null.py",
+            "--baseline",
+            str(config.project_root / "harness" / "config" / "gold_sparsity_baseline.yml"),
+        ]),
         ("Memory Gate", [python, "scripts/quality/check_memory_update.py"]),
         ("Silver 数据字典回归测试", [python, "-m", "pytest", "tests/test_silver_dictionary.py", "-v"]),
         ("Harness 自检回归测试", [python, "-m", "pytest", "tests/test_harness_quality.py", "-v"]),

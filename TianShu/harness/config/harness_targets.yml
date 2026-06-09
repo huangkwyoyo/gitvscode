@@ -28,6 +28,8 @@ checks:
   silver_sparsity_baseline: "harness/config/silver_sparsity_baseline.yml"
   gold_design: "scripts/quality/check_gold_design.py"
   gold_physical: "scripts/quality/check_gold_physical.py"
+  gold_null: "scripts/quality/check_gold_null.py"
+  gold_sparsity_baseline: "harness/config/gold_sparsity_baseline.yml"
   memory_update: "scripts/quality/check_memory_update.py"
   all_checks: "scripts/quality/run_all_checks.py"
 
