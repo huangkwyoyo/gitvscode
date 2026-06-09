@@ -15,6 +15,7 @@ class HarnessConfig:
     """保存 Harness 运行所需的核心路径"""
 
     project_root: Path
+    stage: str
     duckdb_path: Path
     silver_dictionary_xlsx: Path
     official_dictionary_dir: Path
@@ -40,11 +41,13 @@ def load_harness_config(config_path: Path | None = None) -> HarnessConfig:
 
     data: dict[str, Any] = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
     project_root = Path(data["project"]["root"]).resolve()
+    stage = data["project"].get("stage", "pre_silver_build")
     warehouse = data["warehouse"]
     facts = data["facts"]
 
     return HarnessConfig(
         project_root=project_root,
+        stage=stage,
         duckdb_path=_resolve_path(project_root, warehouse["duckdb_path"]),
         silver_dictionary_xlsx=_resolve_path(project_root, warehouse["silver_dictionary_xlsx"]),
         official_dictionary_dir=_resolve_path(project_root, warehouse["official_dictionary_dir"]),

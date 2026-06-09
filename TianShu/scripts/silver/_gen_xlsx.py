@@ -35,10 +35,10 @@ overview = [
     ['P1', 'silver.driver_detail', '司机明细标准表', '供给域', '维表', 11, '~36万', 'license_number + driver_type', 'fhv_active_drivers + shl_active_drivers'],
     ['P1', 'silver.base_detail', '基地月度明细标准表', '供给域', '事实表', 12, '~5.9万', 'composite_key', 'bronze.fhv_base_aggregate_report'],
     ['P1', 'silver.driver_application_detail', '司机申请明细标准表', '监管合规域', '事实表', 14, '4,076', 'app_no', 'bronze.new_driver_applications'],
-    ['P2', 'silver.parking_violation_detail', '停车罚单明细标准表', '监管合规域', '事实表', 32, '958万', 'violation_id（代理键）', 'bronze.parking_violations_all'],
-    ['P2', 'silver.tif_payment_detail', 'TIF支付明细标准表', '监管合规域', '事实表', 11, '~4.8万', 'composite_key', 'bronze.tif_medallion_payments'],
-    ['P2', 'silver.crash_detail', '事故明细标准表', '安全域', '事实表', 25, '166万', 'collision_id', 'bronze.crash_merged'],
-    ['P2', 'silver.crash_person_detail', '事故人员明细标准表', '安全域', '事实表', 22, '533万', 'unique_id', 'bronze.crash_person_all'],
+    ['P2', 'silver.parking_violation_detail', '停车罚单明细标准表', '监管合规域', '事实表', 33, '958万', 'violation_id（代理键）', 'bronze.parking_violations_all'],
+    ['P2', 'silver.tif_payment_detail', 'TIF支付明细标准表', '监管合规域', '事实表', 12, '~4.8万', 'payment_id（代理键）', 'bronze.tif_medallion_payments'],
+    ['P2', 'silver.crash_detail', '事故明细标准表', '安全域', '事实表', 26, '166万', 'crash_id（代理键）', 'bronze.crash_merged'],
+    ['P2', 'silver.crash_person_detail', '事故人员明细标准表', '安全域', '事实表', 24, '533万', 'crash_person_id（代理键）', 'bronze.crash_person_all'],
 ]
 
 fill_map = {'P0': p0_fill, 'P1': p1_fill, 'P2': p2_fill}
@@ -409,6 +409,7 @@ parking_fields = [
     # 质量标记
     ('is_duplicate_summons', '是否重复罚单', 'BOOLEAN', '质量标记', 'summons_number 出现 > 1 次时为 TRUE', ''),
     ('source_row_hash', '来源行哈希', 'VARCHAR(64)', '溯源字段', 'MD5 溯源', '用于数据血缘追踪'),
+    ('source_table', '来源表', 'VARCHAR', '溯源字段', '固定值 parking_violations_all', ''),
 ]
 make_sheet(wb, 'parking_violation_detail', 'silver.parking_violation_detail', '停车罚单明细标准表', parking_fields)
 
@@ -425,11 +426,13 @@ tif_fields = [
     ('last_time_updated', '最后更新时间', 'VARCHAR', '时间字段', 'HH:MM:SS 格式', '保留 VARCHAR'),
     ('composite_key', '复合键', 'VARCHAR', '候选键', 'license_number + _ + payment_date', '用于去重'),
     ('is_duplicate_key', '是否复合键重复', 'BOOLEAN', '质量标记', '复合键出现 > 1 次时为 TRUE', ''),
+    ('source_table', '来源表', 'VARCHAR', '溯源字段', '固定值 tif_medallion_payments', ''),
 ]
 make_sheet(wb, 'tif_payment_detail', 'silver.tif_payment_detail', 'TIF支付明细标准表', tif_fields)
 
 # crash_detail
 crash_fields = [
+    ('crash_id', '事故代理主键', 'BIGINT', '主键', '稳定代理键', '按 collision_id 排序生成'),
     ('collision_id', '事故编号', 'BIGINT', '主键', '原始事故编号', 'VARCHAR→BIGINT。需验证唯一性'),
     ('crash_at', '事故时间', 'TIMESTAMP', '时间字段', 'crash_date + crash_time 合并', '不允许为空。VARCHAR 合并→TIMESTAMP'),
     ('borough', '行政区', 'VARCHAR', '维度属性', '事故所在行政区', '缺失率 30.4%'),
@@ -463,6 +466,7 @@ make_sheet(wb, 'crash_detail', 'silver.crash_detail', '事故明细标准表', c
 
 # crash_person_detail
 person_fields = [
+    ('crash_person_id', '事故人员代理主键', 'BIGINT', '主键', '稳定代理键', '按 unique_id 排序生成'),
     ('unique_id', '人员记录编号', 'BIGINT', '主键', '原始人员记录唯一编号', 'VARCHAR→BIGINT。需验证唯一性'),
     ('collision_id', '事故编号', 'BIGINT', '维度外键', '关联 silver.crash_detail.collision_id', '需验证与 crash_detail 的覆盖关系'),
     ('crash_date', '事故日期', 'DATE', '时间字段', '事故发生日期', 'VARCHAR→DATE'),
@@ -486,6 +490,7 @@ person_fields = [
     ('is_duplicate_person', '是否重复记录', 'BOOLEAN', '质量标记', 'unique_id 出现 > 1 次时为 TRUE', ''),
     ('is_orphan_record', '是否孤立记录', 'BOOLEAN', '质量标记', 'collision_id 在 silver.crash_detail 中不存在时为 TRUE', '当前覆盖不完全'),
     ('has_missing_aux', '是否缺失辅助字段', 'BOOLEAN', '质量标记', '6 个辅助字段全部为 NULL 时为 TRUE', ''),
+    ('is_age_anomaly', '是否年龄异常', 'BOOLEAN', '质量标记', 'person_age < 0 或 > 120 或 NULL 时为 TRUE', '约 4,075 行异常'),
     ('source_table', '来源表', 'VARCHAR', '溯源字段', '固定值 crash_person_all', ''),
     ('source_row_hash', '来源行哈希', 'VARCHAR(64)', '溯源字段', 'MD5 溯源', ''),
 ]

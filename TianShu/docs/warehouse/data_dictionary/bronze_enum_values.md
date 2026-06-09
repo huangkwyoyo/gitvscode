@@ -562,7 +562,7 @@
 
 ### 7.3 其他待补充
 
-4. **VEH 字段 9 个代码** — 详见 [`VEH字段映射分析.md`](./VEH字段映射分析.md)，TLC 未公开发布此字段的映射表
+4. **VEH 字段 9 个代码** — TLC 未公开发布此字段的映射表，当前含义基于 TLC Green Rides 规则和行业术语推断
 5. **DMV Insurance Code 完整 26 种映射** — 已确认 9 种，剩余通过 [NY DFS 查询工具](https://myportal.dfs.ny.gov/companydirectory) 逐条核对
 6. **vehicle_body_type 标准化映射** — 642 种取值需先标准化再映射
 7. **issuing_agency 完整 29 种代码** — 已确认 7 种主要机构
@@ -609,4 +609,4 @@
 
 > **说明**：通过 MV-104AN PDF OCR 验证，`ped_action`/`safety_equipment`/`position_in_vehicle` 的文本编码已全部确认。⚠️ NYPD 遗留项为 NYPD AABS 旧系统产生的纯数字异常代码（如 `35`–`37`），其编码手册未在公开渠道发布。<br>
 > 其他 ⚠️ 推断项：`plate_type` 84 种全部确认，`DMV Insurance Code` 9/26 确认，`VEH` 和 `registration_state` 合理推断。<br>
-> 详见 [`MV104AN编码手册验证报告.md`](../../memory/MV104AN编码手册验证报告.md) 和 [`VEH字段映射分析报告.md`](../../memory/VEH字段映射分析报告.md)。
+> MV-104AN 编码验证基于 NYSDMV 官方 PDF（`nyc_mv104an_rev072001_sub04142006web.pdf`）的 EasyOCR 提取；VEH 字段推断基于 TLC Green Rides Initiative 官方规则和行业术语。

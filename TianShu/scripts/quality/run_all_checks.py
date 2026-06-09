@@ -33,6 +33,19 @@ def main() -> int:
     """运行全部 Harness 检查"""
     config = load_harness_config()
     python = sys.executable
+    schema_command = [
+        python,
+        "scripts/quality/check_schema_consistency.py",
+        "--project-root",
+        str(config.project_root),
+        "--db",
+        str(config.duckdb_path),
+        "--silver-xlsx",
+        str(config.silver_dictionary_xlsx),
+    ]
+    if config.stage in ("post_silver_build", "pre_gold_build") or config.stage.startswith("gold"):
+        schema_command.append("--require-silver-tables")
+
     steps = [
         (
             "Silver 数据字典一致性",
@@ -50,19 +63,21 @@ def main() -> int:
         ("危险模式扫描", [python, "scripts/quality/check_dangerous_patterns.py", "--dir", str(config.project_root)]),
         (
             "schema 一致性",
-            [
-                python,
-                "scripts/quality/check_schema_consistency.py",
-                "--project-root",
-                str(config.project_root),
-                "--db",
-                str(config.duckdb_path),
-                "--silver-xlsx",
-                str(config.silver_dictionary_xlsx),
-            ],
+            schema_command,
         ),
+        ("Silver 空值画像", [
+            python,
+            "scripts/quality/check_silver_null.py",
+            "--baseline",
+            str(config.project_root / "harness" / "config" / "silver_sparsity_baseline.yml"),
+        ]),
+        ("Gold 设计门禁", [python, "scripts/quality/check_gold_design.py"]),
+        ("Gold 物理表门禁", [python, "scripts/quality/check_gold_physical.py", "--batches", "G0,G1"]),
+        ("Memory Gate", [python, "scripts/quality/check_memory_update.py"]),
         ("Silver 数据字典回归测试", [python, "-m", "pytest", "tests/test_silver_dictionary.py", "-v"]),
         ("Harness 自检回归测试", [python, "-m", "pytest", "tests/test_harness_quality.py", "-v"]),
+        ("Gold 设计门禁回归测试", [python, "-m", "pytest", "tests/test_gold_design_quality.py", "-v"]),
+        ("Gold 构建回归测试", [python, "-m", "pytest", "tests/test_gold_build_quality.py", "-v"]),
     ]
 
     failed = 0

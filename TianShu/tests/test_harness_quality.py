@@ -1,5 +1,5 @@
 """
-Harness 质量门禁回归测试
+Harness 质量门禁回归测试。
 
 这些测试约束 Harness 自身的行为，避免门禁被静默跳过。
 """
@@ -56,8 +56,8 @@ def test_harness_config_loader_reads_targets():
     assert config.silver_dictionary_xlsx.name == "Silver层数据字典.xlsx"
 
 
-def test_schema_consistency_requires_silver_tables_when_enabled():
-    """启用 Silver 实表强校验后，空 Silver schema 必须失败"""
+def test_schema_consistency_requires_silver_tables_after_build():
+    """Silver 建成后，实表强校验必须通过，不能继续按空 schema 逻辑跳过"""
     result = run_quality_command(
         [
             "scripts/quality/check_schema_consistency.py",
@@ -65,5 +65,35 @@ def test_schema_consistency_requires_silver_tables_when_enabled():
         ]
     )
 
+    assert result.returncode == 0
+    assert "Silver 实表尚未建设" not in result.stdout
+
+
+def test_memory_gate_fails_when_critical_change_has_no_memory_update():
+    """关键变更没有同步核心记忆文件时必须失败"""
+    result = run_quality_command(
+        [
+            "scripts/quality/check_memory_update.py",
+            "--changed-file",
+            "M::scripts/silver/build_silver_duckdb.py",
+        ]
+    )
+
     assert result.returncode != 0
-    assert "Silver schema 缺少表" in result.stdout
+    assert "关键变更未同步更新核心记忆文件" in result.stdout
+
+
+def test_memory_gate_passes_when_core_memory_updated():
+    """关键变更同步更新核心记忆文件时应通过"""
+    result = run_quality_command(
+        [
+            "scripts/quality/check_memory_update.py",
+            "--changed-file",
+            "M::scripts/silver/build_silver_duckdb.py",
+            "--changed-file",
+            "M::docs/memory/经验复盘.md",
+        ]
+    )
+
+    assert result.returncode == 0
+    assert "Memory Gate 检查通过" in result.stdout

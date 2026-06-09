@@ -7,6 +7,7 @@
 
 project:
   root: "D:\\Program Files\\gitvscode\\TianShu"
+  stage: "gold_g0_g1_build"
 
 warehouse:
   duckdb_path: "D:\\ProgramData\\Datawarehouse\\纽约市城市交通\\nyc_transport.duckdb"
@@ -23,7 +24,15 @@ checks:
   silver_dictionary: "scripts/quality/check_silver_dictionary.py"
   dangerous_patterns: "scripts/quality/check_dangerous_patterns.py"
   schema_consistency: "scripts/quality/check_schema_consistency.py"
+  silver_null: "scripts/quality/check_silver_null.py"
+  silver_sparsity_baseline: "harness/config/silver_sparsity_baseline.yml"
+  gold_design: "scripts/quality/check_gold_design.py"
+  gold_physical: "scripts/quality/check_gold_physical.py"
+  memory_update: "scripts/quality/check_memory_update.py"
   all_checks: "scripts/quality/run_all_checks.py"
 
 tests:
   silver_dictionary: "tests/test_silver_dictionary.py"
+  harness_quality: "tests/test_harness_quality.py"
+  gold_design_quality: "tests/test_gold_design_quality.py"
+  gold_build_quality: "tests/test_gold_build_quality.py"

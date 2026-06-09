@@ -16,8 +16,18 @@
 
 - `AGENTS.md` 放必须遵守的硬规则。
 - `docs/standards/` 只做规范索引和入口，不重复维护具体规范。
+- `docs/standards/` 不是自动触发器。规范必须被 `scripts/quality/` 检查脚本、`run_all_checks.py`、Git hook 或 CI 调用后，才具备自动拦截能力。
 - `docs/warehouse/database_design/` 维护数据库设计事实源。
 - `docs/warehouse/data_dictionary/` 维护字段字典、枚举值（状态码/标志位/分类代码）说明规范。
 - `docs/warehouse/*/AGENTS.md` 维护分层建模规则。
 - 数据库设计文档、字段字典、SQL、实际数据库 schema 发生冲突时，以 `docs/warehouse/database_design/` 中的正式设计文档为最高事实源。
 - 所有面向中文用户和中文 Agent 的数据文档，必须同时保留英文技术名和中文业务名。
+
+## 自动生效条件
+
+规范文档只定义规则，不会自行检查 DuckDB 实表。以下条件同时满足时，规范才算进入 Harness 闭环：
+
+1. 规则有对应质量脚本，例如 `check_schema_consistency.py`、`check_memory_update.py`、`check_silver_null.py`。
+2. 质量脚本已接入 `scripts/quality/run_all_checks.py`。
+3. 项目阶段配置启用了对应强校验，例如 Silver 建成后必须启用 `--require-silver-tables`。
+4. 本地 Git hook、CI 或 PR required check 自动运行统一门禁。

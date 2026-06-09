@@ -2,7 +2,7 @@
 
 ## 当前阶段
 
-Silver 层 11 张表全部建成（P0/P1/P2），~9,700 万行，质量门禁通过。准备进入 Gold 层。
+Silver 层 11 张表已完成修复并通过 post-Silver 强校验。Gold G0/G1 维表已落库并通过 Gold 设计门禁和物理表门禁。当前阶段进入 Gold G2 事实表建设准备。
 
 ## 最近完成
 
@@ -10,7 +10,7 @@ Silver 层 11 张表全部建成（P0/P1/P2），~9,700 万行，质量门禁通
 - [x] Silver P0：dim_date(90行) + taxi_zone(265行) + trip_detail(8,032万行)
 - [x] Silver P1：vehicle_detail(12万) + driver_detail(36万) + base_detail(5.9万) + driver_application_detail(4,076)
 - [x] Silver P2：parking_violation_detail(958万) + tif_payment_detail(4.8万) + crash_detail(166万) + crash_person_detail(533万)
-- [x] Meta 中文注释已写入：11 条表级 + 201 条字段级
+- [x] Meta 中文注释已写入：11 条表级 + 210 条字段级
 - [x] Silver 层构建耗时 464 秒（trip_detail 466s，其余表均 < 5s）
 - [x] Bronze 枚举值字典已完善（95 项 ✅，6 项 ⚠️，5 项 NYPD 遗留）
 - [x] 枚举值识别方法论已建立（`docs/warehouse/data_dictionary/枚举值识别方法论.md`）
@@ -25,6 +25,14 @@ Silver 层 11 张表全部建成（P0/P1/P2），~9,700 万行，质量门禁通
 - [x] `scripts/quality/run_all_checks.py` 统一 Harness 检查入口已实现
 - [x] `docs/warehouse/database_design/gold_database_design.md` 已创建为 Gold 设计入口
 - [x] Harness 全量检查已通过（Silver 字典一致性、危险模式、schema 一致性、pytest）
+- [x] Memory Gate 已接入 `run_all_checks.py`，关键变更必须同步更新 `docs/memory`
+- [x] Silver 字段漂移已修复：数据库设计、Silver xlsx、DuckDB 实表、`meta.column_comments` 已一致
+- [x] Silver 日期和金额转换已修复：美国日期、ISO 日期、TIF 美元金额不再因 `TRY_CAST` 静默失败而全 NULL
+- [x] Gold 层数据库设计入口已升级为字段级方案草案，明确中文名来源、事实表粒度、维表来源和建设批次
+- [x] Gold 设计门禁已接入：`scripts/quality/check_gold_design.py`
+- [x] Gold G0/G1 维表已建设：`dim_date`、`dim_taxi_zone`、`dim_vehicle`、`dim_driver`、`dim_base`、`dim_violation_type`
+- [x] Gold 物理表门禁已接入：`scripts/quality/check_gold_physical.py --batches G0,G1`
+- [x] Gold G0/G1 中文表注释和字段注释已写入 `meta.table_comments`、`meta.column_comments`
 - [x] `docs/standards/` 已调整为规范索引入口，不重复维护数据库设计或字段字典规范
 - [x] `docs/modeling/README.md` 已调整为建模索引入口
 - [x] 官方数据字典位置已登记到 `docs/warehouse/data_dictionary/README.md`
@@ -42,16 +50,20 @@ Silver 层 11 张表全部建成（P0/P1/P2），~9,700 万行，质量门禁通
 5. [x] 实现 `scripts/quality/check_silver_dictionary.py` 检查脚本 ✅
 6. [x] 实现 `scripts/quality/check_dangerous_patterns.py` 危险模式扫描 ✅
 7. [x] 实现 `tests/test_silver_dictionary.py` 回归测试（6 个用例，6 passed） ✅
-8. [x] 修复 `_gen_xlsx.py` 中 trip_detail (42→39)、parking_violation (36→32)、crash (22→25)、crash_person (20→22) 字段数 ✅
+8. [x] 修复 `_gen_xlsx.py` 中字段数：trip_detail 39、parking_violation 33、tif_payment 12、crash 26、crash_person 23 ✅
 9. [x] 启用 Silver 字段来源类型测试 ✅
 10. [x] 实现 `scripts/quality/check_schema_consistency.py` ✅
 11. [x] 实现 `scripts/quality/run_all_checks.py` ✅
-12. [ ] 开始生成 Silver 建表 SQL
-13. [ ] 执行 Silver 数据质量校验
+12. [x] 生成并执行 Silver 建表脚本 ✅
+13. [x] 执行 Silver 数据质量校验 ✅
+14. [x] 进入 Gold 层数据库设计和星型模型落地方案 ✅
+15. [x] 建设 Gold G0/G1 公共维表和业务维表 ✅
+16. [ ] 建设 Gold G2 明细事实表
+17. [ ] 建设 Gold G3 汇总表和中文语义层
 
 ## 阻塞点
 
-无阻塞。Harness 最小闭环已完成。
+无阻塞。post-Silver Harness 强校验和 Gold G0/G1 门禁已完成。
 
 ## 重要注意
 
@@ -66,7 +78,10 @@ Silver 层 11 张表全部建成（P0/P1/P2），~9,700 万行，质量门禁通
 - 字段中的状态码、标志位、分类代码等枚举值必须补中文含义；无法确认时标记 `Human Review`。
 - 每次文档、字段字典、SQL 或 schema 变更后，运行 `python scripts/quality/run_all_checks.py`。
 - 运行 Harness 前需关闭占用 `nyc_transport.duckdb` 的桌面工具，例如 DBeaver；否则 DuckDB 读取检查会因文件锁失败。
-- 当前 Silver 实表尚未建设，schema 一致性检查会跳过 Silver 实表对比；Silver 建表后需要启用实表一致性检查。
+- 当前项目阶段已从 `post_silver_build` 推进到 `gold_g0_g1_build`，schema 一致性检查仍必须启用 Silver 实表强校验。
+- `check_silver_null.py` 会输出高缺失字段画像。高缺失不一定是错误，需结合源表适用范围判断；但全 NULL 的日期、金额字段必须优先排查转换逻辑。
+- 当前 Harness 阶段为 `gold_g0_g1_build`，全量检查会同时执行 Gold 设计门禁和 Gold G0/G1 物理门禁。
+- `gold.dim_violation_type` 的金额字段当前为 `NULL`，`source_status='human_review'`；不得在事实表中直接编造罚款金额。
 
 ## 数据库位置
 

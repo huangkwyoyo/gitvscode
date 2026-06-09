@@ -136,10 +136,10 @@ def test_field_count_matches_plan(silver_dict):
         "driver_detail": 11,
         "base_detail": 12,
         "driver_application_detail": 14,
-        "parking_violation_detail": 32,
-        "tif_payment_detail": 11,
-        "crash_detail": 25,
-        "crash_person_detail": 22,
+        "parking_violation_detail": 33,
+        "tif_payment_detail": 12,
+        "crash_detail": 26,
+        "crash_person_detail": 24,
     }
 
     for table_name, expected in expected_counts.items():
