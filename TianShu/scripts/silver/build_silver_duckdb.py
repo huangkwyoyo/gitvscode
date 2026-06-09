@@ -411,7 +411,10 @@ def build_vehicle_detail(con: duckdb.DuckDBPyConnection, replace: bool = False) 
                 CAST("License Type" AS VARCHAR) AS license_type,
                 CAST("TLC Vehicle License Status" AS VARCHAR) AS license_status,
                 CAST("Owner Name" AS VARCHAR) AS owner_name,
-                TRY_CAST("Expiration Date" AS DATE) AS expiration_date,
+                COALESCE(
+                    CAST(try_strptime("Expiration Date", '%Y-%m-%d') AS DATE),
+                    CAST(try_strptime("Expiration Date", '%m/%d/%Y') AS DATE)
+                ) AS expiration_date,
                 CAST("DMV Plate Number" AS VARCHAR) AS dmv_plate_number,
                 CAST("VIN" AS VARCHAR) AS vin,
                 CAST("Vehicle Make" AS VARCHAR) AS vehicle_make,
@@ -422,7 +425,10 @@ def build_vehicle_detail(con: duckdb.DuckDBPyConnection, replace: bool = False) 
                 CAST("Stretch Limo" AS VARCHAR) AS stretch_limo,
                 CAST("Insurance Carrier Name" AS VARCHAR) AS insurance_carrier,
                 CAST("Automobile Insurance Policy Number" AS VARCHAR) AS insurance_policy_number,
-                TRY_CAST("Last Date Updated" AS DATE) AS last_date_updated,
+                COALESCE(
+                    CAST(try_strptime("Last Date Updated", '%Y-%m-%d') AS DATE),
+                    CAST(try_strptime("Last Date Updated", '%m/%d/%Y') AS DATE)
+                ) AS last_date_updated,
                 CAST('active_vehicles' AS VARCHAR) AS source_table
             FROM bronze.active_vehicles
         ),
@@ -502,9 +508,9 @@ def build_driver_detail(con: duckdb.DuckDBPyConnection, replace: bool = False) -
                     'FHV' AS driver_type,
                     NULL::INTEGER AS status_code,
                     NULL::VARCHAR AS status_description,
-                    TRY_CAST("Expiration Date" AS DATE) AS expiration_date,
+                    CAST(try_strptime("Expiration Date", '%m/%d/%Y') AS DATE) AS expiration_date,
                     CAST("Wheelchair Accessible Trained" AS VARCHAR) AS wav_trained,
-                    TRY_CAST("Last Date Updated" AS DATE) AS last_date_updated,
+                    CAST(try_strptime("Last Date Updated", '%m/%d/%Y') AS DATE) AS last_date_updated,
                     CAST("Last Time Updated" AS VARCHAR) AS last_time_updated,
                     CAST('fhv_active_drivers' AS VARCHAR) AS source_table
                 FROM bronze.fhv_active_drivers
@@ -515,9 +521,9 @@ def build_driver_detail(con: duckdb.DuckDBPyConnection, replace: bool = False) -
                     'SHL' AS driver_type,
                     TRY_CAST("Status Code" AS INTEGER) AS status_code,
                     CAST("Status Description" AS VARCHAR) AS status_description,
-                    TRY_CAST("Expiration Date" AS DATE) AS expiration_date,
+                    CAST(try_strptime("Expiration Date", '%m/%d/%Y') AS DATE) AS expiration_date,
                     NULL::VARCHAR AS wav_trained,
-                    TRY_CAST("Last Date Updated" AS DATE) AS last_date_updated,
+                    CAST(try_strptime("Last Date Updated", '%m/%d/%Y') AS DATE) AS last_date_updated,
                     CAST("Last Time Updated" AS VARCHAR) AS last_time_updated,
                     CAST('shl_active_drivers' AS VARCHAR) AS source_table
                 FROM bronze.shl_active_drivers
@@ -575,9 +581,9 @@ def build_base_detail(con: duckdb.DuckDBPyConnection, replace: bool = False) -> 
                 TRY_CAST("Year" AS INTEGER) AS year,
                 TRY_CAST("Month" AS INTEGER) AS month,
                 CAST("Month Name" AS VARCHAR) AS month_name,
-                TRY_CAST("Total Dispatched Trips" AS BIGINT) AS total_dispatched_trips,
-                TRY_CAST("Total Dispatched Shared Trips" AS BIGINT) AS total_dispatched_shared_trips,
-                TRY_CAST("Unique Dispatched Vehicles" AS BIGINT) AS unique_dispatched_vehicles
+                TRY_CAST(regexp_replace("Total Dispatched Trips", ',', '', 'g') AS BIGINT) AS total_dispatched_trips,
+                TRY_CAST(regexp_replace("Total Dispatched Shared Trips", ',', '', 'g') AS BIGINT) AS total_dispatched_shared_trips,
+                TRY_CAST(regexp_replace("Unique Dispatched Vehicles", ',', '', 'g') AS BIGINT) AS unique_dispatched_vehicles
             FROM bronze.fhv_base_aggregate_report
         )
     """)
@@ -612,7 +618,7 @@ def build_driver_application_detail(con: duckdb.DuckDBPyConnection, replace: boo
             SELECT
                 CAST("App No" AS VARCHAR) AS app_no,
                 CAST("Type" AS VARCHAR) AS application_type,
-                TRY_CAST("App Date" AS DATE) AS app_date,
+                CAST(try_strptime("App Date", '%m/%d/%Y') AS DATE) AS app_date,
                 CAST("Status" AS VARCHAR) AS status,
                 CAST("FRU Interview Scheduled" AS VARCHAR) AS fru_interview_scheduled,
                 CAST("Drug Test" AS VARCHAR) AS drug_test,
@@ -621,7 +627,7 @@ def build_driver_application_detail(con: duckdb.DuckDBPyConnection, replace: boo
                 CAST("Driver Exam" AS VARCHAR) AS driver_exam,
                 CAST("Medical Clearance Form" AS VARCHAR) AS medical_clearance_form,
                 CAST("Other Requirements" AS VARCHAR) AS other_requirements,
-                TRY_CAST("Last Updated" AS DATE) AS last_updated
+                CAST(try_strptime("Last Updated", '%m/%d/%Y %I:%M:%S %p') AS DATE) AS last_updated
             FROM bronze.new_driver_applications
         )
         SELECT
@@ -670,9 +676,19 @@ def build_parking_violation_detail(con: duckdb.DuckDBPyConnection, replace: bool
             CAST(violation_description AS VARCHAR) AS violation_description,
             CAST(vehicle_body_type AS VARCHAR) AS vehicle_body_type,
             CAST(vehicle_make AS VARCHAR) AS vehicle_make,
+            CAST(street_code1 AS VARCHAR) AS street_code1,
+            CAST(street_code2 AS VARCHAR) AS street_code2,
+            CAST(street_code3 AS VARCHAR) AS street_code3,
             CAST(vehicle_color AS VARCHAR) AS vehicle_color,
             TRY_CAST(vehicle_year AS INTEGER) AS vehicle_year,
-            TRY_CAST(vehicle_expiration_date AS DATE) AS vehicle_expiration_date,
+            CAST(try_strptime(
+                CASE
+                    WHEN regexp_matches(CAST(vehicle_expiration_date AS VARCHAR), '^[0-9]{8}$')
+                    THEN CAST(vehicle_expiration_date AS VARCHAR)
+                    ELSE NULL
+                END,
+                '%Y%m%d'
+            ) AS DATE) AS vehicle_expiration_date,
             CAST(issuing_agency AS VARCHAR) AS issuing_agency,
             CAST(violation_precinct AS VARCHAR) AS violation_precinct,
             CAST(issuer_precinct AS VARCHAR) AS issuer_precinct,
@@ -731,11 +747,11 @@ def build_tif_payment_detail(con: duckdb.DuckDBPyConnection, replace: bool = Fal
             ROW_NUMBER() OVER (ORDER BY "License Number", "Payment Date") AS payment_id,
             CAST("License Number" AS VARCHAR) AS license_number,
             CAST("Agent Number" AS VARCHAR) AS agent_number,
-            TRY_CAST("Hackup Payment Amount" AS DECIMAL(12,2)) AS hackup_payment_amount,
-            TRY_CAST("Operational Payment Amount" AS DECIMAL(12,2)) AS operational_payment_amount,
-            TRY_CAST("Total Payment Amount" AS DECIMAL(12,2)) AS total_payment_amount,
-            TRY_CAST("Payment Date" AS DATE) AS payment_date,
-            TRY_CAST("Last Date Updated" AS DATE) AS last_date_updated,
+            TRY_CAST(regexp_replace("Hackup Payment Amount", '[$,]', '', 'g') AS DECIMAL(12,2)) AS hackup_payment_amount,
+            TRY_CAST(regexp_replace("Operational Payment Amount", '[$,]', '', 'g') AS DECIMAL(12,2)) AS operational_payment_amount,
+            TRY_CAST(regexp_replace("Total Payment Amount", '[$,]', '', 'g') AS DECIMAL(12,2)) AS total_payment_amount,
+            CAST(try_strptime("Payment Date", '%m/%d/%Y') AS DATE) AS payment_date,
+            CAST(try_strptime("Last Date Updated", '%m/%d/%Y') AS DATE) AS last_date_updated,
             CAST("Last Time Updated" AS VARCHAR) AS last_time_updated,
             CONCAT(
                 CAST("License Number" AS VARCHAR), '_',
@@ -868,6 +884,7 @@ def build_crash_person_detail(con: duckdb.DuckDBPyConnection, replace: bool = Fa
         ALTER TABLE silver.{table_name} ADD COLUMN is_duplicate_person BOOLEAN;
         ALTER TABLE silver.{table_name} ADD COLUMN is_orphan_record BOOLEAN;
         ALTER TABLE silver.{table_name} ADD COLUMN has_missing_aux BOOLEAN;
+        ALTER TABLE silver.{table_name} ADD COLUMN is_age_anomaly BOOLEAN;
         UPDATE silver.{table_name} SET is_duplicate_person = (
             unique_id IN (SELECT unique_id FROM silver.{table_name} GROUP BY unique_id HAVING COUNT(*) > 1)
         );
@@ -879,12 +896,15 @@ def build_crash_person_detail(con: duckdb.DuckDBPyConnection, replace: bool = Fa
             ejection IS NULL AND emotional_status IS NULL AND bodily_injury IS NULL
             AND position_in_vehicle IS NULL AND safety_equipment IS NULL AND complaint IS NULL
         );
+        UPDATE silver.{table_name} SET is_age_anomaly = (
+            person_age < 0 OR person_age > 120 OR person_age IS NULL
+        );
     """)
     dup = con.execute(f"SELECT COUNT(*) FROM silver.{table_name} WHERE is_duplicate_person").fetchone()[0]
     orphan = con.execute(f"SELECT COUNT(*) FROM silver.{table_name} WHERE is_orphan_record").fetchone()[0]
     aux = con.execute(f"SELECT COUNT(*) FROM silver.{table_name} WHERE has_missing_aux").fetchone()[0]
-    age_err = con.execute(f"SELECT COUNT(*) FROM silver.{table_name} WHERE person_age < 0 OR person_age > 120").fetchone()[0]
-    print(f"  [OK] silver.{table_name}: {cnt:,} 行, 重复 {dup}, 孤立 {orphan:,}, 缺失辅助字段 {aux:,}, 年龄异常 {age_err}")
+    age_anomaly = con.execute(f"SELECT COUNT(*) FROM silver.{table_name} WHERE is_age_anomaly").fetchone()[0]
+    print(f"  [OK] silver.{table_name}: {cnt:,} 行, 重复 {dup}, 孤立 {orphan:,}, 缺失辅助字段 {aux:,}, 年龄异常 {age_anomaly:,}")
     return cnt
 
 
@@ -1002,14 +1022,20 @@ def write_meta_comments(con: duckdb.DuckDBPyConnection) -> None:
             ("base_no", "派车基地编号", "维度属性"),
             ("fare_amount", "基础车费", "金额字段"),
             ("total_amount", "总费用", "金额字段"),
+            ("extra", "附加费", "金额字段"),
+            ("mta_tax", "MTA税", "金额字段"),
             ("tip_amount", "小费", "金额字段"),
             ("tolls_amount", "通行费", "金额字段"),
+            ("improvement_surcharge", "改善附加费", "金额字段"),
             ("congestion_surcharge", "拥堵附加费", "金额字段"),
             ("airport_fee", "机场费", "金额字段"),
             ("cbd_congestion_fee", "CBD拥堵费", "金额字段"),
             ("sales_tax", "销售税", "金额字段"),
             ("bcf", "黑车基金费", "金额字段"),
             ("driver_pay", "司机净收入", "金额字段"),
+            ("ehail_fee", "电子预约费", "金额字段（预期全 NULL：Bronze green 表该字段全空，其余源无此字段）"),
+            ("request_datetime", "乘客请求时间", "时间字段"),
+            ("on_scene_datetime", "司机到达时间", "时间字段"),
             ("shared_request_flag", "请求共享标志", "标志位"),
             ("shared_match_flag", "实际共享标志", "标志位"),
             ("wav_request_flag", "请求WAV标志", "标志位"),
@@ -1102,9 +1128,12 @@ def write_meta_comments(con: duckdb.DuckDBPyConnection) -> None:
             ("violation_description", "违章描述", "维度属性"),
             ("vehicle_body_type", "车身类型", "分类代码"),
             ("vehicle_make", "车辆品牌", "维度属性"),
+            ("street_code1", "街道代码1", "维度属性"),
+            ("street_code2", "街道代码2", "维度属性"),
+            ("street_code3", "街道代码3", "维度属性"),
             ("vehicle_color", "车辆颜色", "维度属性"),
-            ("vehicle_year", "车辆年份", "维度属性"),
-            ("vehicle_expiration_date", "注册到期日", "时间字段"),
+            ("vehicle_year", "车辆年份（0=未记录，占全表18.5%）", "维度属性"),
+            ("vehicle_expiration_date", "注册到期日（含0/88888888等占位编码，62.5%无法解析）", "时间字段"),
             ("issuing_agency", "开票机构", "分类代码"),
             ("violation_precinct", "违章管辖区", "维度属性"),
             ("issuer_precinct", "开票管辖区", "维度属性"),
@@ -1185,14 +1214,16 @@ def write_meta_comments(con: duckdb.DuckDBPyConnection) -> None:
             ("safety_equipment", "安全设备", "分类代码"),
             ("complaint", "投诉信息", "维度属性"),
             ("is_duplicate_person", "是否重复记录", "质量标记"),
-            ("is_orphan_record", "是否孤立记录", "质量标记"),
+            ("is_orphan_record", "是否孤立记录（collision_id 不在 crash_detail 中）", "质量标记"),
             ("has_missing_aux", "是否缺失辅助字段", "质量标记"),
+            ("is_age_anomaly", "是否年龄异常（<0 或 >120 或 NULL）", "质量标记"),
             ("source_row_hash", "来源行哈希", "溯源字段"),
             ("source_table", "来源表", "溯源字段"),
         ],
     }
 
     con.execute("CREATE TABLE IF NOT EXISTS meta.column_comments (table_schema VARCHAR, table_name VARCHAR, column_name VARCHAR, column_name_zh VARCHAR, column_role_zh VARCHAR, updated_at VARCHAR)")
+    con.execute("DELETE FROM meta.column_comments WHERE table_schema='silver'")
     total = 0
     for tbl, cols in columns_zh.items():
         for col_name, col_zh, role in cols:

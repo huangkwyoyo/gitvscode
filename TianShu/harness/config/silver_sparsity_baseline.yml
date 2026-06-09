@@ -1,0 +1,72 @@
+# Silver 层字段预期稀疏基线
+#
+# 用途：check_silver_null.py 通过此文件区分"预期稀疏"和"不该有的 NULL"。
+# 字段实际 NULL 率 ≤ 预期值 + 10% → 标记为"预期稀疏"（⚪）
+# 字段实际 NULL 率 > 预期值 + 10% → 标记为"超出预期"（🔴）
+# 未在此文件中的字段 → 按 50% 通用阈值报告（🟡）
+#
+# 维护规则：新增 Silver 表或字段后，如果某字段预期高缺失（≥50%），应在此补充基线。
+
+baselines:
+  # ── trip_detail：FHV/HV 行程无出租车计价字段 ──
+  - field: "trip_detail.passenger_count"
+    expected_null_rate: 0.90
+    reason: "FHV 和 HVFHV 源表无此字段，仅 Yellow/Green 有"
+  - field: "trip_detail.payment_type"
+    expected_null_rate: 0.86
+    reason: "FHV 和 HVFHV 源表无此字段，仅 Yellow/Green 有"
+  - field: "trip_detail.rate_code_id"
+    expected_null_rate: 0.90
+    reason: "FHV 和 HVFHV 源表无此字段，仅 Yellow/Green 有"
+  - field: "trip_detail.trip_type"
+    expected_null_rate: 0.998
+    reason: "仅 Green 行程有此字段，1,108 万 Yellow + 625 万 FHV + 6,287 万 HVFHV 均无"
+  - field: "trip_detail.total_amount"
+    expected_null_rate: 0.86
+    reason: "FHV 和 HVFHV 源表无此字段，仅 Yellow/Green 有"
+  - field: "trip_detail.extra"
+    expected_null_rate: 0.86
+    reason: "FHV 和 HVFHV 源表无此字段，仅 Yellow/Green 有"
+  - field: "trip_detail.mta_tax"
+    expected_null_rate: 0.86
+    reason: "FHV 和 HVFHV 源表无此字段，仅 Yellow/Green 有"
+  - field: "trip_detail.improvement_surcharge"
+    expected_null_rate: 0.86
+    reason: "FHV 和 HVFHV 源表无此字段，仅 Yellow/Green 有"
+  - field: "trip_detail.ehail_fee"
+    expected_null_rate: 1.0
+    reason: "Bronze green 表该字段本身全 NULL，业务上电子预约费极少发生"
+
+  # ── vehicle_detail：Medallion 专有字段仅覆盖少量车辆 ──
+  - field: "vehicle_detail.medallion_type"
+    expected_null_rate: 0.91
+    reason: "仅 Medallion 授权车辆有此字段（~1万行），其余 11 万行无"
+  - field: "vehicle_detail.agent_number"
+    expected_null_rate: 0.94
+    reason: "仅 Medallion 代理车辆有代理编号"
+  - field: "vehicle_detail.agent_name"
+    expected_null_rate: 0.95
+    reason: "仅 Medallion 代理车辆有代理名称，且 47% 缺失"
+
+  # ── driver_detail：WAV 培训仅 FHV 司机有 ──
+  - field: "driver_detail.wav_trained"
+    expected_null_rate: 0.50
+    reason: "仅 FHV 司机有 WAV 培训标记，SHL 司机无此字段"
+
+  # ── base_detail：可选字段 ──
+  - field: "base_detail.dba"
+    expected_null_rate: 0.81
+    reason: "经营别名 (DBA) 为可选字段，80.7% 基地未填写"
+
+  # ── parking_violation_detail：非必填字段 ──
+  - field: "parking_violation_detail.vehicle_expiration_date"
+    expected_null_rate: 0.62
+    reason: "大量罚单的注册到期日为占位编码（0/88888888/*8888），无法解析为有效日期"
+  - field: "parking_violation_detail.violation_legal_code"
+    expected_null_rate: 0.57
+    reason: "法律条款代码非必填项，57.2% 罚单未填写"
+
+  # ── crash_detail：可选字段 ──
+  - field: "crash_detail.cross_street_name"
+    expected_null_rate: 0.82
+    reason: "事故交叉街道为可选填写，82% 事故未记录"

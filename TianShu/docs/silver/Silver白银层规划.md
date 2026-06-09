@@ -16,6 +16,20 @@ Silver 白银层是从 `bronze` 原始层提取出来的标准明细层。
 
 Silver 层建设完成后，Gold 星型模型和 Agent 问数才有稳定基础。
 
+## 规划与门禁关系
+
+本文件是 Silver 层规划文档，不是自动执行器。实际建表由 `scripts/silver/build_silver_duckdb.py` 完成，落库结果必须通过 Harness 强校验后才视为有效。
+
+Silver 建成后必须执行：
+
+```powershell
+python scripts\quality\check_schema_consistency.py --require-silver-tables
+python scripts\quality\check_silver_null.py
+python scripts\quality\run_all_checks.py
+```
+
+如果规划文档、Silver 数据字典、建表脚本、DuckDB 实表、`meta.column_comments` 不一致，应先修复 Silver，不得直接进入 Gold。
+
 ## 当前 DuckDB 结构
 
 DuckDB 文件：
@@ -608,10 +622,10 @@ meta.column_comments  -- 字段级中文注释
 | P1 | `silver.driver_detail` | 司机明细标准表 | 供给域 | 维表 | 11 | ~36 万 | `license_number` + `driver_type` |
 | P1 | `silver.base_detail` | 基地月度明细标准表 | 供给域 | 事实表 | 12 | ~5.9 万 | `composite_key` |
 | P1 | `silver.driver_application_detail` | 司机申请明细标准表 | 监管合规域 | 事实表 | 14 | 4,076 | `app_no` |
-| P2 | `silver.parking_violation_detail` | 停车罚单明细标准表 | 监管合规域 | 事实表 | 32 | 958 万 | `violation_id`（代理键） | `bronze.parking_violations_all` |
-| P2 | `silver.tif_payment_detail` | TIF支付明细标准表 | 监管合规域 | 事实表 | 11 | ~4.8 万 | `composite_key` |
-| P2 | `silver.crash_detail` | 事故明细标准表 | 安全域 | 事实表 | 25 | 166 万 | `collision_id` |
-| P2 | `silver.crash_person_detail` | 事故人员明细标准表 | 安全域 | 事实表 | 22 | 533 万 | `unique_id` |
+| P2 | `silver.parking_violation_detail` | 停车罚单明细标准表 | 监管合规域 | 事实表 | 33 | 958 万 | `violation_id`（代理键） | `bronze.parking_violations_all` |
+| P2 | `silver.tif_payment_detail` | TIF支付明细标准表 | 监管合规域 | 事实表 | 12 | ~4.8 万 | `payment_id`（代理键） |
+| P2 | `silver.crash_detail` | 事故明细标准表 | 安全域 | 事实表 | 26 | 166 万 | `crash_id`（代理键） |
+| P2 | `silver.crash_person_detail` | 事故人员明细标准表 | 安全域 | 事实表 | 24 | 533 万 | `crash_person_id`（代理键） |
 
 ## 下一步执行建议
 

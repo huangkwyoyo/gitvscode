@@ -12,7 +12,7 @@
 | 来源 | `bronze.tif_medallion_payments`（48,431 行，8 列，全部 VARCHAR） |
 | 预计行数 | ~4.8 万 |
 | 主键 | `payment_id`（BIGINT，代理键），`composite_key`（候选键） |
-| 字段数 | 11 |
+| 字段数 | 12 |
 
 ## 设计理由
 
