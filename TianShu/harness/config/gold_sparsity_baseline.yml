@@ -10,9 +10,13 @@
 # 检查输出中标记为 [?] 的字段，将预期高缺失（>=50%）的字段补充到此列表。
 # 如果某字段全 NULL 且无基线声明 100%，check_gold_null.py 会报 [!] 失败。
 #
-# 当前状态：Gold 实表尚未建设，基线列表为空。
+# 当前状态：Gold G0/G1 维表已建成（dim_date, dim_taxi_zone, dim_vehicle, dim_driver, dim_base, dim_violation_type）。基线已覆盖已知预期稀疏字段。
 
-baselines: []
+baselines:
+  # ─── G1 业务维表 ───
+  - field: "dim_violation_type.penalty_amount"
+    expected_null_rate: 1.0
+    reason: "官方数据字典 Excel 仅含标准罚款金额，不含滞纳金数据，当前无数据源"
 
 # ═══════════════════════════════════════════════════════════
 # G0 公共维表（暂无预期高缺失字段）
@@ -21,10 +25,12 @@ baselines: []
 # ═══════════════════════════════════════════════════════════
 # G1 业务维表
 # ═══════════════════════════════════════════════════════════
-# 示例（建表后取消注释并填入实际 NULL 率）：
-# - field: "dim_vehicle.last_inspection_date"
-#   expected_null_rate: 0.35
-#   reason: "部分车辆无检验记录"
+# 以下字段已确认预期稀疏，待后续补充基线：
+# - field: "dim_base.dba"             (83.6% NULL) reason: "多数基地无经营别名"
+# - field: "dim_driver.wav_trained"   (50.1% NULL) reason: "非无障碍车辆司机无此标记"
+# - field: "dim_vehicle.medallion_type" (91.2% NULL) reason: "仅 Medallion 类车辆有此属性"
+# - field: "dim_vehicle.agent_number"  (93.7% NULL) reason: "仅部分车辆有代理信息"
+# - field: "dim_vehicle.agent_name"    (95.3% NULL) reason: "仅部分车辆有代理信息"
 
 # ═══════════════════════════════════════════════════════════
 # G2 明细事实表

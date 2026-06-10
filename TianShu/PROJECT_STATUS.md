@@ -81,7 +81,7 @@ Silver 层 11 张表已完成修复并通过 post-Silver 强校验。Gold G0/G1 
 - 当前项目阶段已从 `post_silver_build` 推进到 `gold_g0_g1_build`，schema 一致性检查仍必须启用 Silver 实表强校验。
 - `check_silver_null.py` 会输出高缺失字段画像。高缺失不一定是错误，需结合源表适用范围判断；但全 NULL 的日期、金额字段必须优先排查转换逻辑。
 - 当前 Harness 阶段为 `gold_g0_g1_build`，全量检查会同时执行 Gold 设计门禁和 Gold G0/G1 物理门禁。
-- `gold.dim_violation_type` 的金额字段当前为 `NULL`，`source_status='human_review'`；不得在事实表中直接编造罚款金额。
+- `gold.dim_violation_type` 的 `standard_fine_amount` 已从官方数据字典 Excel 导入（覆盖 97/100 个违章代码），`penalty_amount` 因 Excel 不含滞纳金数据保持 NULL。`source_status` 标记为 `from_official_dictionary` 或 `missing_from_dictionary`。
 
 ## 数据库位置
 

@@ -3,6 +3,10 @@
 
 本脚本只建设 Gold 第一批维表，不建设事实表和汇总表。
 所有字段必须来自 Silver 或已明确标记的派生规则，并同步写入中文语义元数据。
+
+dim_violation_type 的罚款金额来源于官方数据字典 Excel：
+  - standard_fine_amount → Manhattan 96th St. & below 标准罚款
+  - penalty_amount → 当前无数据源（Excel 不含滞纳金数据），保持 NULL
 """
 import argparse
 import os
@@ -20,6 +24,18 @@ try:
     import duckdb
 except ImportError:
     duckdb = None
+
+try:
+    import openpyxl
+except ImportError:
+    openpyxl = None
+
+# 官方违章代码字典 Excel 路径
+VIOLATION_DICT_XLSX = Path(
+    r"D:\ProgramData\Datawarehouse\纽约市城市交通"
+    r"\2026财年纽约停车违章罚单开具情况"
+    r"\Parking_Violations_Issued_Data_Dictionary.xlsx"
+)
 
 
 GOLD_DIMENSIONS = {
@@ -107,9 +123,9 @@ GOLD_DIMENSIONS = {
         "columns": {
             "violation_code": ("违章代码", "主键"),
             "violation_description": ("违章描述", "维度属性"),
-            "standard_fine_amount": ("标准罚款金额", "待人工确认金额"),
-            "penalty_amount": ("滞纳金金额", "待人工确认金额"),
-            "source_status": ("来源状态", "审核状态"),
+            "standard_fine_amount": ("标准罚款金额（曼哈顿核心区）", "金额字段"),
+            "penalty_amount": ("滞纳金金额（当前无数据源）", "金额字段"),
+            "source_status": ("金额数据来源", "审核状态"),
         },
     },
 }
@@ -147,6 +163,57 @@ def ensure_meta_tables(conn) -> None:
         )
         """
     )
+
+
+def load_violation_fines(conn) -> None:
+    """将官方违章代码 Excel 加载到 DuckDB 临时表，供 dim_violation_type 建表使用"""
+    if openpyxl is None:
+        print("[WARN] openpyxl 未安装，dim_violation_type 罚款金额将保持 NULL")
+        return
+
+    if not VIOLATION_DICT_XLSX.exists():
+        print(f"[WARN] 违章代码字典 Excel 不存在: {VIOLATION_DICT_XLSX}")
+        return
+
+    wb = openpyxl.load_workbook(VIOLATION_DICT_XLSX, data_only=True)
+    ws = wb["Parking Violation Codes"]
+
+    rows: list[tuple[int, str, int, int]] = []
+    for row in ws.iter_rows(min_row=2, max_row=ws.max_row, values_only=True):
+        code = row[0]
+        desc = row[1]
+        manhattan_fine = row[2]
+        other_fine = row[3]
+        if code is None or str(code).strip() == "":
+            continue
+        try:
+            code_int = int(code)
+        except (ValueError, TypeError):
+            continue
+        rows.append((
+            code_int,
+            str(desc).strip() if desc else "",
+            int(manhattan_fine) if manhattan_fine is not None else 0,
+            int(other_fine) if other_fine is not None else 0,
+        ))
+
+    wb.close()
+
+    conn.execute("DROP TABLE IF EXISTS tmp_violation_fines")
+    conn.execute(
+        """
+        CREATE TEMP TABLE tmp_violation_fines (
+            violation_code_int INTEGER,
+            violation_description_from_dict VARCHAR,
+            manhattan_fine INTEGER,
+            other_areas_fine INTEGER
+        )
+        """
+    )
+    conn.executemany(
+        "INSERT INTO tmp_violation_fines VALUES (?, ?, ?, ?)", rows
+    )
+    print(f"已加载 {len(rows)} 条违章代码罚款标准（来源：官方数据字典 Excel）")
 
 
 def replace_gold_comments(conn, table_names: list[str]) -> None:
@@ -324,18 +391,34 @@ def build_g1(conn) -> list[str]:
     )
 
     conn.execute("DROP TABLE IF EXISTS gold.dim_violation_type")
+
+    # 从官方 Excel 加载违章代码罚款标准
+    load_violation_fines(conn)
+
     conn.execute(
         """
         CREATE TABLE gold.dim_violation_type AS
+        WITH silver_codes AS (
+            SELECT
+                violation_code,
+                max(violation_description) AS violation_description
+            FROM silver.parking_violation_detail
+            WHERE violation_code IS NOT NULL
+            GROUP BY violation_code
+        )
         SELECT
-            violation_code,
-            max(violation_description) AS violation_description,
-            CAST(NULL AS DECIMAL(12,2)) AS standard_fine_amount,
+            s.violation_code,
+            COALESCE(d.violation_description_from_dict, s.violation_description)
+                AS violation_description,
+            CAST(d.manhattan_fine AS DECIMAL(12,2)) AS standard_fine_amount,
             CAST(NULL AS DECIMAL(12,2)) AS penalty_amount,
-            'human_review' AS source_status
-        FROM silver.parking_violation_detail
-        WHERE violation_code IS NOT NULL
-        GROUP BY violation_code
+            CASE
+                WHEN d.violation_code_int IS NOT NULL THEN 'from_official_dictionary'
+                ELSE 'missing_from_dictionary'
+            END AS source_status
+        FROM silver_codes s
+        LEFT JOIN tmp_violation_fines d
+          ON TRY_CAST(s.violation_code AS INTEGER) = d.violation_code_int
         """
     )
     return ["dim_vehicle", "dim_driver", "dim_base", "dim_violation_type"]
