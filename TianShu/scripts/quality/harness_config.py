@@ -41,7 +41,13 @@ def load_harness_config(config_path: Path | None = None) -> HarnessConfig:
 
     data: dict[str, Any] = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
     project_root = Path(data["project"]["root"]).resolve()
-    stage = data["project"].get("stage", "pre_silver_build")
+    stage = data.get("project", {}).get("stage")
+    if not stage:
+        raise ValueError(
+            "harness_targets.yml 中缺少 project.stage 字段，无法确定当前项目阶段。"
+            "请在 harness/config/harness_targets.yml 中设置 project.stage，"
+            "可选值：pre_silver_build / post_silver_build / gold_g0_g1_build / gold_g2_prepare / gold_g2_build / gold_g3_build"
+        )
     warehouse = data["warehouse"]
     facts = data["facts"]
 

@@ -7,7 +7,7 @@
 
 project:
   root: "D:\\Program Files\\gitvscode\\TianShu"
-  stage: "gold_g0_g1_build"
+  stage: "gold_g2_prepare"
 
 warehouse:
   duckdb_path: "D:\\ProgramData\\Datawarehouse\\纽约市城市交通\\nyc_transport.duckdb"

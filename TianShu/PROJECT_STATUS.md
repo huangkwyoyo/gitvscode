@@ -2,7 +2,7 @@
 
 ## 当前阶段
 
-Silver 层 11 张表已完成修复并通过 post-Silver 强校验。Gold G0/G1 维表已落库并通过 Gold 设计门禁和物理表门禁。当前阶段进入 Gold G2 事实表建设准备。
+Silver 层 11 张表已完成修复并通过 post-Silver 强校验。Gold G0/G1 维表已落库并通过 Gold 设计门禁和物理表门禁。当前阶段进入 Gold G2 事实表建设准备（`harness/config/harness_targets.yml` 中的 `project.stage` 为 `gold_g2_prepare`）。
 
 ## 最近完成
 
