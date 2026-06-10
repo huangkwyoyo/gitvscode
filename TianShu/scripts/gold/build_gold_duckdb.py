@@ -1,12 +1,12 @@
 """
-构建 DuckDB Gold G0/G1 维表。
+构建 DuckDB Gold G0/G1/G2 表。
 
-本脚本只建设 Gold 第一批维表，不建设事实表和汇总表。
+G0 公共维表 | G1 业务维表 | G2 明细事实表。
 所有字段必须来自 Silver 或已明确标记的派生规则，并同步写入中文语义元数据。
 
-dim_violation_type 的罚款金额来源于官方数据字典 Excel：
-  - standard_fine_amount → Manhattan 96th St. & below 标准罚款
-  - penalty_amount → 当前无数据源（Excel 不含滞纳金数据），保持 NULL
+dim_date 的日期范围动态计算：从所有 Silver 日期列中获取 min/max，
+生成完整日期序列（当前覆盖 2012-01-01 ~ 2026-12-31）。
+dim_violation_type 的罚款金额来源于官方数据字典 Excel。
 """
 import argparse
 import os
@@ -372,27 +372,75 @@ def write_gold_comments(conn, table_names: list[str]) -> None:
 
 
 def build_g0(conn) -> list[str]:
-    """构建 G0 公共维表"""
+    """构建 G0 公共维表。dim_date 从 Silver 实际日期范围动态生成。"""
     conn.execute("CREATE SCHEMA IF NOT EXISTS gold")
+
+    # ── dim_date：从所有 Silver 日期列动态生成完整日期范围 ──
+    # 避免硬编码固定区间，确保覆盖任何新导入的数据集
     conn.execute("DROP TABLE IF EXISTS gold.dim_date")
     conn.execute(
         """
         CREATE TABLE gold.dim_date AS
+        WITH date_bounds AS (
+            -- 每表独立取 min/max，避免 UNION 全表扫描
+            SELECT 'trip' AS src, min(pickup_at)::DATE AS d_min, max(pickup_at)::DATE AS d_max
+                FROM silver.trip_detail WHERE pickup_at IS NOT NULL
+            UNION ALL
+            SELECT 'parking', min(issue_date), max(issue_date)
+                FROM silver.parking_violation_detail
+                WHERE issue_date IS NOT NULL
+                  AND issue_date >= '2000-01-01'
+                  AND issue_date <= '2027-12-31'
+            UNION ALL
+            SELECT 'tif', min(payment_date), max(payment_date)
+                FROM silver.tif_payment_detail WHERE payment_date IS NOT NULL
+            UNION ALL
+            SELECT 'driver_app', min(app_date), max(app_date)
+                FROM silver.driver_application_detail WHERE app_date IS NOT NULL
+            UNION ALL
+            SELECT 'crash', min(crash_at)::DATE, max(crash_at)::DATE
+                FROM silver.crash_detail WHERE crash_at IS NOT NULL
+            UNION ALL
+            SELECT 'crash_person', min(crash_date), max(crash_date)
+                FROM silver.crash_person_detail WHERE crash_date IS NOT NULL
+        ),
+        global_bounds AS (
+            SELECT
+                CAST(date_trunc('year', min(d_min)) AS DATE) AS start_date,
+                CAST(date_trunc('year', max(d_max) + INTERVAL 1 YEAR) - INTERVAL 1 DAY AS DATE) AS end_date
+            FROM date_bounds
+        ),
+        date_range AS (
+            SELECT UNNEST(generate_series(
+                (SELECT start_date FROM global_bounds),
+                (SELECT end_date FROM global_bounds),
+                INTERVAL 1 DAY
+            )) AS date
+        )
         SELECT
-            date_key,
-            CAST(date AS DATE) AS date,
-            year,
-            quarter,
-            month,
-            week,
-            day_of_week,
-            day_of_week_name,
-            is_weekend,
-            fiscal_year
-        FROM silver.dim_date
+            strftime(date, '%Y%m%d')::INTEGER AS date_key,
+            date,
+            year(date) AS year,
+            quarter(date) AS quarter,
+            month(date) AS month,
+            week(date) AS week,
+            dayofweek(date) AS day_of_week,
+            CASE dayofweek(date)
+                WHEN 1 THEN '周一' WHEN 2 THEN '周二' WHEN 3 THEN '周三'
+                WHEN 4 THEN '周四' WHEN 5 THEN '周五' WHEN 6 THEN '周六'
+                WHEN 0 THEN '周日'
+            END AS day_of_week_name,
+            CASE WHEN dayofweek(date) IN (0, 6) THEN true ELSE false END AS is_weekend,
+            CASE
+                WHEN month(date) >= 7
+                    THEN year(date) + 1
+                ELSE year(date)
+            END AS fiscal_year
+        FROM date_range
         """
     )
 
+    # ── dim_taxi_zone ──
     conn.execute("DROP TABLE IF EXISTS gold.dim_taxi_zone")
     conn.execute(
         """
