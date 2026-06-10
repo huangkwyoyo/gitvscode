@@ -8,9 +8,9 @@
 |---|---|
 | 英文 Schema | `gold` |
 | 中文 Schema | 主题分析层 |
-| 当前状态 | G0/G1 维表已正式建表，G2 事实表尚未建设 |
+| 当前状态 | G0/G1 维表和 G2 明细事实表已正式建表，G3 汇总表尚未建设 |
 | 上游依赖 | `silver` 标准层、`meta.table_comments`、`meta.column_comments`、字段字典、枚举值字典 |
-| 前置门禁 | `check_schema_consistency.py --require-silver-tables`、`check_gold_design.py`、`check_gold_physical.py --batches G0,G1` 必须通过 |
+| 前置门禁 | `check_schema_consistency.py --require-silver-tables`、`check_gold_design.py`、`check_gold_physical.py --batches G0,G1,G2` 必须通过 |
 | 设计目标 | 面向中文工程师、BI、Text2SQL Agent 和数据分析 Agent 的主题星型模型 |
 
 ## 2. Gold 层设计原则
@@ -228,7 +228,7 @@ gold
 | `violation_description` | 违章描述 | VARCHAR | `silver.parking_violation_detail.violation_description` | 描述 |
 | `standard_fine_amount` | 标准罚款金额 | DECIMAL(12,2) | 官方数据字典 | 待人工确认 |
 | `penalty_amount` | 滞纳金金额 | DECIMAL(12,2) | 官方数据字典 | 待人工确认 |
-| `source_status` | 来源状态 | VARCHAR | 派生 | `confirmed` / `human_review` |
+| `source_status` | 来源状态 | VARCHAR | 派生 | `from_official_dictionary` / `missing_from_dictionary` |
 
 ## 6. 事实表设计
 
@@ -283,11 +283,13 @@ gold
 | `issuing_agency` | 开票机构 | VARCHAR | `silver.parking_violation_detail.issuing_agency` | 执法机构 |
 | `feet_from_curb` | 距路缘英尺数 | DOUBLE | `silver.parking_violation_detail.feet_from_curb` | 度量 |
 | `fiscal_year` | 财年 | INTEGER | `silver.parking_violation_detail.fiscal_year` | 财年 |
+| `standard_fine_amount` | 标准罚款金额 | DECIMAL(12,2) | `gold.dim_violation_type.standard_fine_amount` | 官方字典标准金额 |
+| `fine_source_status` | 罚款金额来源状态 | VARCHAR | `gold.dim_violation_type.source_status` | from_official_dictionary / missing_from_dictionary |
 | `is_duplicate_summons` | 是否重复罚单 | BOOLEAN | `silver.parking_violation_detail.is_duplicate_summons` | 质量标记 |
 
 金额字段规则：
 
-> 第一阶段不在 `fact_parking_violations` 中凭空新增罚款金额。只有 `dim_violation_type` 从官方字典确认金额后，才允许通过 Join 引入分析口径。
+> `standard_fine_amount` 已通过 `violation_code` 关联 `gold.dim_violation_type` 引入，来源为官方数据字典 Excel 中的标准罚款金额。它表示标准罚款金额，不代表实际缴纳金额、减免后金额或滞纳金金额。
 
 ### 6.3 `gold.fact_tif_payments` TIF支付事实表
 
@@ -438,9 +440,10 @@ Gold 建表前必须完成：
 - [x] 不使用 Google 翻译结果直接作为正式中文名
 - [x] Gold G0/G1 构建脚本写入 `meta.table_comments` 和 `meta.column_comments`
 - [x] `check_gold_design.py` 通过
-- [x] `check_gold_physical.py --batches G0,G1` 通过
-- [ ] `dim_violation_type` 官方字典金额来源确认
-- [ ] 每个 G2 指标都有来源表、来源字段和计算公式
+- [x] `check_gold_physical.py --batches G0,G1,G2` 通过
+- [x] `dim_violation_type` 官方字典金额来源确认
+- [x] G2 明细事实表字段来源已确认
+- [ ] 每个 G3 汇总指标都有来源表、来源字段和计算公式
 
 ## 10. G0/G1 落库状态
 
@@ -453,10 +456,33 @@ Gold 建表前必须完成：
 | `gold.dim_vehicle` | 车辆维表 | 119207 | 24 | `silver.vehicle_detail` | 已落库 |
 | `gold.dim_driver` | 司机维表 | 360009 | 9 | `silver.driver_detail` | 已落库 |
 | `gold.dim_base` | 基地维表 | 1117 | 6 | `silver.base_detail`、`silver.vehicle_detail` | 已落库 |
-| `gold.dim_violation_type` | 违章类型维表 | 100 | 5 | `silver.parking_violation_detail` | 已落库，金额字段待官方字典确认 |
+| `gold.dim_violation_type` | 违章类型维表 | 100 | 5 | `silver.parking_violation_detail`、官方数据字典 Excel | 已落库，标准罚款金额已导入 |
 
 说明：
 
-- `gold.dim_violation_type.standard_fine_amount` 和 `gold.dim_violation_type.penalty_amount` 当前不从 Silver 推断，统一保留为 `NULL`，`source_status='human_review'`。
-- 停车罚单金额不得直接进入 `gold.fact_parking_violations`，必须等官方金额字典确认后，通过 `violation_code` 关联维表取得。
+- `gold.dim_violation_type.standard_fine_amount` 当前来自官方数据字典 Excel，覆盖 97/100 个违章代码。
+- `gold.dim_violation_type.penalty_amount` 因当前官方 Excel 不含滞纳金数据，继续保留为 `NULL`。
+- `gold.fact_parking_violations.standard_fine_amount` 通过 `violation_code` 关联维表取得，表示标准罚款金额，不代表实际缴纳金额。
 - G0/G1 的中文表名和中文字段名已写入 `meta.table_comments`、`meta.column_comments`。
+
+## 11. G2 落库状态
+
+当前 DuckDB 中已建设以下 Gold 明细事实表：
+
+| 英文表名 | 中文表名 | 行数 | 字段数 | 构建来源 | 状态 |
+|---|---|---:|---:|---|---|
+| `gold.fact_trips` | 出行事实表 | 80324417 | 18 | `silver.trip_detail` | 已落库 |
+| `gold.fact_parking_violations` | 停车罚单事实表 | 9582412 | 18 | `silver.parking_violation_detail`、`gold.dim_violation_type` | 已落库，已带入标准罚款金额 |
+| `gold.fact_tif_payments` | TIF支付事实表 | 48431 | 8 | `silver.tif_payment_detail` | 已落库 |
+| `gold.fact_driver_applications` | 司机申请事实表 | 4076 | 10 | `silver.driver_application_detail` | 已落库 |
+| `gold.fact_crashes` | 事故事实表 | 1655065 | 20 | `silver.crash_detail` | 已落库 |
+| `gold.fact_crash_persons` | 事故人员事实表 | 5333042 | 16 | `silver.crash_person_detail` | 已落库 |
+
+停车罚单金额覆盖：
+
+| 来源状态 | 中文说明 | 罚单行数 | 有标准罚款金额行数 |
+|---|---|---:|---:|
+| `from_official_dictionary` | 来自官方违章代码字典 | 9581483 | 9581483 |
+| `missing_from_dictionary` | 源表违章代码未在官方字典匹配 | 929 | 0 |
+
+`gold.fact_parking_violations.standard_fine_amount` 可用于估算标准罚款金额，总额当前为 `686536335.00`。该指标不是实际收款金额。

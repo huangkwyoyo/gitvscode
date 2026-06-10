@@ -13,10 +13,10 @@
 | `gold.dim_vehicle` | 车辆维表 | 已由脚本构建 |
 | `gold.dim_driver` | 司机维表 | 已由脚本构建 |
 | `gold.dim_base` | 基地维表 | 已由脚本构建 |
-| `gold.dim_violation_type` | 违章类型维表 | 已由脚本构建，金额待审核 |
-| `gold.fact_trips` | 出行事实表 | 待建设 |
-| `gold.fact_parking_violations` | 停车罚单事实表 | 待建设 |
-| `gold.fact_tif_payments` | TIF支付事实表 | 待建设 |
-| `gold.fact_driver_applications` | 司机申请事实表 | 待建设 |
-| `gold.fact_crashes` | 事故事实表 | 待建设 |
-| `gold.fact_crash_persons` | 事故人员事实表 | 待建设 |
+| `gold.dim_violation_type` | 违章类型维表 | 已由脚本构建，标准罚款金额来自官方字典 |
+| `gold.fact_trips` | 出行事实表 | 已由脚本构建 |
+| `gold.fact_parking_violations` | 停车罚单事实表 | 已由脚本构建，标准罚款金额通过违章类型维表带入 |
+| `gold.fact_tif_payments` | TIF支付事实表 | 已由脚本构建 |
+| `gold.fact_driver_applications` | 司机申请事实表 | 已由脚本构建 |
+| `gold.fact_crashes` | 事故事实表 | 已由脚本构建 |
+| `gold.fact_crash_persons` | 事故人员事实表 | 已由脚本构建 |

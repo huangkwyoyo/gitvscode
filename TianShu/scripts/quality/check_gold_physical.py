@@ -23,13 +23,21 @@ except ImportError:
 BATCH_TABLES = {
     "G0": ["dim_date", "dim_taxi_zone"],
     "G1": ["dim_vehicle", "dim_driver", "dim_base", "dim_violation_type"],
+    "G2": [
+        "fact_trips",
+        "fact_parking_violations",
+        "fact_tif_payments",
+        "fact_driver_applications",
+        "fact_crashes",
+        "fact_crash_persons",
+    ],
 }
 
 
 def expected_tables(batches: set[str]) -> list[str]:
     """根据批次返回应检查的 Gold 表"""
     tables: list[str] = []
-    for batch in ["G0", "G1"]:
+    for batch in ["G0", "G1", "G2"]:
         if batch in batches:
             tables.extend(BATCH_TABLES[batch])
     return tables
@@ -121,7 +129,7 @@ def main() -> int:
     config = load_harness_config()
     parser = argparse.ArgumentParser(description="Gold 物理表门禁检查")
     parser.add_argument("--db", type=Path, default=config.duckdb_path, help="DuckDB 数据库路径")
-    parser.add_argument("--batches", default="G0,G1", help="检查批次，支持 G0,G1")
+    parser.add_argument("--batches", default="G0,G1", help="检查批次，支持 G0,G1,G2")
     args = parser.parse_args()
 
     try:

@@ -128,6 +128,126 @@ GOLD_DIMENSIONS = {
             "source_status": ("金额数据来源", "审核状态"),
         },
     },
+    "fact_trips": {
+        "zh": "出行事实表",
+        "columns": {
+            "trip_id": ("行程代理主键", "主键"),
+            "trip_source": ("行程来源类型", "退化维度"),
+            "pickup_date_key": ("接客日期键", "维度外键"),
+            "pickup_location_id": ("上车区域编号", "维度外键"),
+            "dropoff_location_id": ("下车区域编号", "维度外键"),
+            "base_no": ("派车基地编号", "弱关联键"),
+            "pickup_at": ("接客时间", "时间字段"),
+            "dropoff_at": ("送客时间", "时间字段"),
+            "passenger_count": ("乘客人数", "度量字段"),
+            "distance_miles": ("行程距离英里", "度量字段"),
+            "fare_amount": ("基础车费", "金额字段"),
+            "total_amount": ("总费用", "金额字段"),
+            "tip_amount": ("小费", "金额字段"),
+            "tolls_amount": ("通行费", "金额字段"),
+            "driver_pay": ("司机净收入", "金额字段"),
+            "is_time_anomaly": ("是否时间异常", "质量标记"),
+            "is_location_missing": ("是否位置缺失", "质量标记"),
+            "is_distance_outlier": ("是否距离异常", "质量标记"),
+        },
+    },
+    "fact_parking_violations": {
+        "zh": "停车罚单事实表",
+        "columns": {
+            "violation_id": ("罚单代理主键", "主键"),
+            "summons_number": ("罚单编号", "候选键"),
+            "issue_date_key": ("开票日期键", "维度外键"),
+            "violation_code": ("违章代码", "维度外键"),
+            "plate_id": ("车牌号", "退化维度"),
+            "registration_state": ("注册州", "退化维度"),
+            "plate_type": ("车牌类型", "退化维度"),
+            "vehicle_body_type": ("车身类型", "退化维度"),
+            "vehicle_make": ("车辆品牌", "退化维度"),
+            "vehicle_year": ("车辆年份", "退化维度"),
+            "violation_county": ("违章所在县", "空间属性"),
+            "violation_precinct": ("违章管辖区", "空间属性"),
+            "issuing_agency": ("开票机构", "退化维度"),
+            "feet_from_curb": ("距路缘英尺数", "度量字段"),
+            "fiscal_year": ("财年", "时间属性"),
+            "standard_fine_amount": ("标准罚款金额", "金额字段"),
+            "fine_source_status": ("罚款金额来源状态", "审核状态"),
+            "is_duplicate_summons": ("是否重复罚单", "质量标记"),
+        },
+    },
+    "fact_tif_payments": {
+        "zh": "TIF支付事实表",
+        "columns": {
+            "payment_id": ("支付代理主键", "主键"),
+            "license_number": ("牌照号", "弱关联键"),
+            "agent_number": ("代理编号", "退化维度"),
+            "payment_date_key": ("支付日期键", "维度外键"),
+            "hackup_payment_amount": ("改装支付金额", "金额字段"),
+            "operational_payment_amount": ("运营支付金额", "金额字段"),
+            "total_payment_amount": ("总支付金额", "金额字段"),
+            "is_duplicate_key": ("是否复合键重复", "质量标记"),
+        },
+    },
+    "fact_driver_applications": {
+        "zh": "司机申请事实表",
+        "columns": {
+            "application_id": ("申请代理主键", "主键"),
+            "app_no": ("申请编号", "业务键"),
+            "application_type": ("申请类型", "退化维度"),
+            "app_date_key": ("申请日期键", "维度外键"),
+            "status": ("审批状态", "状态字段"),
+            "drug_test": ("药检状态", "状态字段"),
+            "wav_course": ("WAV培训状态", "状态字段"),
+            "defensive_driving": ("防御性驾驶状态", "状态字段"),
+            "driver_exam": ("司机考试状态", "状态字段"),
+            "last_updated": ("最后更新日期", "时间字段"),
+        },
+    },
+    "fact_crashes": {
+        "zh": "事故事实表",
+        "columns": {
+            "crash_id": ("事故代理主键", "主键"),
+            "collision_id": ("事故编号", "业务键"),
+            "crash_date_key": ("事故日期键", "维度外键"),
+            "borough": ("行政区", "退化维度"),
+            "zip_code": ("邮政编码", "退化维度"),
+            "latitude": ("纬度", "空间字段"),
+            "longitude": ("经度", "空间字段"),
+            "persons_injured": ("受伤总人数", "度量字段"),
+            "persons_killed": ("死亡总人数", "度量字段"),
+            "pedestrians_injured": ("行人受伤数", "度量字段"),
+            "pedestrians_killed": ("行人死亡数", "度量字段"),
+            "cyclist_injured": ("骑行者受伤数", "度量字段"),
+            "cyclist_killed": ("骑行者死亡数", "度量字段"),
+            "motorist_injured": ("驾驶员受伤数", "度量字段"),
+            "motorist_killed": ("驾驶员死亡数", "度量字段"),
+            "vehicle_type_1": ("涉事车辆1类型", "退化维度"),
+            "vehicle_type_2": ("涉事车辆2类型", "退化维度"),
+            "contributing_factor_1": ("车辆1事故因素", "退化维度"),
+            "contributing_factor_2": ("车辆2事故因素", "退化维度"),
+            "is_location_missing": ("是否位置缺失", "质量标记"),
+        },
+    },
+    "fact_crash_persons": {
+        "zh": "事故人员事实表",
+        "columns": {
+            "crash_person_id": ("事故人员代理主键", "主键"),
+            "unique_id": ("人员记录编号", "业务键"),
+            "collision_id": ("事故编号", "关联键"),
+            "crash_date_key": ("事故日期键", "维度外键"),
+            "person_type": ("人员类型", "退化维度"),
+            "person_injury": ("伤害程度", "退化维度"),
+            "person_sex": ("性别", "退化维度"),
+            "person_age": ("年龄", "度量字段"),
+            "ped_role": ("行人角色", "退化维度"),
+            "ejection": ("是否弹出", "退化维度"),
+            "emotional_status": ("情绪状态", "退化维度"),
+            "bodily_injury": ("身体伤害", "退化维度"),
+            "position_in_vehicle": ("车内位置", "退化维度"),
+            "safety_equipment": ("安全设备", "退化维度"),
+            "is_orphan_record": ("是否孤立记录", "质量标记"),
+            "is_age_anomaly": ("是否年龄异常", "质量标记"),
+        },
+    },
 }
 
 
@@ -424,17 +544,199 @@ def build_g1(conn) -> list[str]:
     return ["dim_vehicle", "dim_driver", "dim_base", "dim_violation_type"]
 
 
+def build_g2(conn) -> list[str]:
+    """构建 G2 明细事实表"""
+    conn.execute("DROP TABLE IF EXISTS gold.fact_trips")
+    conn.execute(
+        """
+        CREATE TABLE gold.fact_trips AS
+        SELECT
+            trip_id,
+            trip_source,
+            CASE
+                WHEN pickup_date IS NOT NULL
+                THEN strftime(pickup_date, '%Y%m%d')::INTEGER
+                ELSE NULL
+            END AS pickup_date_key,
+            pickup_location_id,
+            dropoff_location_id,
+            base_no,
+            pickup_at,
+            dropoff_at,
+            passenger_count,
+            distance_miles,
+            fare_amount,
+            total_amount,
+            tip_amount,
+            tolls_amount,
+            driver_pay,
+            is_time_anomaly,
+            is_location_missing,
+            is_distance_outlier
+        FROM silver.trip_detail
+        """
+    )
+
+    conn.execute("DROP TABLE IF EXISTS gold.fact_parking_violations")
+    conn.execute(
+        """
+        CREATE TABLE gold.fact_parking_violations AS
+        SELECT
+            p.violation_id,
+            p.summons_number,
+            CASE
+                WHEN p.issue_date IS NOT NULL
+                THEN strftime(p.issue_date, '%Y%m%d')::INTEGER
+                ELSE NULL
+            END AS issue_date_key,
+            p.violation_code,
+            p.plate_id,
+            p.registration_state,
+            p.plate_type,
+            p.vehicle_body_type,
+            p.vehicle_make,
+            p.vehicle_year,
+            p.violation_county,
+            p.violation_precinct,
+            p.issuing_agency,
+            p.feet_from_curb,
+            p.fiscal_year,
+            d.standard_fine_amount,
+            d.source_status AS fine_source_status,
+            p.is_duplicate_summons
+        FROM silver.parking_violation_detail p
+        LEFT JOIN gold.dim_violation_type d
+          ON d.violation_code = p.violation_code
+        """
+    )
+
+    conn.execute("DROP TABLE IF EXISTS gold.fact_tif_payments")
+    conn.execute(
+        """
+        CREATE TABLE gold.fact_tif_payments AS
+        SELECT
+            payment_id,
+            license_number,
+            agent_number,
+            CASE
+                WHEN payment_date IS NOT NULL
+                THEN strftime(payment_date, '%Y%m%d')::INTEGER
+                ELSE NULL
+            END AS payment_date_key,
+            hackup_payment_amount,
+            operational_payment_amount,
+            total_payment_amount,
+            is_duplicate_key
+        FROM silver.tif_payment_detail
+        """
+    )
+
+    conn.execute("DROP TABLE IF EXISTS gold.fact_driver_applications")
+    conn.execute(
+        """
+        CREATE TABLE gold.fact_driver_applications AS
+        SELECT
+            application_id,
+            app_no,
+            application_type,
+            CASE
+                WHEN app_date IS NOT NULL
+                THEN strftime(app_date, '%Y%m%d')::INTEGER
+                ELSE NULL
+            END AS app_date_key,
+            status,
+            drug_test,
+            wav_course,
+            defensive_driving,
+            driver_exam,
+            last_updated
+        FROM silver.driver_application_detail
+        """
+    )
+
+    conn.execute("DROP TABLE IF EXISTS gold.fact_crashes")
+    conn.execute(
+        """
+        CREATE TABLE gold.fact_crashes AS
+        SELECT
+            crash_id,
+            collision_id,
+            CASE
+                WHEN crash_at IS NOT NULL
+                THEN strftime(CAST(crash_at AS DATE), '%Y%m%d')::INTEGER
+                ELSE NULL
+            END AS crash_date_key,
+            borough,
+            zip_code,
+            latitude,
+            longitude,
+            persons_injured,
+            persons_killed,
+            pedestrians_injured,
+            pedestrians_killed,
+            cyclist_injured,
+            cyclist_killed,
+            motorist_injured,
+            motorist_killed,
+            vehicle_type_1,
+            vehicle_type_2,
+            contributing_factor_1,
+            contributing_factor_2,
+            is_location_missing
+        FROM silver.crash_detail
+        """
+    )
+
+    conn.execute("DROP TABLE IF EXISTS gold.fact_crash_persons")
+    conn.execute(
+        """
+        CREATE TABLE gold.fact_crash_persons AS
+        SELECT
+            crash_person_id,
+            unique_id,
+            collision_id,
+            CASE
+                WHEN crash_date IS NOT NULL
+                THEN strftime(crash_date, '%Y%m%d')::INTEGER
+                ELSE NULL
+            END AS crash_date_key,
+            person_type,
+            person_injury,
+            person_sex,
+            person_age,
+            ped_role,
+            ejection,
+            emotional_status,
+            bodily_injury,
+            position_in_vehicle,
+            safety_equipment,
+            is_orphan_record,
+            is_age_anomaly
+        FROM silver.crash_person_detail
+        """
+    )
+
+    return [
+        "fact_trips",
+        "fact_parking_violations",
+        "fact_tif_payments",
+        "fact_driver_applications",
+        "fact_crashes",
+        "fact_crash_persons",
+    ]
+
+
 def parse_batches(value: str) -> set[str]:
     """解析构建批次参数"""
     batches = {item.strip().upper() for item in value.split(",") if item.strip()}
-    invalid = batches - {"G0", "G1"}
+    invalid = batches - {"G0", "G1", "G2"}
     if invalid:
-        raise ValueError(f"当前脚本只支持 G0/G1，收到无效批次: {', '.join(sorted(invalid))}")
+        raise ValueError(f"当前脚本只支持 G0/G1/G2，收到无效批次: {', '.join(sorted(invalid))}")
     return batches
 
 
 def build_gold(db_path: Path, batches: set[str]) -> list[str]:
-    """按批次构建 Gold 维表"""
+    """按批次构建 Gold 表"""
     conn = connect_duckdb(db_path)
     built_tables: list[str] = []
     try:
@@ -443,6 +745,8 @@ def build_gold(db_path: Path, batches: set[str]) -> list[str]:
             built_tables.extend(build_g0(conn))
         if "G1" in batches:
             built_tables.extend(build_g1(conn))
+        if "G2" in batches:
+            built_tables.extend(build_g2(conn))
         replace_gold_comments(conn, built_tables)
         write_gold_comments(conn, built_tables)
         return built_tables
@@ -454,19 +758,19 @@ def main() -> int:
     """命令行入口"""
     os.environ.setdefault("PYTHONIOENCODING", "utf-8")
     config = load_harness_config()
-    parser = argparse.ArgumentParser(description="构建 DuckDB Gold G0/G1 维表")
+    parser = argparse.ArgumentParser(description="构建 DuckDB Gold G0/G1/G2 表")
     parser.add_argument("--db", type=Path, default=config.duckdb_path, help="DuckDB 数据库路径")
-    parser.add_argument("--batches", default="G0,G1", help="构建批次，支持 G0,G1")
+    parser.add_argument("--batches", default="G0,G1", help="构建批次，支持 G0,G1,G2")
     args = parser.parse_args()
 
     try:
         batches = parse_batches(args.batches)
         built_tables = build_gold(args.db, batches)
     except Exception as exc:
-        print(f"[FAIL] Gold G0/G1 构建失败: {exc}")
+        print(f"[FAIL] Gold 构建失败: {exc}")
         return 1
 
-    print("[OK] Gold G0/G1 构建完成。")
+    print("[OK] Gold 构建完成。")
     for table_name in built_tables:
         print(f"- gold.{table_name}")
     return 0
