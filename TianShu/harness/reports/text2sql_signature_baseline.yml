@@ -1,4 +1,4 @@
-generated_at: '2026-06-10T20:51:25'
+generated_at: '2026-06-10T21:35:48'
 description: Text2SQL 结果签名基线。删除此文件可强制重新生成。
 signatures:
   q_daily_trip_count:
@@ -99,3 +99,115 @@ signatures:
     - BIGINT
     - BIGINT
     md5: e4d2343958c23ab07df6d5a03a943a75
+  q_daily_trip_revenue:
+    row_count: 31
+    columns:
+    - trip_date
+    - total_fare_amount
+    column_types:
+    - TIMESTAMP
+    - DECIMAL(18,2)
+    md5: af0893f16b081cf44b83d2984a213512
+  q_vehicle_license_status:
+    row_count: 5
+    columns:
+    - license_type
+    - cnt
+    column_types:
+    - VARCHAR
+    - BIGINT
+    md5: 87067a53f5ae83be1434c3fc092e886f
+  q_trip_by_vehicle_type:
+    row_count: 0
+    columns:
+    - license_type
+    - trip_count
+    column_types:
+    - VARCHAR
+    - BIGINT
+    md5: 5cda104d737a6b17a44439e6735caf03
+  q_driver_expiration_2026:
+    row_count: 1
+    columns:
+    - cnt
+    column_types:
+    - BIGINT
+    md5: cd25ac714491bdfdac1cc3b2f5583abd
+  q_driver_applications_daily:
+    row_count: 65
+    columns:
+    - date
+    - cnt
+    column_types:
+    - TIMESTAMP
+    - BIGINT
+    md5: c337aa1c6d22860e81bfe89a9001cd12
+  q_violation_type_top:
+    row_count: 20
+    columns:
+    - violation_description
+    - violation_count
+    column_types:
+    - VARCHAR
+    - BIGINT
+    md5: 902338c32c68ee80197b8c7a6a8dead6
+  q_tif_payment_daily:
+    row_count: 0
+    columns:
+    - date
+    - daily_total
+    column_types:
+    - TIMESTAMP
+    - DECIMAL(38,2)
+    md5: 51b35a1b4498abac4f597a1014cf9190
+  q_violation_fine_avg:
+    row_count: 20
+    columns:
+    - violation_description
+    - standard_fine_amount
+    column_types:
+    - VARCHAR
+    - DECIMAL(12,2)
+    md5: 7008ebdfd9fb588860ee1090131737d6
+  q_zone_fare_per_trip:
+    row_count: 10
+    columns:
+    - borough
+    - zone_name
+    - trip_count
+    - total_fare_amount
+    - fare_per_trip
+    column_types:
+    - VARCHAR
+    - VARCHAR
+    - BIGINT
+    - DECIMAL(18,2)
+    - DOUBLE
+    md5: a645e9121c89b6e28c4e8ff45e75ddfb
+  q_borough_crash_density:
+    row_count: 6
+    columns:
+    - borough
+    - crash_count
+    column_types:
+    - VARCHAR
+    - BIGINT
+    md5: 8e8e88f04ff520d0d0624c5fb0c3922f
+  q_parking_date_filtered:
+    row_count: 31
+    columns:
+    - date
+    - violation_count
+    column_types:
+    - TIMESTAMP
+    - BIGINT
+    md5: 4e0640b0c7fb55d1aeba20391fe03318
+  q_empty_date_range:
+    row_count: 0
+    columns:
+    - trip_date
+    - trip_count
+    column_types:
+    - TIMESTAMP
+    - BIGINT
+    md5: 2270df4428bded1a972565ceb8fadb74

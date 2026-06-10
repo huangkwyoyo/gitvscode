@@ -44,8 +44,8 @@ def check_semantic_layer(db_path: Path, questions_path: Path) -> list[str]:
 
     questions = load_questions(questions_path)
     violations: list[str] = []
-    if len(questions) < 6:
-        violations.append("标准中文问数集至少需要 6 个问题")
+    if len(questions) < 15:
+        violations.append("标准中文问数集至少需要 15 个问题")
 
     con = duckdb.connect(str(db_path), read_only=True)
     try:

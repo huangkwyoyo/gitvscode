@@ -109,4 +109,11 @@ Text2SQL 数据源优先级：Gold G3 汇总表 > Gold G2 明细事实表 > Silv
 ## 11. 当前已知问题
 
 - **日期维表范围**：`dim_date` 是全域事实日期维表（1997-2027，11,322 行），不是仅 2026Q1 行程日期维表。问数时需注意日期过滤。
-- **停车罚单异常日期**：`fact_parking_violations.issue_date_key` 包含 1971 和 2060 等异常值。G3 汇总表 `dws_daily_parking_summary` 未主动过滤这些异常日期，需在问数口径中明确是否排除。
+- **停车罚单异常日期**：`fact_parking_violations.issue_date_key` 包含 1971 和 2060 等异常值。
+  - **过滤方案 A**：使用视图 `gold.v_parking_violations_valid`（INNER JOIN dim_date 自动过滤）
+  - **过滤方案 B**：`check_gold_date_quality.py` 门禁自动检测并输出异常报告
+  - **推荐做法**：问数时先确认"是否需排除异常日期"，确认后使用视图替代基表
+
+## 12. 查询边界规则
+
+Text2SQL Agent 的查询路径决策树、跨表 JOIN 白名单和日期过滤规则在 `agents/text2sql/AGENTS.md` 中定义。Gold 层本文件仅维护数据模型和已知问题，不重复 Agent 行为规则。

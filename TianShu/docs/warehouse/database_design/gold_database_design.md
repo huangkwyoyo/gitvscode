@@ -489,3 +489,29 @@ Gold 建表前必须完成：
 | `missing_from_dictionary` | 源表违章代码未在官方字典匹配 | 929 | 0 |
 
 `gold.fact_parking_violations.standard_fine_amount` 可用于估算标准罚款金额，总额当前为 `686536335.00`。该指标不是实际收款金额。
+
+## 12. 业务过滤视图
+
+### 12.1 gold.v_parking_violations_valid
+
+停车罚单事实表包含异常日期（如 1971、2060），超出 `dim_date` 覆盖范围（1997-2027）。为方便 Text2SQL Agent 和 BI 工具使用，提供过滤视图。
+
+| 英文视图名 | 中文视图名 | 基表 | 过滤逻辑 | 用途 |
+|---|---|---|---|---|
+| `gold.v_parking_violations_valid` | 有效停车罚单视图 | `gold.fact_parking_violations` | INNER JOIN `gold.dim_date` ON `date_key = issue_date_key`，自动排除 dim_date 范围外的日期键 | 提供给 Text2SQL Agent 和 BI 工具。建议先确认"是否需排除异常日期"，确认后使用此视图替代基表 |
+
+**技术说明**：
+- 视图使用 `INNER JOIN dim_date` 而非硬编码日期范围，以 `dim_date` 作为"已知有效日期"的权威白名单
+- 当 `dim_date` 覆盖范围变化时，视图自动跟随，无需手动维护日期阈值
+- 视图不替代基表，`gold.fact_parking_violations` 仍保留全部原始数据供数据质量排查
+
+**使用示例**：
+```sql
+-- 查询 2026 年 1 月每日有效罚单量（自动排除异常日期）
+SELECT d.date, COUNT(*) AS violation_count
+FROM gold.v_parking_violations_valid p
+JOIN gold.dim_date d ON d.date_key = p.issue_date_key
+WHERE d.date BETWEEN DATE '2026-01-01' AND DATE '2026-01-31'
+GROUP BY d.date
+ORDER BY d.date;
+```

@@ -1032,6 +1032,16 @@ def build_g3(conn) -> list[str]:
         """
     )
 
+    # 创建业务过滤视图：自动排除 dim_date 范围外的异常日期
+    # 视图 INNER JOIN dim_date 确保 issue_date_key 在有效日期范围内
+    conn.execute("""
+        CREATE OR REPLACE VIEW gold.v_parking_violations_valid AS
+        SELECT p.*
+        FROM gold.fact_parking_violations p
+        INNER JOIN gold.dim_date d
+          ON d.date_key = p.issue_date_key
+    """)
+
     write_semantic_layer(conn)
     return [
         "dws_daily_trip_summary",

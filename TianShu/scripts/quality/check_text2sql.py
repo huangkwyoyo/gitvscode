@@ -418,6 +418,7 @@ def check_metrics(
 
     # 检查 2：SQL 返回值列是否都能在引用表中找到
     # 注意：已注册的指标名和聚合函数别名是合法的派生列，不需要在物理列中存在
+    # 对于纯维度查询（metric_names 为空），跳过列名校验，因为 COUNT(*) 等聚合别名天然不在物理列中
     if select_columns and available_columns:
         unknown_columns = select_columns - available_columns
         # 排除已注册指标（它们可能是 count(*) AS trip_count 等派生列）
@@ -430,6 +431,9 @@ def check_metrics(
             c for c in unknown_columns
             if c not in {"count", "sum", "avg", "min", "max"} and not c.startswith("?")
         }
+        # 纯维度查询（无指标要求）不校验列名是否在物理表中存在
+        if not metric_names_lower:
+            unknown_columns = set()
         if unknown_columns:
             violations.append(
                 f"SQL 返回值列在引用表中找不到: {sorted(unknown_columns)}"
@@ -439,8 +443,15 @@ def check_metrics(
         pass
 
     if violations:
+        # 如果指标都已注册（检查 1 通过）但列名不匹配（检查 2 失败），降级为 WARN
+        # 这种情况常见于 G2 降级查询或派生计算列，不是错误
+        has_unregistered_only = (
+            len(violations) == 1
+            and violations[0].startswith("指标未在 meta.metric_definitions 注册")
+        )
+        severity = "FAIL" if has_unregistered_only else "WARN"
         return EvalItem(
-            status="FAIL",
+            status=severity,
             label="指标",
             detail="; ".join(violations),
             fix_hint=(

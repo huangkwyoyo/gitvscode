@@ -81,6 +81,7 @@ def main() -> int:
             str(config.project_root / "harness" / "config" / "gold_sparsity_baseline.yml"),
         ]),
         ("Memory Gate", [python, "scripts/quality/check_memory_update.py"]),
+        ("Gold 日期键质量门禁", [python, "scripts/quality/check_gold_date_quality.py"]),
         ("Silver 数据字典回归测试", [python, "-m", "pytest", "tests/test_silver_dictionary.py", "-v"]),
         ("Harness 自检回归测试", [python, "-m", "pytest", "tests/test_harness_quality.py", "-v"]),
         ("Gold 设计门禁回归测试", [python, "-m", "pytest", "tests/test_gold_design_quality.py", "-v"]),

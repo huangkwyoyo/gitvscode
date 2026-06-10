@@ -34,6 +34,7 @@ checks:
   gold_standard_questions: "harness/questions/gold_standard_questions.yml"
   text2sql: "scripts/quality/check_text2sql.py"
   text2sql_signature_baseline: "harness/reports/text2sql_signature_baseline.yml"
+  gold_date_quality: "scripts/quality/check_gold_date_quality.py"
   memory_update: "scripts/quality/check_memory_update.py"
   all_checks: "scripts/quality/run_all_checks.py"
 

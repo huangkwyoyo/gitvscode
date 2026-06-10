@@ -89,3 +89,115 @@ questions:
     sql: "SELECT t.trip_date, t.trip_count, COALESCE(c.crash_count, 0) AS crash_count FROM gold.dws_daily_trip_summary t LEFT JOIN gold.dws_daily_crash_summary c ON c.crash_date = t.trip_date WHERE t.trip_date BETWEEN DATE '2026-01-01' AND DATE '2026-01-31' ORDER BY t.trip_date"
     caution: "跨两个 G3 汇总表 JOIN，注意日期字段名不同（trip_date vs crash_date），用 COALESCE 处理无事故日期的 NULL。"
     expected_tables: ["gold.dws_daily_trip_summary", "gold.dws_daily_crash_summary"]
+
+  # ═══════════════════════════════════════════════════════
+  # 扩展题：车辆、司机、违章类型、TIF 支付、派生度量、日期边界
+  # ═══════════════════════════════════════════════════════
+
+  # ── 域 A：基础汇总补充 ──
+
+  - id: q_daily_trip_revenue
+    question_zh: "2026 年 1 月每天的总车费收入是多少？"
+    recommended_table: "gold.dws_daily_trip_summary"
+    metric_names: ["total_fare_amount"]
+    sql: "SELECT trip_date, total_fare_amount FROM gold.dws_daily_trip_summary WHERE trip_date BETWEEN DATE '2026-01-01' AND DATE '2026-01-31' ORDER BY trip_date"
+    caution: "total_fare_amount 来自 fare_amount 的汇总，仅 Yellow/Green 出租车有值，FHV/HV 为 0。"
+    expected_tables: ["gold.dws_daily_trip_summary"]
+
+  # ── 域 B：车辆维度查询 ──
+
+  - id: q_vehicle_license_status
+    question_zh: "不同牌照类型的车辆各有多少？"
+    recommended_table: "gold.dim_vehicle"
+    metric_names: []
+    sql: "SELECT license_type, count(*) AS cnt FROM gold.dim_vehicle GROUP BY license_type ORDER BY cnt DESC"
+    caution: "纯维度聚合查询，metric_names 为空列表。牌照类型来自 DMV 登记数据。"
+    expected_tables: ["gold.dim_vehicle"]
+
+  - id: q_trip_by_vehicle_type
+    question_zh: "2026 年 Q1 不同牌照类型的车辆各完成了多少行程？"
+    recommended_table: "gold.fact_trips"
+    metric_names: ["trip_count"]
+    sql: "SELECT v.license_type, count(*) AS trip_count FROM gold.fact_trips t INNER JOIN gold.dim_vehicle v ON v.license_number = t.base_no INNER JOIN gold.dim_date d ON d.date_key = t.pickup_date_key WHERE d.date BETWEEN DATE '2026-01-01' AND DATE '2026-03-31' GROUP BY v.license_type ORDER BY trip_count DESC"
+    caution: "G3 汇总表不含车辆维度，需降级到 G2 fact_trips JOIN dim_vehicle。注意 JOIN 键是 base_no = license_number，不是 vehicle_key。"
+    expected_tables: ["gold.fact_trips", "gold.dim_vehicle", "gold.dim_date"]
+
+  # ── 域 C：司机维度查询 ──
+
+  - id: q_driver_expiration_2026
+    question_zh: "有多少司机的牌照在 2026 年到期？"
+    recommended_table: "gold.dim_driver"
+    metric_names: []
+    sql: "SELECT count(*) AS cnt FROM gold.dim_driver WHERE expiration_date >= DATE '2026-01-01' AND expiration_date < DATE '2027-01-01'"
+    caution: "纯维度过滤查询，metric_names 为空。expiration_date 可能为 NULL（状态为未激活的司机）。"
+    expected_tables: ["gold.dim_driver"]
+
+  - id: q_driver_applications_daily
+    question_zh: "2026 年 Q1 每天有多少新的司机申请？"
+    recommended_table: "gold.fact_driver_applications"
+    metric_names: []
+    sql: "SELECT d.date, count(*) AS cnt FROM gold.fact_driver_applications a INNER JOIN gold.dim_date d ON d.date_key = a.app_date_key WHERE d.date BETWEEN DATE '2026-01-01' AND DATE '2026-03-31' GROUP BY d.date ORDER BY d.date"
+    caution: "fact_driver_applications 无对应 G3 汇总表，直接使用 G2 事实表。metric_names 为空，指标尚未注册。"
+    expected_tables: ["gold.fact_driver_applications", "gold.dim_date"]
+
+  # ── 域 D：违章类型与 TIF 支付 ──
+
+  - id: q_violation_type_top
+    question_zh: "最常发生的违章类型是哪些？"
+    recommended_table: "gold.fact_parking_violations"
+    metric_names: ["parking_violation_count"]
+    sql: "SELECT vt.violation_description, count(*) AS violation_count FROM gold.fact_parking_violations p INNER JOIN gold.dim_violation_type vt ON vt.violation_code = p.violation_code GROUP BY vt.violation_description ORDER BY violation_count DESC LIMIT 20"
+    caution: "G3 汇总表不含违章类型维度，需降级到 G2。注意 violation_count 是 G2 口径别名，已注册 parking_violation_count 对应 G3 口径。"
+    expected_tables: ["gold.fact_parking_violations", "gold.dim_violation_type"]
+
+  - id: q_tif_payment_daily
+    question_zh: "2026 年 Q1 每天的 TIF 支付总额是多少？"
+    recommended_table: "gold.fact_tif_payments"
+    metric_names: []
+    sql: "SELECT d.date, sum(p.total_payment_amount) AS daily_total FROM gold.fact_tif_payments p INNER JOIN gold.dim_date d ON d.date_key = p.payment_date_key WHERE d.date BETWEEN DATE '2026-01-01' AND DATE '2026-03-31' GROUP BY d.date ORDER BY d.date"
+    caution: "fact_tif_payments 无对应 G3 汇总表，直接使用 G2。total_payment_amount = hackup_payment_amount + operational_payment_amount。"
+    expected_tables: ["gold.fact_tif_payments", "gold.dim_date"]
+
+  - id: q_violation_fine_avg
+    question_zh: "不同违章类型的标准罚款金额排序？"
+    recommended_table: "gold.dim_violation_type"
+    metric_names: []
+    sql: "SELECT violation_description, standard_fine_amount FROM gold.dim_violation_type ORDER BY standard_fine_amount DESC LIMIT 20"
+    caution: "standard_fine_amount 是官方参考标准罚款金额，不是实际缴款金额。纯维度查询，metric_names 为空。"
+    expected_tables: ["gold.dim_violation_type"]
+
+  # ── 域 E：多表 JOIN 与派生度量 ──
+
+  - id: q_zone_fare_per_trip
+    question_zh: "哪个行政区平均每程车费最高？"
+    recommended_table: "gold.dws_zone_trip_summary"
+    metric_names: ["trip_count", "total_fare_amount"]
+    sql: "SELECT borough, zone_name, trip_count, total_fare_amount, CASE WHEN trip_count > 0 THEN total_fare_amount / trip_count ELSE 0 END AS fare_per_trip FROM gold.dws_zone_trip_summary ORDER BY fare_per_trip DESC LIMIT 10"
+    caution: "使用派生计算 total_fare_amount / trip_count，注意除零保护。fare_per_trip 是派生指标，非预存字段。"
+    expected_tables: ["gold.dws_zone_trip_summary"]
+
+  - id: q_borough_crash_density
+    question_zh: "各行政区的事故数量对比如何？"
+    recommended_table: "gold.fact_crashes"
+    metric_names: ["crash_count"]
+    sql: "SELECT borough, count(*) AS crash_count FROM gold.fact_crashes GROUP BY borough ORDER BY crash_count DESC"
+    caution: "fact_crashes 直接包含 borough 字段（事故行政区），无需 JOIN 维表。G3 汇总表不含行政区维度。"
+    expected_tables: ["gold.fact_crashes"]
+
+  # ── 域 F：日期边界与异常覆盖 ──
+
+  - id: q_parking_date_filtered
+    question_zh: "2026 年 1 月每天的有效停车罚单量是多少？（排除异常日期）"
+    recommended_table: "gold.v_parking_violations_valid"
+    metric_names: ["parking_violation_count"]
+    sql: "SELECT d.date, count(*) AS violation_count FROM gold.v_parking_violations_valid p INNER JOIN gold.dim_date d ON d.date_key = p.issue_date_key WHERE d.date BETWEEN DATE '2026-01-01' AND DATE '2026-01-31' GROUP BY d.date ORDER BY d.date"
+    caution: "使用视图 v_parking_violations_valid 自动排除 dim_date 范围外的异常日期（如 1971、2060、2028+）。需先运行 Gold G3 构建以创建视图。"
+    expected_tables: ["gold.v_parking_violations_valid", "gold.dim_date"]
+
+  - id: q_empty_date_range
+    question_zh: "2025 年 12 月 25 日圣诞节的行程量是多少？"
+    recommended_table: "gold.dws_daily_trip_summary"
+    metric_names: ["trip_count"]
+    sql: "SELECT trip_date, trip_count FROM gold.dws_daily_trip_summary WHERE trip_date = DATE '2025-12-25'"
+    caution: "出行数据主要为 2026Q1，此日期大概率无数据返回空结果集。验证空结果集 SQL 仍可正常执行不报错。"
+    expected_tables: ["gold.dws_daily_trip_summary"]
