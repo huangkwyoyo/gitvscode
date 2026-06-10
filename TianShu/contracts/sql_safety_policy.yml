@@ -1,0 +1,91 @@
+# SQL 安全策略契约
+#
+# 定义 Text2SQL Agent 生成 SQL 时必须遵守的安全规则。
+# 此契约是 Agent 的"安全宪法"——任何 SQL 生成前必须先通过此规则检查。
+
+# ═══════════════════════════════════════════════════════
+# 禁止的 SQL 操作（黑名单）
+# ═══════════════════════════════════════════════════════
+forbidden_operations:
+  - category: dml
+    keywords: [INSERT, UPDATE, DELETE, MERGE, REPLACE, TRUNCATE]
+    description: "禁止任何数据修改操作。Agent 是只读消费方。"
+
+  - category: ddl
+    keywords: [CREATE, ALTER, DROP, RENAME]
+    description: "禁止任何数据定义操作。表结构变更必须通过 TianShu Dev Agent 和 Harness。"
+
+  - category: dcl
+    keywords: [GRANT, REVOKE]
+    description: "禁止任何权限控制操作。"
+
+  - category: dangerous
+    keywords: [ATTACH, DETACH, EXPORT, IMPORT]
+    description: "禁止数据库文件级别的操作。"
+
+  - category: system_calls
+    keywords: [COPY, INSTALL, LOAD]
+    description: "禁止系统级操作和扩展加载。"
+
+# ═══════════════════════════════════════════════════════
+# 必须遵守的 SQL 编写规则（白名单）
+# ═══════════════════════════════════════════════════════
+required_patterns:
+  - rule: "read_only_select"
+    description: "SQL 必须以 SELECT 开头（WITH/EXPLAIN 等只读前缀除外）"
+    allowed_prefixes: [SELECT, WITH, EXPLAIN, DESCRIBE, SHOW]
+
+  - rule: "fully_qualified_table_names"
+    description: "表名必须使用完全限定名（schema.table），禁止裸表名"
+
+  - rule: "date_filter_via_dim_date"
+    description: "日期过滤必须通过 gold.dim_date 完成，禁止直接比较 date_key 整数值"
+    correct: "INNER JOIN gold.dim_date d ON d.date_key = t.pickup_date_key WHERE d.date BETWEEN ..."
+    incorrect: "WHERE pickup_date_key BETWEEN 20260101 AND 20260331"
+
+  - rule: "use_coalesce_for_null"
+    description: "LEFT JOIN 可能产生 NULL 的数值列必须用 COALESCE 处理"
+
+  - rule: "limit_large_queries"
+    description: "不带聚合的明细查询建议加 LIMIT（默认 1000），避免返回海量数据"
+
+# ═══════════════════════════════════════════════════════
+# 表引用规则
+# ═══════════════════════════════════════════════════════
+table_reference_rules:
+  - rule: "gold_first"
+    description: "优先使用 Gold 层表（G3 > G2 > G1/G0），禁止使用 Bronze/Silver"
+
+  - rule: "join_whitelist"
+    description: "跨表 JOIN 仅限于以下已核准的路径"
+    allowed_joins:
+      - "gold.fact_trips ↔ gold.dim_date (pickup_date_key / dropoff_date_key)"
+      - "gold.fact_trips ↔ gold.dim_vehicle (base_no = license_number)"
+      - "gold.fact_parking_violations ↔ gold.dim_date (issue_date_key)"
+      - "gold.fact_parking_violations ↔ gold.dim_violation_type (violation_code)"
+      - "gold.fact_crashes ↔ gold.dim_date (crash_date_key)"
+      - "gold.fact_tif_payments ↔ gold.dim_date (payment_date_key)"
+      - "gold.fact_driver_applications ↔ gold.dim_date (app_date_key)"
+      - "gold.dws_daily_trip_summary ↔ gold.dws_daily_crash_summary (trip_date = crash_date)"
+
+  - rule: "forbidden_joins"
+    description: "禁止以下 JOIN 模式"
+    forbidden:
+      - "任意事实表与 bronze.* / silver.* 的 JOIN"
+      - "不同事实表之间的 JOIN（除上述已核准的 trip↔crash）"
+      - "不通过 date_key 列的日期关联"
+      - "笛卡尔积（CROSS JOIN 无 ON 条件）"
+
+# ═══════════════════════════════════════════════════════
+# DuckDB 只读执行约束
+# ═══════════════════════════════════════════════════════
+execution_constraints:
+  - constraint: "read_only_connection"
+    description: "DuckDB 连接必须使用 read_only=True，数据库层面的写保护"
+
+  - constraint: "query_timeout"
+    description: "单次查询超时限制 30 秒，防止慢查询影响数据库性能"
+    timeout_seconds: 30
+
+  - constraint: "no_multi_statement"
+    description: "每次只执行一条 SQL 语句，禁止分号分隔的多语句"

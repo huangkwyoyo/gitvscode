@@ -1,0 +1,38 @@
+# TianShu 数据仓库目标配置
+#
+# 定义 Text2SQL Agent 连接 TianShu 的方式。
+# Agent 启动时读取此文件，建立只读连接。
+
+# ── TianShu 项目路径 ──
+tianshu:
+  # TianShu 项目根目录（相对于本项目的路径）
+  # 默认假设 TianShu 和 TianShu-Text2SQL-Agent 是同级目录
+  project_root: "../TianShu"
+
+  # DuckDB 数据库文件（相对于 TianShu 项目根目录）
+  duckdb_path: "data/tian_shu.duckdb"
+
+  # 契约文件目录（相对于 TianShu 项目根目录）
+  contracts_path: "contracts"
+
+  # 标准问题集（可选，用于评测）
+  standard_questions_path: "harness/questions/gold_standard_questions.yml"
+
+# ── 连接配置 ──
+connection:
+  read_only: true
+  connect_timeout: 30
+  # DuckDB 连接配置
+  duckdb:
+    # 内存限制（GB）
+    memory_limit_gb: 2
+    # 线程数
+    threads: 2
+
+# ── 契约文件列表（从 TianShu contracts/ 目录加载）──
+contracts:
+  - "warehouse_connection.yml"     # 连接方式
+  - "semantic_contract.yml"        # 可用表、优先级、JOIN 白名单
+  - "metric_contract.yml"          # 指标定义
+  - "question_policy.yml"          # 问答边界策略
+  - "sql_safety_policy.yml"        # SQL 安全规则

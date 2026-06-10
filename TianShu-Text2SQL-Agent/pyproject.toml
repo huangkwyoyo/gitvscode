@@ -1,0 +1,34 @@
+[project]
+name = "tianshu-text2sql-agent"
+version = "0.1.0"
+description = "TianShu 数据仓库的中文问数分析 Agent —— 自然语言 → 三层 IR → 只读 SQL → 中文解释"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [
+    { name = "TianShu Team" }
+]
+keywords = ["text2sql", "duckdb", "data-warehouse", "chinese-nlp", "agent"]
+
+dependencies = [
+    "duckdb>=0.10.0",
+    "pyyaml>=6.0",
+    "jsonschema>=4.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+    "ruff>=0.1.0",
+]
+
+[project.scripts]
+tianshu-ask = "src.agent:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"

@@ -1,0 +1,128 @@
+# 指标契约
+#
+# 定义 TianShu 数据仓库对外暴露的指标及其口径。
+# 所有指标必须在 meta.metric_definitions 表中注册，
+# 此文件是注册表的静态快照，供 Agent 项目在无法直连 DuckDB 时使用。
+#
+# 权威源：TianShu DuckDB 中的 meta.metric_definitions 表
+# 此文件更新频率：每次新增/修改指标时同步更新
+
+metrics:
+  # ── 行程域（Traffic）──
+  - name: "trip_count"
+    zh_name: "行程量"
+    domain: "traffic"
+    description: "行程总数（按 pickup_date 统计）"
+    base_table: "gold.fact_trips"
+    aggregation: "COUNT(*)"
+    unit: "次"
+    g3_available: true
+    g3_table: "gold.dws_daily_trip_summary"
+
+  - name: "total_fare_amount"
+    zh_name: "总车费收入"
+    domain: "traffic"
+    description: "车费收入的汇总金额（仅 Yellow/Green 出租车有值，FHV/HV 为 0）"
+    base_table: "gold.fact_trips"
+    aggregation: "SUM(fare_amount)"
+    unit: "美元"
+    g3_available: true
+    g3_table: "gold.dws_daily_trip_summary"
+    caution: "不包含 FHV/HV 行程的车费"
+
+  - name: "total_tip_amount"
+    zh_name: "总小费金额"
+    domain: "traffic"
+    description: "小费汇总金额"
+    base_table: "gold.fact_trips"
+    aggregation: "SUM(tip_amount)"
+    unit: "美元"
+    g3_available: true
+    g3_table: "gold.dws_daily_trip_summary"
+
+  - name: "total_distance_miles"
+    zh_name: "总行驶距离"
+    domain: "traffic"
+    description: "行程总距离（英里）"
+    base_table: "gold.fact_trips"
+    aggregation: "SUM(trip_miles)"
+    unit: "英里"
+    g3_available: true
+    g3_table: "gold.dws_daily_trip_summary"
+
+  # ── 违章域（Violation）──
+  - name: "parking_violation_count"
+    zh_name: "停车罚单数量"
+    domain: "violation"
+    description: "停车罚单总数"
+    base_table: "gold.fact_parking_violations"
+    aggregation: "COUNT(*)"
+    unit: "张"
+    g3_available: true
+    g3_table: "gold.dws_daily_parking_summary"
+
+  - name: "standard_fine_total"
+    zh_name: "标准罚款总额"
+    domain: "violation"
+    description: "按违章代码字典的标准罚款金额汇总（非实际缴款金额）"
+    base_table: "gold.dim_violation_type"
+    aggregation: "SUM(standard_fine_amount)"
+    unit: "美元"
+    g3_available: true
+    g3_table: "gold.dws_daily_parking_summary"
+    caution: "这是官方参考标准罚款金额，不是实际缴款金额，也不是实际收入"
+
+  # ── 安全域（Safety）──
+  - name: "crash_count"
+    zh_name: "事故数量"
+    domain: "safety"
+    description: "交通事故总数"
+    base_table: "gold.fact_crashes"
+    aggregation: "COUNT(*)"
+    unit: "起"
+    g3_available: true
+    g3_table: "gold.dws_daily_crash_summary"
+
+  - name: "persons_killed"
+    zh_name: "死亡人数"
+    domain: "safety"
+    description: "事故死亡总人数"
+    base_table: "gold.fact_crashes"
+    aggregation: "SUM(persons_killed)"
+    unit: "人"
+    g3_available: true
+    g3_table: "gold.dws_daily_crash_summary"
+
+  - name: "persons_injured"
+    zh_name: "受伤人数"
+    domain: "safety"
+    description: "事故受伤总人数"
+    base_table: "gold.fact_crashes"
+    aggregation: "SUM(persons_injured)"
+    unit: "人"
+    g3_available: true
+    g3_table: "gold.dws_daily_crash_summary"
+
+  # ── 供给域（Supply）──
+  - name: "tif_payment_amount"
+    zh_name: "TIF 支付金额"
+    domain: "supply"
+    description: "TIF（出租车改进基金）支付总额 = hackup_payment_amount + operational_payment_amount"
+    base_table: "gold.fact_tif_payments"
+    aggregation: "SUM(total_payment_amount)"
+    unit: "美元"
+    g3_available: false
+    g3_table: null
+    note: "无 G3 汇总表，需从 G2 fact_tif_payments 聚合"
+
+# ── 易混淆指标对照 ──
+#
+# 以下三个"金额"概念容易混淆，Agent 和用户都需要明确区分：
+#
+# | 用户可能说         | 对应指标              | 来源表                    | 含义                         |
+# |-------------------|----------------------|--------------------------|------------------------------|
+# | "车费""收入"       | total_fare_amount    | fact_trips / dws_daily   | 乘客支付的车费总和            |
+# | "罚款""罚金"       | standard_fine_total  | dim_violation_type / dws  | 按违章代码的官方参考罚款总额   |
+# | "TIF""支付"        | tif_payment_amount   | fact_tif_payments        | 出租车改进基金的支付金额       |
+#
+# 当用户只说"金额"且无法从上下文判断时，Agent 必须反问确认。

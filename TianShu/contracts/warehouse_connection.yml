@@ -1,0 +1,22 @@
+# 数据仓库连接契约
+#
+# 定义 TianShu-Text2SQL-Agent 如何连接 TianShu 数据仓库。
+# 此文件是 TianShu 对外暴露的"API 文档"的一部分，
+# Agent 项目通过读取此文件获取连接方式和安全约束。
+
+# DuckDB 数据库文件路径（相对于 TianShu 项目根目录）
+duckdb:
+  relative_path: "data/tian_shu.duckdb"
+  # Agent 必须使用只读模式连接
+  read_only: true
+  # 连接超时（秒）
+  connect_timeout: 30
+
+# 连接字符串模板（Agent 项目据此构造连接）
+connection_string: "duckdb:///{tianshu_root}/data/tian_shu.duckdb?read_only=true"
+
+# 数据库引擎信息
+engine:
+  type: duckdb
+  min_version: "0.10.0"
+  note: "DuckDB 嵌入式分析数据库，无需独立服务进程"

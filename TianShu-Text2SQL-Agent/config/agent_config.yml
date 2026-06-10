@@ -1,0 +1,69 @@
+# Text2SQL Agent 运行时配置
+#
+# 控制 Agent 的行为、模型选择和安全设置。
+
+# ── 模型配置 ──
+model:
+  # 意图分类模型（轻量即可，结构化输出）
+  intent_classifier:
+    provider: "anthropic"
+    model: "claude-haiku-4-5-20251001"
+    temperature: 0.0
+    max_tokens: 500
+
+  # SQL 规划模型（中等推理能力）
+  sql_planner:
+    provider: "anthropic"
+    model: "claude-sonnet-4-6"
+    temperature: 0.0
+    max_tokens: 1000
+
+  # SQL 生成模型（需要强 SQL 语法知识）
+  sql_generator:
+    provider: "anthropic"
+    model: "claude-sonnet-4-6"
+    temperature: 0.0
+    max_tokens: 500
+
+  # 结果解释模型（自然语言生成）
+  explainer:
+    provider: "anthropic"
+    model: "claude-haiku-4-5-20251001"
+    temperature: 0.3
+    max_tokens: 800
+
+# ── 行为配置 ──
+behavior:
+  # 歧义检测置信度阈值：低于此值必须反问
+  ambiguity_threshold: 0.85
+
+  # 反问时最多提供的选项数
+  max_clarification_options: 3
+
+  # 明细查询默认 LIMIT（不带聚合时必须加）
+  default_limit: 1000
+
+  # 结果展示最大行数
+  max_result_rows: 50
+
+  # 是否在回答中标注数据来源表
+  show_source_table: true
+
+# ── 安全配置 ──
+safety:
+  # 必须启用只读模式（不可关闭）
+  read_only: true
+
+  # 查询超时（秒）
+  query_timeout: 30
+
+  # 禁止的 SQL 关键字（除 contracts 中定义的外，额外加强）
+  extra_forbidden_keywords:
+    - "PRAGMA"
+    - "CHECKPOINT"
+
+# ── 日志配置 ──
+logging:
+  level: "INFO"
+  format: "%(asctime)s [%(levelname)s] %(message)s"
+  file: "logs/agent.log"

@@ -1,0 +1,154 @@
+# 语义层契约
+#
+# 定义 TianShu Gold 层对外暴露的表、视图及其优先级。
+# Agent 必须按优先级顺序选表：G3 > G2 > G1/G0。
+# 禁止直接查询未列入此契约的表（如 Bronze/Silver）。
+
+# ═══════════════════════════════════════════════════════
+# G3 汇总表（最高优先级）—— 预先聚合的日报/区域汇总
+# ═══════════════════════════════════════════════════════
+g3_summary:
+  - table: "gold.dws_daily_trip_summary"
+    zh_name: "每日行程汇总"
+    description: "按天汇总的行程量、车费、距离、小费等指标"
+    grain: "日期"
+    key_dimensions: ["trip_date"]
+    key_metrics: ["trip_count", "total_fare_amount", "total_tip_amount", "total_distance_miles"]
+    note: "仅覆盖 Yellow/Green 出租车，不含 FHV/HV"
+
+  - table: "gold.dws_zone_trip_summary"
+    zh_name: "区域行程汇总"
+    description: "按出租车区域汇总的行程量和车费"
+    grain: "zone_name, borough"
+    key_dimensions: ["borough", "zone_name"]
+    key_metrics: ["trip_count", "total_fare_amount"]
+    note: "已预关联 dim_taxi_zone，可直接按 borough 过滤"
+
+  - table: "gold.dws_daily_parking_summary"
+    zh_name: "每日停车罚单汇总"
+    description: "按天汇总的停车罚单数量和标准罚款金额"
+    grain: "日期"
+    key_dimensions: ["issue_date"]
+    key_metrics: ["parking_violation_count", "standard_fine_total"]
+    note: "不包含违章类型维度，需要该维度时降级到 G2"
+
+  - table: "gold.dws_daily_crash_summary"
+    zh_name: "每日事故汇总"
+    description: "按天汇总的事故数量、死亡和受伤人数"
+    grain: "日期"
+    key_dimensions: ["crash_date"]
+    key_metrics: ["crash_count", "persons_killed", "persons_injured"]
+    note: "不包含行政区维度，需要该维度时降级到 G2"
+
+# ═══════════════════════════════════════════════════════
+# G2 事实表（降级使用）—— 明细级业务事件
+# ═══════════════════════════════════════════════════════
+g2_facts:
+  - table: "gold.fact_trips"
+    zh_name: "行程明细事实表"
+    description: "每一条行程记录，包含接客/送客时间、区域、车费、行程来源等"
+    grain: "单条行程"
+    join_keys:
+      pickup_date_key: "gold.dim_date.date_key"
+      dropoff_date_key: "gold.dim_date.date_key"
+      base_no: "gold.dim_vehicle.license_number"
+    note: "当 G3 汇总表不含所需维度（如 trip_source、vehicle_type）时降级使用"
+
+  - table: "gold.fact_parking_violations"
+    zh_name: "停车罚单明细事实表"
+    description: "每一条停车罚单记录"
+    grain: "单条罚单"
+    join_keys:
+      issue_date_key: "gold.dim_date.date_key"
+      violation_code: "gold.dim_violation_type.violation_code"
+    note: "当 G3 不含违章类型维度时降级使用。issue_date_key 包含部分异常日期"
+
+  - table: "gold.fact_crashes"
+    zh_name: "事故明细事实表"
+    description: "每一条交通事故记录，直接包含 borough 字段"
+    grain: "单条事故"
+    join_keys:
+      crash_date_key: "gold.dim_date.date_key"
+    note: "直接包含 borough 字段，无需 JOIN 维表获取行政区"
+
+  - table: "gold.fact_crash_persons"
+    zh_name: "事故人员明细事实表"
+    description: "事故涉及人员的详细信息"
+    grain: "单条人员记录"
+    join_keys:
+      crash_date_key: "gold.dim_date.date_key"
+    note: "用于人员级别统计，一般事故统计用 fact_crashes 即可"
+
+  - table: "gold.fact_tif_payments"
+    zh_name: "TIF 支付明细事实表"
+    description: "每一条 TIF（出租车改进基金）支付记录"
+    grain: "单条支付"
+    join_keys:
+      payment_date_key: "gold.dim_date.date_key"
+    note: "无对应 G3 汇总表，直接使用 G2。"
+
+  - table: "gold.fact_driver_applications"
+    zh_name: "司机申请明细事实表"
+    description: "每一条司机牌照申请记录"
+    grain: "单条申请"
+    join_keys:
+      app_date_key: "gold.dim_date.date_key"
+    note: "无对应 G3 汇总表，直接使用 G2。"
+
+# ═══════════════════════════════════════════════════════
+# G1 业务维表 + G0 公共维表
+# ═══════════════════════════════════════════════════════
+dimensions:
+  - table: "gold.dim_date"
+    zh_name: "日期维表"
+    description: "日期维度白名单（1997-01-01 ~ 2027-12-31），所有日期过滤的权威源"
+    note: "必须通过此表过滤日期，不要直接比较 date_key 整数值"
+
+  - table: "gold.dim_taxi_zone"
+    zh_name: "出租车区域维表"
+    description: "NYC 出租车区域信息，包含 borough 和 zone_name"
+    note: "当 G3 表不含区域名称时 JOIN 使用"
+
+  - table: "gold.dim_vehicle"
+    zh_name: "车辆维表"
+    description: "车辆牌照信息，包含 license_type"
+    note: "JOIN fact_trips 时使用 base_no = license_number"
+
+  - table: "gold.dim_driver"
+    zh_name: "司机维表"
+    description: "司机牌照信息，包含 expiration_date"
+    note: "纯维度查询可直接使用"
+
+  - table: "gold.dim_violation_type"
+    zh_name: "违章类型维表"
+    description: "违章代码字典，包含 standard_fine_amount（标准罚款金额）"
+    note: "standard_fine_amount 是官方参考标准，不是实际缴款金额"
+
+# ═══════════════════════════════════════════════════════
+# 业务视图
+# ═══════════════════════════════════════════════════════
+views:
+  - table: "gold.v_parking_violations_valid"
+    zh_name: "有效停车罚单视图"
+    description: "已通过 dim_date INNER JOIN 过滤异常日期的停车罚单"
+    note: "停车罚单相关查询优先使用此视图，自动排除 1971/2060/2028+ 异常日期"
+
+# ═══════════════════════════════════════════════════════
+# 语义层元数据表
+# ═══════════════════════════════════════════════════════
+meta:
+  - table: "meta.metric_definitions"
+    zh_name: "指标定义注册表"
+    description: "所有可用指标的唯一定义源，Agent 必须从此表发现指标"
+    note: "不在此表中的指标名称视为未注册，Agent 不得使用"
+
+# ═══════════════════════════════════════════════════════
+# 禁止查询的表
+# ═══════════════════════════════════════════════════════
+forbidden:
+  - pattern: "bronze.*"
+    reason: "Bronze 层为原始摄入数据，未经清洗，禁止用于业务问答"
+  - pattern: "silver.*"
+    reason: "Silver 层为中间清洗数据，未建模为业务主题，禁止用于业务问答"
+  - pattern: "*.raw_*"
+    reason: "原始数据表，禁止直接查询"
