@@ -32,6 +32,8 @@ checks:
   gold_sparsity_baseline: "harness/config/gold_sparsity_baseline.yml"
   semantic_layer: "scripts/quality/check_semantic_layer.py"
   gold_standard_questions: "harness/questions/gold_standard_questions.yml"
+  text2sql: "scripts/quality/check_text2sql.py"
+  text2sql_signature_baseline: "harness/reports/text2sql_signature_baseline.yml"
   memory_update: "scripts/quality/check_memory_update.py"
   all_checks: "scripts/quality/run_all_checks.py"
 
@@ -40,3 +42,4 @@ tests:
   harness_quality: "tests/test_harness_quality.py"
   gold_design_quality: "tests/test_gold_design_quality.py"
   gold_build_quality: "tests/test_gold_build_quality.py"
+  text2sql: "tests/test_text2sql.py"

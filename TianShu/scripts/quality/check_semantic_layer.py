@@ -76,9 +76,12 @@ def check_semantic_layer(db_path: Path, questions_path: Path) -> list[str]:
 
             for item in questions:
                 question_id = item.get("id", "")
-                for field in ["question_zh", "recommended_table", "metric_names", "sql", "caution"]:
+                # metric_names 允许为空列表（纯维度查询）
+                for field in ["question_zh", "recommended_table", "sql", "caution"]:
                     if not item.get(field):
                         violations.append(f"{question_id or '未命名问题'} 缺少字段: {field}")
+                if "metric_names" not in item:
+                    violations.append(f"{question_id or '未命名问题'} 缺少字段: metric_names")
                 for metric_name in item.get("metric_names", []):
                     if metric_name not in metric_names:
                         violations.append(f"{question_id} 引用未登记指标: {metric_name}")

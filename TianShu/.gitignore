@@ -1,0 +1,21 @@
+# ─── Python ───
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# ─── Harness 评测报告（每次运行自动生成，仅保留最新一份代表性报告） ───
+# 时间戳报告（本地保留，不提交）
+harness/reports/text2sql_report_20[0-9][0-9]*.md
+# 稳定版报告（提交）
+!harness/reports/text2sql_report_latest.md
+
+# ─── IDE / 工具临时文件 ───
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ─── 数据文件（绝对路径，不提交） ───
+*.duckdb
+*.duckdb.wal

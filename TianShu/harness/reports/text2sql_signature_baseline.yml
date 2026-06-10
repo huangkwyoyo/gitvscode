@@ -1,0 +1,101 @@
+generated_at: '2026-06-10T20:51:25'
+description: Text2SQL 结果签名基线。删除此文件可强制重新生成。
+signatures:
+  q_daily_trip_count:
+    row_count: 90
+    columns:
+    - trip_date
+    - trip_count
+    column_types:
+    - TIMESTAMP
+    - BIGINT
+    md5: 09d9b9f7dee1901d04e5869618d2fe1b
+  q_top_pickup_zone:
+    row_count: 20
+    columns:
+    - borough
+    - zone_name
+    - trip_count
+    column_types:
+    - VARCHAR
+    - VARCHAR
+    - BIGINT
+    md5: 1cde76f0c77059d693f77a78516094bd
+  q_daily_parking_count:
+    row_count: 1247
+    columns:
+    - issue_date
+    - violation_count
+    column_types:
+    - TIMESTAMP
+    - BIGINT
+    md5: d6b4a43b0b693765a7890fed58958820
+  q_daily_standard_fine:
+    row_count: 20
+    columns:
+    - issue_date
+    - standard_fine_total
+    column_types:
+    - TIMESTAMP
+    - DECIMAL(18,2)
+    md5: 7bac220191e7f6167ebd9b73b14a3132
+  q_daily_crash_trend:
+    row_count: 5085
+    columns:
+    - crash_date
+    - crash_count
+    - persons_killed
+    column_types:
+    - TIMESTAMP
+    - BIGINT
+    - BIGINT
+    md5: 62dbb78006e676c030004886491c3995
+  q_daily_injury_trend:
+    row_count: 5085
+    columns:
+    - crash_date
+    - persons_injured
+    column_types:
+    - TIMESTAMP
+    - BIGINT
+    md5: 8768c662c0875fec4ef05193af8d04a5
+  q_top_borough_fares:
+    row_count: 67
+    columns:
+    - zone_name
+    - trip_count
+    - total_fare_amount
+    column_types:
+    - VARCHAR
+    - BIGINT
+    - DECIMAL(18,2)
+    md5: 4a23412456c36a0f3a17b680d3183651
+  q_trip_source_breakdown:
+    row_count: 360
+    columns:
+    - date
+    - trip_source
+    - trip_count
+    column_types:
+    - TIMESTAMP
+    - VARCHAR
+    - BIGINT
+    md5: 1fa159c15d227059201c760a3383f856
+  q_borough_list:
+    row_count: 8
+    columns:
+    - borough
+    column_types:
+    - VARCHAR
+    md5: 57f756e6958cfd7d4024fa54d99c363b
+  q_cross_fact_comparison:
+    row_count: 31
+    columns:
+    - trip_date
+    - trip_count
+    - crash_count
+    column_types:
+    - TIMESTAMP
+    - BIGINT
+    - BIGINT
+    md5: e4d2343958c23ab07df6d5a03a943a75

@@ -42,6 +42,7 @@ python scripts\quality\run_all_checks.py
 | Gold 设计门禁 | `scripts/quality/check_gold_design.py` | 检查 Gold 设计文档的中文名、字段来源和类型口径 |
 | Gold 物理表门禁 | `scripts/quality/check_gold_physical.py` | 检查 Gold G0/G1/G2/G3 表存在、字段集合和中文注释 |
 | 中文语义层门禁 | `scripts/quality/check_semantic_layer.py` | 检查语义元数据、标准中文问题集和模板 SQL 可执行性 |
+| Text2SQL 问数能力评测 | `scripts/quality/check_text2sql.py` | 基于标准问题集，五维评测表选择、指标、SQL 可执行性、结果一致性和层级合规 |
 
 Silver 实表建成后，启用强校验：
 

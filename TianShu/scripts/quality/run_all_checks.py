@@ -85,6 +85,7 @@ def main() -> int:
         ("Harness 自检回归测试", [python, "-m", "pytest", "tests/test_harness_quality.py", "-v"]),
         ("Gold 设计门禁回归测试", [python, "-m", "pytest", "tests/test_gold_design_quality.py", "-v"]),
         ("Gold 构建回归测试", [python, "-m", "pytest", "tests/test_gold_build_quality.py", "-v"]),
+        ("Text2SQL 问数能力评测", [python, "scripts/quality/check_text2sql.py"]),
     ]
 
     failed = 0

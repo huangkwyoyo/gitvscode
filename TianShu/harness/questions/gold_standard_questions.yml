@@ -3,6 +3,7 @@
 # 用途：
 # - 验证 Text2SQL Agent 是否能稳定选择 Gold 汇总表、事实表和指标口径。
 # - 每个问题都必须有推荐表、指标、SQL 标准答案和注意事项。
+# - expected_tables 字段用于精确校验 SQL 应引用的表（可选，未指定时回退到 recommended_table）。
 
 questions:
   - id: q_daily_trip_count
@@ -11,6 +12,7 @@ questions:
     metric_names: ["trip_count"]
     sql: "SELECT trip_date, trip_count FROM gold.dws_daily_trip_summary WHERE trip_date BETWEEN DATE '2026-01-01' AND DATE '2026-03-31' ORDER BY trip_date"
     caution: "行程日期使用 pickup_date_key；不直接回查 Bronze。"
+    expected_tables: ["gold.dws_daily_trip_summary"]
 
   - id: q_top_pickup_zone
     question_zh: "哪个区域上车量最高？"
@@ -18,6 +20,7 @@ questions:
     metric_names: ["trip_count"]
     sql: "SELECT borough, zone_name, trip_count FROM gold.dws_zone_trip_summary ORDER BY trip_count DESC LIMIT 20"
     caution: "只统计 pickup_location_id 非空且可关联出租车区域的行程。"
+    expected_tables: ["gold.dws_zone_trip_summary"]
 
   - id: q_daily_parking_count
     question_zh: "每天停车罚单数量是多少？"
@@ -25,6 +28,7 @@ questions:
     metric_names: ["parking_violation_count"]
     sql: "SELECT issue_date, violation_count FROM gold.dws_daily_parking_summary ORDER BY issue_date"
     caution: "日期使用罚单开票日期 issue_date_key。"
+    expected_tables: ["gold.dws_daily_parking_summary"]
 
   - id: q_daily_standard_fine
     question_zh: "标准罚款金额最高的日期是哪天？"
@@ -32,6 +36,7 @@ questions:
     metric_names: ["standard_fine_total"]
     sql: "SELECT issue_date, standard_fine_total FROM gold.dws_daily_parking_summary ORDER BY standard_fine_total DESC LIMIT 20"
     caution: "标准罚款金额来自官方违章代码字典，不代表实际缴款金额。"
+    expected_tables: ["gold.dws_daily_parking_summary"]
 
   - id: q_daily_crash_trend
     question_zh: "每天事故数量和死亡人数趋势如何？"
@@ -39,6 +44,7 @@ questions:
     metric_names: ["crash_count", "persons_killed"]
     sql: "SELECT crash_date, crash_count, persons_killed FROM gold.dws_daily_crash_summary ORDER BY crash_date"
     caution: "事故日期来自 crash_date_key。"
+    expected_tables: ["gold.dws_daily_crash_summary"]
 
   - id: q_daily_injury_trend
     question_zh: "每天事故受伤人数是多少？"
@@ -46,3 +52,40 @@ questions:
     metric_names: ["persons_injured"]
     sql: "SELECT crash_date, persons_injured FROM gold.dws_daily_crash_summary ORDER BY crash_date"
     caution: "使用事故级受伤人数汇总，不用人员表重复计算。"
+    expected_tables: ["gold.dws_daily_crash_summary"]
+
+  # ═══════════════════════════════════════════════════════
+  # 边界测试题
+  # ═══════════════════════════════════════════════════════
+
+  - id: q_top_borough_fares
+    question_zh: "曼哈顿行政区的行程量和总车费是多少？"
+    recommended_table: "gold.dws_zone_trip_summary"
+    metric_names: ["trip_count", "total_fare_amount"]
+    sql: "SELECT zone_name, trip_count, total_fare_amount FROM gold.dws_zone_trip_summary WHERE borough = 'Manhattan' ORDER BY trip_count DESC"
+    caution: "dws_zone_trip_summary 已预关联 dim_taxi_zone，可直接按 borough 过滤。"
+    expected_tables: ["gold.dws_zone_trip_summary"]
+
+  - id: q_trip_source_breakdown
+    question_zh: "2026 年 Q1 每天不同行程来源类型的行程量分布如何？"
+    recommended_table: "gold.fact_trips"
+    metric_names: ["trip_count"]
+    sql: "SELECT d.date, t.trip_source, count(*) AS trip_count FROM gold.fact_trips t INNER JOIN gold.dim_date d ON d.date_key = t.pickup_date_key WHERE d.date BETWEEN DATE '2026-01-01' AND DATE '2026-03-31' GROUP BY d.date, t.trip_source ORDER BY d.date, t.trip_source"
+    caution: "G3 汇总表 dws_daily_trip_summary 不包含 trip_source 维度，必须回退到 G2 fact_trips。这不是误用明细表，而是汇总表粒度不足时的合理回退。"
+    expected_tables: ["gold.fact_trips", "gold.dim_date"]
+
+  - id: q_borough_list
+    question_zh: "纽约市有哪些行政区？"
+    recommended_table: "gold.dim_taxi_zone"
+    metric_names: []
+    sql: "SELECT DISTINCT borough FROM gold.dim_taxi_zone WHERE borough IS NOT NULL ORDER BY borough"
+    caution: "纯维度查询，不涉及指标。metric_names 为空列表表示无指标要求。"
+    expected_tables: ["gold.dim_taxi_zone"]
+
+  - id: q_cross_fact_comparison
+    question_zh: "2026 年 1 月每日行程量和事故量的对比趋势？"
+    recommended_table: "gold.dws_daily_trip_summary"
+    metric_names: ["trip_count", "crash_count"]
+    sql: "SELECT t.trip_date, t.trip_count, COALESCE(c.crash_count, 0) AS crash_count FROM gold.dws_daily_trip_summary t LEFT JOIN gold.dws_daily_crash_summary c ON c.crash_date = t.trip_date WHERE t.trip_date BETWEEN DATE '2026-01-01' AND DATE '2026-01-31' ORDER BY t.trip_date"
+    caution: "跨两个 G3 汇总表 JOIN，注意日期字段名不同（trip_date vs crash_date），用 COALESCE 处理无事故日期的 NULL。"
+    expected_tables: ["gold.dws_daily_trip_summary", "gold.dws_daily_crash_summary"]
