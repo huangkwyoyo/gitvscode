@@ -39,6 +39,9 @@ python scripts\quality\run_all_checks.py
 | Schema 一致性 | `scripts/quality/check_schema_consistency.py` | 设计文档、xlsx、DuckDB Bronze schema |
 | 回归测试 | `tests/test_silver_dictionary.py` | 已发生问题的自动回归 |
 | Harness 自检 | `tests/test_harness_quality.py` | 配置读取、关键输入缺失、Silver 实表强校验 |
+| Gold 设计门禁 | `scripts/quality/check_gold_design.py` | 检查 Gold 设计文档的中文名、字段来源和类型口径 |
+| Gold 物理表门禁 | `scripts/quality/check_gold_physical.py` | 检查 Gold G0/G1/G2/G3 表存在、字段集合和中文注释 |
+| 中文语义层门禁 | `scripts/quality/check_semantic_layer.py` | 检查语义元数据、标准中文问题集和模板 SQL 可执行性 |
 
 Silver 实表建成后，启用强校验：
 
@@ -57,6 +60,8 @@ harness
 │  └─ pr_review.md
 ├─ config
 │  └─ harness_targets.yml
+├─ questions
+│  └─ gold_standard_questions.yml
 ├─ reports
 │  └─ README.md
 └─ lessons

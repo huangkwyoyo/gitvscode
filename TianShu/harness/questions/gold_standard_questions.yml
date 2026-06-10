@@ -1,0 +1,48 @@
+# Gold 标准中文问数集
+#
+# 用途：
+# - 验证 Text2SQL Agent 是否能稳定选择 Gold 汇总表、事实表和指标口径。
+# - 每个问题都必须有推荐表、指标、SQL 标准答案和注意事项。
+
+questions:
+  - id: q_daily_trip_count
+    question_zh: "2026 年 Q1 每天有多少行程？"
+    recommended_table: "gold.dws_daily_trip_summary"
+    metric_names: ["trip_count"]
+    sql: "SELECT trip_date, trip_count FROM gold.dws_daily_trip_summary WHERE trip_date BETWEEN DATE '2026-01-01' AND DATE '2026-03-31' ORDER BY trip_date"
+    caution: "行程日期使用 pickup_date_key；不直接回查 Bronze。"
+
+  - id: q_top_pickup_zone
+    question_zh: "哪个区域上车量最高？"
+    recommended_table: "gold.dws_zone_trip_summary"
+    metric_names: ["trip_count"]
+    sql: "SELECT borough, zone_name, trip_count FROM gold.dws_zone_trip_summary ORDER BY trip_count DESC LIMIT 20"
+    caution: "只统计 pickup_location_id 非空且可关联出租车区域的行程。"
+
+  - id: q_daily_parking_count
+    question_zh: "每天停车罚单数量是多少？"
+    recommended_table: "gold.dws_daily_parking_summary"
+    metric_names: ["parking_violation_count"]
+    sql: "SELECT issue_date, violation_count FROM gold.dws_daily_parking_summary ORDER BY issue_date"
+    caution: "日期使用罚单开票日期 issue_date_key。"
+
+  - id: q_daily_standard_fine
+    question_zh: "标准罚款金额最高的日期是哪天？"
+    recommended_table: "gold.dws_daily_parking_summary"
+    metric_names: ["standard_fine_total"]
+    sql: "SELECT issue_date, standard_fine_total FROM gold.dws_daily_parking_summary ORDER BY standard_fine_total DESC LIMIT 20"
+    caution: "标准罚款金额来自官方违章代码字典，不代表实际缴款金额。"
+
+  - id: q_daily_crash_trend
+    question_zh: "每天事故数量和死亡人数趋势如何？"
+    recommended_table: "gold.dws_daily_crash_summary"
+    metric_names: ["crash_count", "persons_killed"]
+    sql: "SELECT crash_date, crash_count, persons_killed FROM gold.dws_daily_crash_summary ORDER BY crash_date"
+    caution: "事故日期来自 crash_date_key。"
+
+  - id: q_daily_injury_trend
+    question_zh: "每天事故受伤人数是多少？"
+    recommended_table: "gold.dws_daily_crash_summary"
+    metric_names: ["persons_injured"]
+    sql: "SELECT crash_date, persons_injured FROM gold.dws_daily_crash_summary ORDER BY crash_date"
+    caution: "使用事故级受伤人数汇总，不用人员表重复计算。"

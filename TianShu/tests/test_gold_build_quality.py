@@ -32,6 +32,20 @@ EXPECTED_FACTS = {
     "fact_crash_persons": "crash_person_detail",
 }
 
+EXPECTED_G3_SUMMARIES = {
+    "dws_daily_trip_summary",
+    "dws_zone_trip_summary",
+    "dws_daily_parking_summary",
+    "dws_daily_crash_summary",
+}
+
+EXPECTED_SEMANTIC_TABLES = {
+    "metric_definitions",
+    "semantic_dimensions",
+    "semantic_query_templates",
+    "business_terms",
+}
+
 
 def run_quality_command(args: list[str]) -> subprocess.CompletedProcess[str]:
     """使用统一环境运行构建脚本，避免中文输出编码干扰"""
@@ -157,6 +171,58 @@ def test_gold_g2_build_creates_fact_tables():
 def test_gold_physical_gate_passes_after_g2_build():
     """Gold G2 建成后，物理门禁必须覆盖事实表"""
     result = run_quality_command(["scripts/quality/check_gold_physical.py", "--batches", "G0,G1,G2"])
+
+    assert result.returncode == 0, result.stdout
+    assert "Gold 物理表门禁检查通过" in result.stdout
+
+
+def test_gold_g3_build_creates_summary_and_semantic_tables():
+    """Gold G3 构建后必须生成汇总表和中文语义层表"""
+    result = run_quality_command(["scripts/gold/build_gold_duckdb.py", "--batches", "G3"])
+
+    assert result.returncode == 0, result.stdout
+
+    con = duckdb.connect(str(DB_PATH), read_only=True)
+    try:
+        gold_tables = {
+            row[0]
+            for row in con.execute(
+                """
+                SELECT table_name
+                FROM information_schema.tables
+                WHERE table_schema = 'gold'
+                """
+            ).fetchall()
+        }
+        assert EXPECTED_G3_SUMMARIES <= gold_tables
+
+        for table_name in EXPECTED_G3_SUMMARIES:
+            count = con.execute(f"SELECT count(*) FROM gold.{table_name}").fetchone()[0]
+            assert count > 0, table_name
+
+        meta_tables = {
+            row[0]
+            for row in con.execute(
+                """
+                SELECT table_name
+                FROM information_schema.tables
+                WHERE table_schema = 'meta'
+                """
+            ).fetchall()
+        }
+        assert EXPECTED_SEMANTIC_TABLES <= meta_tables
+
+        metric_count = con.execute("SELECT count(*) FROM meta.metric_definitions").fetchone()[0]
+        template_count = con.execute("SELECT count(*) FROM meta.semantic_query_templates").fetchone()[0]
+        assert metric_count >= 8
+        assert template_count >= 6
+    finally:
+        con.close()
+
+
+def test_gold_physical_gate_passes_after_g3_build():
+    """Gold G3 建成后，物理门禁必须覆盖汇总表"""
+    result = run_quality_command(["scripts/quality/check_gold_physical.py", "--batches", "G0,G1,G2,G3"])
 
     assert result.returncode == 0, result.stdout
     assert "Gold 物理表门禁检查通过" in result.stdout

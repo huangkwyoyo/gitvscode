@@ -7,7 +7,7 @@
 
 project:
   root: "D:\\Program Files\\gitvscode\\TianShu"
-  stage: "gold_g2_build"
+  stage: "gold_g3_semantic_layer"
 
 warehouse:
   duckdb_path: "D:\\ProgramData\\Datawarehouse\\纽约市城市交通\\nyc_transport.duckdb"
@@ -30,6 +30,8 @@ checks:
   gold_physical: "scripts/quality/check_gold_physical.py"
   gold_null: "scripts/quality/check_gold_null.py"
   gold_sparsity_baseline: "harness/config/gold_sparsity_baseline.yml"
+  semantic_layer: "scripts/quality/check_semantic_layer.py"
+  gold_standard_questions: "harness/questions/gold_standard_questions.yml"
   memory_update: "scripts/quality/check_memory_update.py"
   all_checks: "scripts/quality/run_all_checks.py"
 

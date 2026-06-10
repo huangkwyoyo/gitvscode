@@ -250,6 +250,68 @@ GOLD_DIMENSIONS = {
     },
 }
 
+GOLD_DIMENSIONS.update(
+    {
+        "dws_daily_trip_summary": {
+            "zh": "每日出行汇总表",
+            "columns": {
+                "date_key": ("日期键", "维度外键"),
+                "trip_date": ("出行日期", "时间字段"),
+                "trip_count": ("行程量", "指标字段"),
+                "total_passenger_count": ("乘客总人数", "指标字段"),
+                "total_distance_miles": ("总行程距离英里", "指标字段"),
+                "total_fare_amount": ("基础车费总额", "金额指标"),
+                "avg_distance_miles": ("平均行程距离英里", "指标字段"),
+                "time_anomaly_count": ("时间异常行程数", "质量指标"),
+                "location_missing_count": ("位置缺失行程数", "质量指标"),
+                "distance_outlier_count": ("距离异常行程数", "质量指标"),
+            },
+        },
+        "dws_zone_trip_summary": {
+            "zh": "区域出行汇总表",
+            "columns": {
+                "pickup_location_id": ("上车区域编号", "维度外键"),
+                "borough": ("行政区", "维度属性"),
+                "zone_name": ("区域名称", "维度属性"),
+                "trip_count": ("行程量", "指标字段"),
+                "total_distance_miles": ("总行程距离英里", "指标字段"),
+                "total_fare_amount": ("基础车费总额", "金额指标"),
+                "avg_distance_miles": ("平均行程距离英里", "指标字段"),
+                "location_missing_count": ("位置缺失行程数", "质量指标"),
+            },
+        },
+        "dws_daily_parking_summary": {
+            "zh": "每日罚单汇总表",
+            "columns": {
+                "date_key": ("日期键", "维度外键"),
+                "issue_date": ("开票日期", "时间字段"),
+                "violation_count": ("罚单量", "指标字段"),
+                "unique_plate_count": ("唯一车牌数", "指标字段"),
+                "standard_fine_total": ("标准罚款总额", "金额指标"),
+                "standard_fine_covered_count": ("有标准罚款金额罚单数", "质量指标"),
+                "duplicate_summons_count": ("重复罚单数", "质量指标"),
+            },
+        },
+        "dws_daily_crash_summary": {
+            "zh": "每日事故汇总表",
+            "columns": {
+                "date_key": ("日期键", "维度外键"),
+                "crash_date": ("事故日期", "时间字段"),
+                "crash_count": ("事故量", "指标字段"),
+                "persons_injured": ("受伤人数", "指标字段"),
+                "persons_killed": ("死亡人数", "指标字段"),
+                "pedestrians_injured": ("行人受伤数", "指标字段"),
+                "pedestrians_killed": ("行人死亡数", "指标字段"),
+                "cyclist_injured": ("骑行者受伤数", "指标字段"),
+                "cyclist_killed": ("骑行者死亡数", "指标字段"),
+                "motorist_injured": ("机动车人员受伤数", "指标字段"),
+                "motorist_killed": ("机动车人员死亡数", "指标字段"),
+                "location_missing_count": ("位置缺失事故数", "质量指标"),
+            },
+        },
+    }
+)
+
 
 def connect_duckdb(db_path: Path):
     """连接 DuckDB，失败时给出明确错误"""
@@ -270,6 +332,107 @@ def ensure_meta_tables(conn) -> None:
             updated_at VARCHAR
         )
         """
+    )
+
+
+def ensure_semantic_tables(conn) -> None:
+    """确保 Gold 中文语义层表存在"""
+    conn.execute("CREATE SCHEMA IF NOT EXISTS meta")
+    conn.execute(
+        """
+        CREATE OR REPLACE TABLE meta.metric_definitions (
+            metric_name VARCHAR,
+            metric_name_zh VARCHAR,
+            source_table VARCHAR,
+            calculation_sql VARCHAR,
+            time_key VARCHAR,
+            business_meaning VARCHAR,
+            audit_status VARCHAR
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE OR REPLACE TABLE meta.semantic_dimensions (
+            dimension_name VARCHAR,
+            dimension_name_zh VARCHAR,
+            source_table VARCHAR,
+            source_column VARCHAR,
+            business_meaning VARCHAR
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE OR REPLACE TABLE meta.semantic_query_templates (
+            question_zh VARCHAR,
+            intent_name VARCHAR,
+            recommended_table VARCHAR,
+            metric_names VARCHAR,
+            sql_template VARCHAR,
+            caution VARCHAR
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE OR REPLACE TABLE meta.business_terms (
+            term VARCHAR,
+            term_zh VARCHAR,
+            definition_zh VARCHAR,
+            source VARCHAR
+        )
+        """
+    )
+
+
+def write_semantic_layer(conn) -> None:
+    """写入面向中文问数的指标、维度、模板和术语"""
+    ensure_semantic_tables(conn)
+    conn.executemany(
+        "INSERT INTO meta.metric_definitions VALUES (?, ?, ?, ?, ?, ?, ?)",
+        [
+            ("trip_count", "行程量", "gold.dws_daily_trip_summary", "sum(trip_count)", "date_key", "统计出行事实表中的行程记录数", "approved"),
+            ("total_fare_amount", "基础车费总额", "gold.dws_daily_trip_summary", "sum(total_fare_amount)", "date_key", "统计基础车费金额，不等同于乘客总支付金额", "approved"),
+            ("avg_distance_miles", "平均行程距离", "gold.dws_daily_trip_summary", "avg(avg_distance_miles)", "date_key", "按日或区域观察平均行程距离", "approved"),
+            ("parking_violation_count", "罚单量", "gold.dws_daily_parking_summary", "sum(violation_count)", "date_key", "统计停车违章罚单数量", "approved"),
+            ("standard_fine_total", "标准罚款总额", "gold.dws_daily_parking_summary", "sum(standard_fine_total)", "date_key", "按官方标准罚款金额估算，不代表实际收款", "approved"),
+            ("crash_count", "事故量", "gold.dws_daily_crash_summary", "sum(crash_count)", "date_key", "统计机动车碰撞事故数量", "approved"),
+            ("persons_injured", "受伤人数", "gold.dws_daily_crash_summary", "sum(persons_injured)", "date_key", "统计事故涉及受伤人数", "approved"),
+            ("persons_killed", "死亡人数", "gold.dws_daily_crash_summary", "sum(persons_killed)", "date_key", "统计事故涉及死亡人数", "approved"),
+        ],
+    )
+    conn.executemany(
+        "INSERT INTO meta.semantic_dimensions VALUES (?, ?, ?, ?, ?)",
+        [
+            ("date", "日期", "gold.dim_date", "date", "按自然日、月、季度、财年分析"),
+            ("taxi_zone", "出租车区域", "gold.dim_taxi_zone", "zone_name", "按 TLC 出租车区域分析上车和下车热度"),
+            ("borough", "行政区", "gold.dim_taxi_zone", "borough", "按纽约市行政区分析空间分布"),
+            ("trip_source", "行程来源类型", "gold.fact_trips", "trip_source", "区分 yellow、green、fhv、fhvhv 行程"),
+            ("violation_code", "违章代码", "gold.dim_violation_type", "violation_code", "按官方违章代码分析罚单"),
+            ("person_type", "事故人员类型", "gold.fact_crash_persons", "person_type", "按驾驶员、乘客、行人、骑行者等分析事故人员"),
+        ],
+    )
+    conn.executemany(
+        "INSERT INTO meta.semantic_query_templates VALUES (?, ?, ?, ?, ?, ?)",
+        [
+            ("2026 年 Q1 每天有多少行程？", "daily_trip_count", "gold.dws_daily_trip_summary", "trip_count", "SELECT trip_date, trip_count FROM gold.dws_daily_trip_summary ORDER BY trip_date", "行程日期使用 pickup_date_key"),
+            ("哪个区域上车量最高？", "top_pickup_zone", "gold.dws_zone_trip_summary", "trip_count", "SELECT borough, zone_name, trip_count FROM gold.dws_zone_trip_summary ORDER BY trip_count DESC LIMIT 20", "只统计 pickup_location_id 非空且可关联区域的行程"),
+            ("每天停车罚单数量是多少？", "daily_parking_count", "gold.dws_daily_parking_summary", "parking_violation_count", "SELECT issue_date, violation_count FROM gold.dws_daily_parking_summary ORDER BY issue_date", "日期使用罚单开票日期 issue_date_key"),
+            ("标准罚款金额最高的日期是哪天？", "daily_standard_fine", "gold.dws_daily_parking_summary", "standard_fine_total", "SELECT issue_date, standard_fine_total FROM gold.dws_daily_parking_summary ORDER BY standard_fine_total DESC LIMIT 20", "标准罚款金额不是实际缴款金额"),
+            ("每天事故数量和死亡人数趋势如何？", "daily_crash_trend", "gold.dws_daily_crash_summary", "crash_count,persons_killed", "SELECT crash_date, crash_count, persons_killed FROM gold.dws_daily_crash_summary ORDER BY crash_date", "事故日期来自 crash_date_key"),
+            ("每天事故受伤人数是多少？", "daily_injury_trend", "gold.dws_daily_crash_summary", "persons_injured", "SELECT crash_date, persons_injured FROM gold.dws_daily_crash_summary ORDER BY crash_date", "使用事故级受伤人数汇总，不用人员表重复计算"),
+        ],
+    )
+    conn.executemany(
+        "INSERT INTO meta.business_terms VALUES (?, ?, ?, ?)",
+        [
+            ("FHV", "网约出租车辆", "For-Hire Vehicle，纽约 TLC 语境中的预约出租车辆", "TLC"),
+            ("HVFHV", "高容量网约出租车辆", "High Volume For-Hire Vehicle，Uber/Lyft 等高容量平台车辆类别", "TLC"),
+            ("TIF", "出租车改善基金", "Taxi Improvement Fund，用于无障碍车辆改装和运营相关支付", "TLC"),
+            ("WAV", "无障碍车辆", "Wheelchair Accessible Vehicle，可服务轮椅乘客的车辆", "TLC"),
+            ("standard_fine_amount", "标准罚款金额", "来自官方违章代码字典的标准罚款金额，不代表实际收款", "NYC Open Data"),
+        ],
     )
     conn.execute(
         """
@@ -774,12 +937,116 @@ def build_g2(conn) -> list[str]:
     ]
 
 
+def build_g3(conn) -> list[str]:
+    """构建 G3 汇总表和中文语义层"""
+    conn.execute("DROP TABLE IF EXISTS gold.dws_daily_trip_summary")
+    conn.execute(
+        """
+        CREATE TABLE gold.dws_daily_trip_summary AS
+        SELECT
+            t.pickup_date_key AS date_key,
+            d.date AS trip_date,
+            count(*)::BIGINT AS trip_count,
+            sum(COALESCE(t.passenger_count, 0))::BIGINT AS total_passenger_count,
+            sum(COALESCE(t.distance_miles, 0))::DOUBLE AS total_distance_miles,
+            sum(COALESCE(t.fare_amount, 0))::DECIMAL(18,2) AS total_fare_amount,
+            avg(t.distance_miles)::DOUBLE AS avg_distance_miles,
+            sum(CASE WHEN t.is_time_anomaly THEN 1 ELSE 0 END)::BIGINT AS time_anomaly_count,
+            sum(CASE WHEN t.is_location_missing THEN 1 ELSE 0 END)::BIGINT AS location_missing_count,
+            sum(CASE WHEN t.is_distance_outlier THEN 1 ELSE 0 END)::BIGINT AS distance_outlier_count
+        FROM gold.fact_trips t
+        LEFT JOIN gold.dim_date d
+          ON d.date_key = t.pickup_date_key
+        WHERE t.pickup_date_key IS NOT NULL
+        GROUP BY t.pickup_date_key, d.date
+        ORDER BY t.pickup_date_key
+        """
+    )
+
+    conn.execute("DROP TABLE IF EXISTS gold.dws_zone_trip_summary")
+    conn.execute(
+        """
+        CREATE TABLE gold.dws_zone_trip_summary AS
+        SELECT
+            t.pickup_location_id,
+            z.borough,
+            z.zone_name,
+            count(*)::BIGINT AS trip_count,
+            sum(COALESCE(t.distance_miles, 0))::DOUBLE AS total_distance_miles,
+            sum(COALESCE(t.fare_amount, 0))::DECIMAL(18,2) AS total_fare_amount,
+            avg(t.distance_miles)::DOUBLE AS avg_distance_miles,
+            sum(CASE WHEN t.is_location_missing THEN 1 ELSE 0 END)::BIGINT AS location_missing_count
+        FROM gold.fact_trips t
+        LEFT JOIN gold.dim_taxi_zone z
+          ON z.location_id = t.pickup_location_id
+        WHERE t.pickup_location_id IS NOT NULL
+        GROUP BY t.pickup_location_id, z.borough, z.zone_name
+        ORDER BY trip_count DESC
+        """
+    )
+
+    conn.execute("DROP TABLE IF EXISTS gold.dws_daily_parking_summary")
+    conn.execute(
+        """
+        CREATE TABLE gold.dws_daily_parking_summary AS
+        SELECT
+            p.issue_date_key AS date_key,
+            d.date AS issue_date,
+            count(*)::BIGINT AS violation_count,
+            count(DISTINCT p.plate_id)::BIGINT AS unique_plate_count,
+            sum(COALESCE(p.standard_fine_amount, 0))::DECIMAL(18,2) AS standard_fine_total,
+            count(p.standard_fine_amount)::BIGINT AS standard_fine_covered_count,
+            sum(CASE WHEN p.is_duplicate_summons THEN 1 ELSE 0 END)::BIGINT AS duplicate_summons_count
+        FROM gold.fact_parking_violations p
+        LEFT JOIN gold.dim_date d
+          ON d.date_key = p.issue_date_key
+        WHERE p.issue_date_key IS NOT NULL
+        GROUP BY p.issue_date_key, d.date
+        ORDER BY p.issue_date_key
+        """
+    )
+
+    conn.execute("DROP TABLE IF EXISTS gold.dws_daily_crash_summary")
+    conn.execute(
+        """
+        CREATE TABLE gold.dws_daily_crash_summary AS
+        SELECT
+            c.crash_date_key AS date_key,
+            d.date AS crash_date,
+            count(*)::BIGINT AS crash_count,
+            sum(COALESCE(c.persons_injured, 0))::BIGINT AS persons_injured,
+            sum(COALESCE(c.persons_killed, 0))::BIGINT AS persons_killed,
+            sum(COALESCE(c.pedestrians_injured, 0))::BIGINT AS pedestrians_injured,
+            sum(COALESCE(c.pedestrians_killed, 0))::BIGINT AS pedestrians_killed,
+            sum(COALESCE(c.cyclist_injured, 0))::BIGINT AS cyclist_injured,
+            sum(COALESCE(c.cyclist_killed, 0))::BIGINT AS cyclist_killed,
+            sum(COALESCE(c.motorist_injured, 0))::BIGINT AS motorist_injured,
+            sum(COALESCE(c.motorist_killed, 0))::BIGINT AS motorist_killed,
+            sum(CASE WHEN c.is_location_missing THEN 1 ELSE 0 END)::BIGINT AS location_missing_count
+        FROM gold.fact_crashes c
+        LEFT JOIN gold.dim_date d
+          ON d.date_key = c.crash_date_key
+        WHERE c.crash_date_key IS NOT NULL
+        GROUP BY c.crash_date_key, d.date
+        ORDER BY c.crash_date_key
+        """
+    )
+
+    write_semantic_layer(conn)
+    return [
+        "dws_daily_trip_summary",
+        "dws_zone_trip_summary",
+        "dws_daily_parking_summary",
+        "dws_daily_crash_summary",
+    ]
+
+
 def parse_batches(value: str) -> set[str]:
     """解析构建批次参数"""
     batches = {item.strip().upper() for item in value.split(",") if item.strip()}
-    invalid = batches - {"G0", "G1", "G2"}
+    invalid = batches - {"G0", "G1", "G2", "G3"}
     if invalid:
-        raise ValueError(f"当前脚本只支持 G0/G1/G2，收到无效批次: {', '.join(sorted(invalid))}")
+        raise ValueError(f"当前脚本只支持 G0/G1/G2/G3，收到无效批次: {', '.join(sorted(invalid))}")
     return batches
 
 
@@ -795,6 +1062,8 @@ def build_gold(db_path: Path, batches: set[str]) -> list[str]:
             built_tables.extend(build_g1(conn))
         if "G2" in batches:
             built_tables.extend(build_g2(conn))
+        if "G3" in batches:
+            built_tables.extend(build_g3(conn))
         replace_gold_comments(conn, built_tables)
         write_gold_comments(conn, built_tables)
         return built_tables
@@ -806,9 +1075,9 @@ def main() -> int:
     """命令行入口"""
     os.environ.setdefault("PYTHONIOENCODING", "utf-8")
     config = load_harness_config()
-    parser = argparse.ArgumentParser(description="构建 DuckDB Gold G0/G1/G2 表")
+    parser = argparse.ArgumentParser(description="构建 DuckDB Gold G0/G1/G2/G3 表")
     parser.add_argument("--db", type=Path, default=config.duckdb_path, help="DuckDB 数据库路径")
-    parser.add_argument("--batches", default="G0,G1", help="构建批次，支持 G0,G1,G2")
+    parser.add_argument("--batches", default="G0,G1", help="构建批次，支持 G0,G1,G2,G3")
     args = parser.parse_args()
 
     try:

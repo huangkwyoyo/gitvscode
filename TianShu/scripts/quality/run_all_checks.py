@@ -72,7 +72,8 @@ def main() -> int:
             str(config.project_root / "harness" / "config" / "silver_sparsity_baseline.yml"),
         ]),
         ("Gold 设计门禁", [python, "scripts/quality/check_gold_design.py"]),
-        ("Gold 物理表门禁", [python, "scripts/quality/check_gold_physical.py", "--batches", "G0,G1,G2"]),
+        ("Gold 物理表门禁", [python, "scripts/quality/check_gold_physical.py", "--batches", "G0,G1,G2,G3"]),
+        ("中文语义层门禁", [python, "scripts/quality/check_semantic_layer.py"]),
         ("Gold 空值画像", [
             python,
             "scripts/quality/check_gold_null.py",

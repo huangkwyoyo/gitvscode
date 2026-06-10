@@ -2,7 +2,7 @@
 
 ## 当前阶段
 
-Silver 层 11 张表已完成修复并通过 post-Silver 强校验。Gold G0/G1 维表和 G2 明细事实表已落库，并通过 Gold 设计门禁、物理表门禁和空值画像检查。当前阶段进入 Gold G3 汇总表和中文语义层准备（`harness/config/harness_targets.yml` 中的 `project.stage` 为 `gold_g2_build`）。
+Silver 层 11 张表已完成修复并通过 post-Silver 强校验。Gold G0/G1 维表、G2 明细事实表、G3 汇总表和中文语义层已落库，并通过 Gold 设计门禁、物理表门禁、语义层门禁和空值画像检查。当前阶段进入标准中文问题集与 Agent Harness 封装验证（`harness/config/harness_targets.yml` 中的 `project.stage` 为 `gold_g3_semantic_layer`）。
 
 ## 最近完成
 
@@ -35,6 +35,10 @@ Silver 层 11 张表已完成修复并通过 post-Silver 强校验。Gold G0/G1 
 - [x] Gold G0/G1 中文表注释和字段注释已写入 `meta.table_comments`、`meta.column_comments`
 - [x] Gold G2 明细事实表已建设：`fact_trips`、`fact_parking_violations`、`fact_tif_payments`、`fact_driver_applications`、`fact_crashes`、`fact_crash_persons`
 - [x] `fact_parking_violations.standard_fine_amount` 已通过 `dim_violation_type` 引入官方标准罚款金额
+- [x] Gold G3 汇总表已建设：`dws_daily_trip_summary`、`dws_zone_trip_summary`、`dws_daily_parking_summary`、`dws_daily_crash_summary`
+- [x] 中文语义层已建设：`meta.metric_definitions`、`meta.semantic_dimensions`、`meta.semantic_query_templates`、`meta.business_terms`
+- [x] 标准中文问题集已接入：`harness/questions/gold_standard_questions.yml`
+- [x] 语义层门禁已接入 Harness：`scripts/quality/check_semantic_layer.py`
 - [x] `docs/standards/` 已调整为规范索引入口，不重复维护数据库设计或字段字典规范
 - [x] `docs/modeling/README.md` 已调整为建模索引入口
 - [x] 官方数据字典位置已登记到 `docs/warehouse/data_dictionary/README.md`
@@ -61,11 +65,11 @@ Silver 层 11 张表已完成修复并通过 post-Silver 强校验。Gold G0/G1 
 14. [x] 进入 Gold 层数据库设计和星型模型落地方案 ✅
 15. [x] 建设 Gold G0/G1 公共维表和业务维表 ✅
 16. [x] 建设 Gold G2 明细事实表 ✅
-17. [ ] 建设 Gold G3 汇总表和中文语义层
+17. [x] 建设 Gold G3 汇总表和中文语义层 ✅
 
 ## 阻塞点
 
-无阻塞。post-Silver Harness 强校验、Gold G0/G1 门禁和 Gold G2 门禁已完成。
+无阻塞。post-Silver Harness 强校验、Gold G0/G1/G2/G3 门禁和中文语义层门禁已完成。
 
 ## 重要注意
 
@@ -80,9 +84,9 @@ Silver 层 11 张表已完成修复并通过 post-Silver 强校验。Gold G0/G1 
 - 字段中的状态码、标志位、分类代码等枚举值必须补中文含义；无法确认时标记 `Human Review`。
 - 每次文档、字段字典、SQL 或 schema 变更后，运行 `python scripts/quality/run_all_checks.py`。
 - 运行 Harness 前需关闭占用 `nyc_transport.duckdb` 的桌面工具，例如 DBeaver；否则 DuckDB 读取检查会因文件锁失败。
-- 当前项目阶段已从 `post_silver_build` 推进到 `gold_g2_build`，schema 一致性检查仍必须启用 Silver 实表强校验。
+- 当前项目阶段已从 `gold_g2_build` 推进到 `gold_g3_semantic_layer`，schema 一致性检查仍必须启用 Silver 实表强校验。
 - `check_silver_null.py` 会输出高缺失字段画像。高缺失不一定是错误，需结合源表适用范围判断；但全 NULL 的日期、金额字段必须优先排查转换逻辑。
-- 当前 Harness 阶段为 `gold_g2_build`，全量检查会同时执行 Gold 设计门禁、Gold G0/G1/G2 物理门禁和 Gold 空值画像。
+- 当前 Harness 阶段为 `gold_g3_semantic_layer`，全量检查会同时执行 Gold 设计门禁、Gold G0/G1/G2/G3 物理门禁、中文语义层门禁和 Gold 空值画像。
 - `gold.dim_violation_type` 的 `standard_fine_amount` 已从官方数据字典 Excel 导入（覆盖 97/100 个违章代码），`penalty_amount` 因 Excel 不含滞纳金数据保持 NULL。`source_status` 标记为 `from_official_dictionary` 或 `missing_from_dictionary`。
 
 ## 数据库位置

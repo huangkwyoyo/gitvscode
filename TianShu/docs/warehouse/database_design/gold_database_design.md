@@ -8,9 +8,9 @@
 |---|---|
 | 英文 Schema | `gold` |
 | 中文 Schema | 主题分析层 |
-| 当前状态 | G0/G1 维表和 G2 明细事实表已正式建表，G3 汇总表尚未建设 |
+| 当前状态 | G0/G1 维表、G2 明细事实表、G3 汇总表和中文语义层已正式建表 |
 | 上游依赖 | `silver` 标准层、`meta.table_comments`、`meta.column_comments`、字段字典、枚举值字典 |
-| 前置门禁 | `check_schema_consistency.py --require-silver-tables`、`check_gold_design.py`、`check_gold_physical.py --batches G0,G1,G2` 必须通过 |
+| 前置门禁 | `check_schema_consistency.py --require-silver-tables`、`check_gold_design.py`、`check_gold_physical.py --batches G0,G1,G2,G3`、`check_semantic_layer.py` 必须通过 |
 | 设计目标 | 面向中文工程师、BI、Text2SQL Agent 和数据分析 Agent 的主题星型模型 |
 
 ## 2. Gold 层设计原则
@@ -113,7 +113,7 @@ gold
 │  ├─ fact_driver_applications      # 司机申请事实表
 │  ├─ fact_crashes                  # 事故事实表
 │  └─ fact_crash_persons            # 事故人员事实表
-└─ 汇总表（第二阶段）
+└─ 汇总表
    ├─ dws_daily_trip_summary        # 每日出行汇总表
    ├─ dws_zone_trip_summary         # 区域出行汇总表
    ├─ dws_daily_parking_summary     # 每日罚单汇总表
@@ -423,12 +423,14 @@ gold
 
 ### G3：汇总表和语义层
 
-1. 每日出行汇总
-2. 区域出行汇总
-3. 每日罚单汇总
-4. 每日事故汇总
-5. 中文指标口径
-6. Text2SQL 问数模板
+1. `gold.dws_daily_trip_summary`：每日出行汇总，基于 `gold.fact_trips` 和 `gold.dim_date`。
+2. `gold.dws_zone_trip_summary`：区域出行汇总，基于 `gold.fact_trips` 和 `gold.dim_taxi_zone`。
+3. `gold.dws_daily_parking_summary`：每日罚单汇总，基于 `gold.fact_parking_violations` 和 `gold.dim_date`。
+4. `gold.dws_daily_crash_summary`：每日事故汇总，基于 `gold.fact_crashes` 和 `gold.dim_date`。
+5. `meta.metric_definitions`：中文指标口径，记录指标英文名、中文名、来源表、来源字段、计算公式和人工确认状态。
+6. `meta.semantic_dimensions`：中文维度口径，记录问数可用维度、来源表、来源字段和中文说明。
+7. `meta.semantic_query_templates`：Text2SQL 问数模板，承接标准中文问题集。
+8. `meta.business_terms`：中文业务术语表，记录 FHV、HVFHV、TIF、WAV、标准罚款金额等术语解释。
 
 ## 9. Gold 前置检查
 
@@ -440,10 +442,11 @@ Gold 建表前必须完成：
 - [x] 不使用 Google 翻译结果直接作为正式中文名
 - [x] Gold G0/G1 构建脚本写入 `meta.table_comments` 和 `meta.column_comments`
 - [x] `check_gold_design.py` 通过
-- [x] `check_gold_physical.py --batches G0,G1,G2` 通过
+- [x] `check_gold_physical.py --batches G0,G1,G2,G3` 通过
 - [x] `dim_violation_type` 官方字典金额来源确认
 - [x] G2 明细事实表字段来源已确认
-- [ ] 每个 G3 汇总指标都有来源表、来源字段和计算公式
+- [x] 每个 G3 汇总指标都有来源表、来源字段和计算公式
+- [x] 中文语义层表已写入 `meta` schema，并通过 `check_semantic_layer.py`
 
 ## 10. G0/G1 落库状态
 

@@ -31,13 +31,19 @@ BATCH_TABLES = {
         "fact_crashes",
         "fact_crash_persons",
     ],
+    "G3": [
+        "dws_daily_trip_summary",
+        "dws_zone_trip_summary",
+        "dws_daily_parking_summary",
+        "dws_daily_crash_summary",
+    ],
 }
 
 
 def expected_tables(batches: set[str]) -> list[str]:
     """根据批次返回应检查的 Gold 表"""
     tables: list[str] = []
-    for batch in ["G0", "G1", "G2"]:
+    for batch in ["G0", "G1", "G2", "G3"]:
         if batch in batches:
             tables.extend(BATCH_TABLES[batch])
     return tables
