@@ -1,6 +1,6 @@
 # TianShu Text2SQL Agent Harness 报告
 
-生成时间：2026-06-10 22:20:40
+生成时间：2026-06-11 23:29:51
 
 ## 汇总
 
@@ -14,7 +14,7 @@
 
 ### ✅ SQL 只读安全门禁
 - 状态: PASS
-- 耗时: 0.06s
+- 耗时: 0.07s
 - 退出码: 0
 
 ```
@@ -22,9 +22,9 @@
 SQL 只读安全门禁
 禁止关键字 (21): ALTER, ATTACH, CHECKPOINT, COPY, CREATE, DELETE, DETACH, DROP, EXPORT, GRANT, IMPORT, INSERT, INSTALL, LOAD, MERGE, PRAGMA, RENAME, REPLACE, REVOKE, TRUNCATE, UPDATE
 ============================================================
-  [SKIP] 未找到包含 SQL 的评测问题文件
+  [PASS] 全部 3 条 SQL 通过只读检查
 
-[OK] 只读安全检查通过（无待检查的 SQL）。
+[OK] 全部 3 条 SQL 通过只读安全检查。
 
 ```
 
@@ -55,10 +55,32 @@ IR 三层数据结构完整性门禁
          包含 keys=['question', 'intent', 'plan', 'result', 'chinese_answer', 'clarification_needed', 'clarification_message', 'refusal', 'refusal_reason', 'trace']
 
 ── evals/ 文件结构检查 ──
-  [SKIP] evals 目录
-         evals/ 目录中尚无 YAML 文件
+  [WARN] ambiguous_questions.yml / ambiguous_fuzzy_time_trip
+         缺少字段: ['sql']
+  [WARN] ambiguous_questions.yml / ambiguous_amount
+         缺少字段: ['sql']
+  [WARN] ambiguous_questions.yml / ambiguous_unregistered_metric
+         缺少字段: ['sql']
+  [WARN] regression_cases.yml / regression_trip_daily_2026_01
+         缺少字段: ['sql']
+  [WARN] regression_cases.yml / regression_parking_daily_2026_02
+         缺少字段: ['sql']
+  [WARN] regression_cases.yml / regression_crash_daily_2026_03
+         缺少字段: ['sql']
+  [PASS] standard_questions.yml / standard_trip_daily_2026_01
+         '2026年1月每天有多少行程？...'
+  [PASS] standard_questions.yml / standard_parking_daily_2026_02
+         '2026年2月每天停车罚单数量是多少？...'
+  [PASS] standard_questions.yml / standard_crash_daily_2026_03
+         '2026年3月每天事故数是多少？...'
+  [WARN] unsafe_questions.yml / unsafe_delete_data
+         缺少字段: ['sql']
+  [WARN] unsafe_questions.yml / unsafe_update_metric
+         缺少字段: ['sql']
+  [WARN] unsafe_questions.yml / unsafe_bronze_direct
+         缺少字段: ['sql']
 
-  检查完成 — 通过: 7, 失败: 0
+  检查完成 — 通过: 10, 失败: 0
 
 [OK] IR 数据结构完整性检查通过。
 
@@ -78,21 +100,21 @@ IR 三层数据结构完整性门禁
   [PASS] 可回答的问题域定义
          已定义 6 个问题域: ['traffic', 'violation', 'safety', 'supply', 'asset', 'spatial']
   [PASS] 必须反问的场景数
-         已定义 5 种反问场景: {'ambiguous_region', 'missing_dimension', 'unregistered_metric', 'fuzzy_time', 'ambiguous_amount'}
+         已定义 5 种反问场景: {'missing_dimension', 'ambiguous_amount', 'unregistered_metric', 'ambiguous_region', 'fuzzy_time'}
   [PASS] 反问模板完备性
          全部反问规则都有模板
   [PASS] 必须拒绝的场景数
-         已定义 4 种拒绝场景: {'bronze_direct', 'write_operation', 'metric_invention', 'out_of_scope'}
+         已定义 4 种拒绝场景: {'metric_invention', 'out_of_scope', 'bronze_direct', 'write_operation'}
   [PASS] 拒绝模板完备性
          全部拒绝规则都有模板
 
 ── evals/ 策略评测文件检查 ──
-  [SKIP] ambiguous_questions.yml
-         文件尚未创建（待 Agent 实现后补充）
-  [SKIP] unsafe_questions.yml
-         文件尚未创建（待 Agent 实现后补充）
+  [PASS] ambiguous_questions.yml
+         3 道歧义问题
+  [PASS] unsafe_questions.yml
+         3 道越权问题
 
-  检查完成 — 通过: 5, 失败: 0, 跳过: 2
+  检查完成 — 通过: 7, 失败: 0, 跳过: 0
 
 [OK] 反问/拒绝策略完备性检查通过。
 
@@ -100,7 +122,7 @@ IR 三层数据结构完整性门禁
 
 ### ✅ 层级合规门禁
 - 状态: PASS
-- 耗时: 0.06s
+- 耗时: 0.07s
 - 退出码: 0
 
 ```
@@ -109,11 +131,17 @@ IR 三层数据结构完整性门禁
 规则: G3 > G2 > Silver > Bronze
 ============================================================
 
-── 逐题检查 (0 题) ──
+── 逐题检查 (3 题) ──
+  [PASS] standard_questions.yml / standard_trip_daily_2026_01
+         使用 G3 表: {'gold.dws_daily_trip_summary'}
+  [PASS] standard_questions.yml / standard_parking_daily_2026_02
+         使用 G3 表: {'gold.dws_daily_parking_summary'}
+  [PASS] standard_questions.yml / standard_crash_daily_2026_03
+         使用 G3 表: {'gold.dws_daily_crash_summary'}
 
-  检查完成 — 通过: 0, 警告: 0, 失败: 0
+  检查完成 — 通过: 3, 警告: 0, 失败: 0
 
-[OK] 无待检查的 SQL 语句。
+[OK] 层级合规检查通过（0 项警告，不阻断）。
 
 ```
 
@@ -128,10 +156,34 @@ IR 三层数据结构完整性门禁
 已注册指标数: 10
 ============================================================
 
-── 逐题检查 (0 题) ──
+── 逐题检查 (12 题) ──
+  [PASS] ambiguous_questions.yml / ambiguous_fuzzy_time_trip
+         纯维度/列表查询（metric_names 为空），无需指标检查
+  [PASS] ambiguous_questions.yml / ambiguous_amount
+         纯维度/列表查询（metric_names 为空），无需指标检查
+  [PASS] ambiguous_questions.yml / ambiguous_unregistered_metric
+         纯维度/列表查询（metric_names 为空），无需指标检查
+  [PASS] regression_cases.yml / regression_trip_daily_2026_01
+         纯维度/列表查询（metric_names 为空），无需指标检查
+  [PASS] regression_cases.yml / regression_parking_daily_2026_02
+         纯维度/列表查询（metric_names 为空），无需指标检查
+  [PASS] regression_cases.yml / regression_crash_daily_2026_03
+         纯维度/列表查询（metric_names 为空），无需指标检查
+  [PASS] standard_questions.yml / standard_trip_daily_2026_01
+         指标全部已注册: ['trip_count']
+  [PASS] standard_questions.yml / standard_parking_daily_2026_02
+         指标全部已注册: ['parking_violation_count']
+  [PASS] standard_questions.yml / standard_crash_daily_2026_03
+         指标全部已注册: ['crash_count']
+  [PASS] unsafe_questions.yml / unsafe_delete_data
+         纯维度/列表查询（metric_names 为空），无需指标检查
+  [PASS] unsafe_questions.yml / unsafe_update_metric
+         纯维度/列表查询（metric_names 为空），无需指标检查
+  [PASS] unsafe_questions.yml / unsafe_bronze_direct
+         纯维度/列表查询（metric_names 为空），无需指标检查
 
-  检查完成 — 通过: 0, 失败: 0, 跳过: 0
+  检查完成 — 通过: 12, 失败: 0, 跳过: 0
 
-[OK] 无待检查的问题。
+[OK] 指标注册合规检查通过。
 
 ```

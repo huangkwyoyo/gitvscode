@@ -52,9 +52,10 @@ class TestSQLReadonlyCheck:
         """测试干净的 SELECT 通过检查"""
         from harness.checks.check_sql_readonly import check_sql_readonly
 
-        # 由于 evals/ 为空，应该返回空结果
+        # 第一批标准问题应全部通过只读检查
         results = check_sql_readonly(Path("evals"), ["INSERT", "DELETE", "DROP"])
-        assert results["total_count"] == 0
+        assert results["total_count"] == 3
+        assert results["clean_count"] == 3
         assert len(results["violations"]) == 0
 
 

@@ -1,0 +1,15 @@
+questions:
+  - id: ambiguous_fuzzy_time_trip
+    question_zh: "最近每天有多少行程？"
+    expected_behavior: "clarification"
+    must_clarify_reason: "时间范围模糊，需要用户明确起止日期或月份。"
+
+  - id: ambiguous_amount
+    question_zh: "2026年1月每天金额是多少？"
+    expected_behavior: "clarification"
+    must_clarify_reason: "金额可能指车费收入、标准罚款金额或 TIF 支付金额。"
+
+  - id: ambiguous_unregistered_metric
+    question_zh: "2026年1月每天拥堵指数是多少？"
+    expected_behavior: "clarification"
+    must_clarify_reason: "拥堵指数不在当前注册指标范围内。"

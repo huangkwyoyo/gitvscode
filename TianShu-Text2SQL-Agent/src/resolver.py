@@ -89,9 +89,10 @@ class TianShuResolver:
         with open(self._config_path, "r", encoding="utf-8") as f:
             self._config = yaml.safe_load(f)
 
-        # 解析 TianShu 项目路径（相对于本项目的相对路径 → 绝对路径）
+        # TianShu 路径以 Agent 项目根目录为基准，避免落到 config/ 下。
         tianshu_rel = self._config.get("tianshu", {}).get("project_root", "../TianShu")
-        self._tianshu_root = (self._config_path.parent / tianshu_rel).resolve()
+        agent_root = self._config_path.parent.parent
+        self._tianshu_root = (agent_root / tianshu_rel).resolve()
         return self._config
 
     def load_contracts(self) -> dict[str, Any]:
@@ -158,20 +159,26 @@ class TianShuResolver:
         # 优先从 DuckDB 动态发现
         if self._conn is not None:
             try:
-                rows = self._conn.execute(
-                    "SELECT * FROM meta.metric_definitions ORDER BY domain, metric_name"
-                ).fetchall()
-                # 按实际列名解析（TODO：适配 TianShu 的 meta.metric_definitions 表结构）
+                result = self._conn.execute(
+                    "SELECT * FROM meta.metric_definitions ORDER BY metric_name"
+                )
+                rows = result.fetchall()
+                columns = [desc[0] for desc in result.description]
                 for row in rows:
-                    # 假设列顺序：metric_name, zh_name, domain, aggregation, base_table, unit, g3_available
+                    row_data = dict(zip(columns, row))
+                    metric_name = str(row_data.get("metric_name", row[0]))
+                    source_table = str(row_data.get("source_table", row_data.get("base_table", "")))
+                    aggregation = str(row_data.get("calculation_sql", row_data.get("aggregation", "")))
                     metrics.append(MetricInfo(
-                        name=str(row[0]),
-                        zh_name=str(row[1]) if len(row) > 1 else "",
-                        domain=str(row[2]) if len(row) > 2 else "",
-                        aggregation=str(row[3]) if len(row) > 3 else "",
-                        base_table=str(row[4]) if len(row) > 4 else "",
-                        unit=str(row[5]) if len(row) > 5 else "",
-                        g3_available=bool(row[6]) if len(row) > 6 else False,
+                        name=metric_name,
+                        zh_name=str(row_data.get("metric_name_zh", row_data.get("zh_name", ""))),
+                        domain=str(row_data.get("domain", self._infer_metric_domain(metric_name, source_table))),
+                        aggregation=aggregation,
+                        base_table=source_table,
+                        unit=str(row_data.get("unit", "")),
+                        g3_available=bool(
+                            row_data.get("g3_available", source_table.startswith("gold.dws_"))
+                        ),
                     ))
                 return metrics
             except Exception:
@@ -192,6 +199,19 @@ class TianShuResolver:
 
         return metrics
 
+    def _infer_metric_domain(self, metric_name: str, source_table: str) -> str:
+        """从指标名和来源表推断基础业务域"""
+        text = f"{metric_name} {source_table}"
+        if "trip" in text or "fare" in text or "distance" in text:
+            return "traffic"
+        if "parking" in text or "violation" in text or "fine" in text:
+            return "violation"
+        if "crash" in text or "injured" in text or "killed" in text:
+            return "safety"
+        if "tif" in text or "payment" in text or "application" in text:
+            return "supply"
+        return ""
+
     def build_context(self) -> AgentContext:
         """
         构建 Agent 运行时上下文。
@@ -208,8 +228,8 @@ class TianShuResolver:
         except Exception:
             self._conn = None  # 离线模式：仅使用契约文件
 
-        # 3. 动态发现
-        available_tables = self.discover_tables() if self._conn else []
+        # 3. 动态发现；离线时从契约生成静态白名单。
+        available_tables = self.discover_tables() if self._conn else self._tables_from_contracts()
         available_metrics = self.discover_metrics()
 
         # 4. 从契约中提取规则
@@ -224,6 +244,13 @@ class TianShuResolver:
                         left = parts[0].strip().split("(")[0].strip()
                         right = parts[1].strip().split("(")[0].strip()
                         join_whitelist.append((left, right))
+
+        # G3 日汇总表按契约必须经 dim_date 做日期过滤，补齐本 Agent 的查询路径。
+        join_whitelist.extend([
+            ("gold.dws_daily_trip_summary", "gold.dim_date"),
+            ("gold.dws_daily_parking_summary", "gold.dim_date"),
+            ("gold.dws_daily_crash_summary", "gold.dim_date"),
+        ])
 
         forbidden_patterns: list[str] = []
         semantic = self._contracts.get("semantic_contract", {})
@@ -243,6 +270,22 @@ class TianShuResolver:
             forbidden_patterns=forbidden_patterns,
             forbidden_sql_keywords=forbidden_keywords,
         )
+
+    def _tables_from_contracts(self) -> list[TableInfo]:
+        """从语义契约构建离线表白名单"""
+        semantic = self._contracts.get("semantic_contract", {})
+        entries: list[dict[str, Any]] = []
+        for key in ("g3_summary", "g2_facts", "dimensions", "views", "meta"):
+            entries.extend(semantic.get(key, []))
+
+        tables: list[TableInfo] = []
+        for entry in entries:
+            full_name = entry.get("table", "")
+            if "." not in full_name:
+                continue
+            schema, name = full_name.split(".", 1)
+            tables.append(TableInfo(schema=schema, name=name))
+        return tables
 
     def close(self):
         """关闭 DuckDB 连接"""

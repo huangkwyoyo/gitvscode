@@ -31,24 +31,31 @@ def explain_result(
         中文解释字符串
     """
     if result.error:
-        return f"抱歉，查询执行时出错：{result.error}"
+        return f"抱歉，查询执行时出错：{result.error}。数据来源：{result.source_table or '未知表'}。"
 
     if result.row_count == 0:
         return (
-            f"查询'{question}'未返回任何数据。"
+            f"查询“{question}”未返回数据。"
             f"可能原因：该时间范围内没有记录，或过滤条件过严。"
             f"数据来源：{result.source_table or '未知表'}。"
         )
 
-    # 桩：基本的统计描述
     parts: list[str] = []
-
-    parts.append(f"查询'{question}'返回 {result.row_count} 行数据。")
-
-    if result.columns:
-        parts.append(f"包含 {len(result.columns)} 个字段：{'、'.join(result.columns[:10])}。")
+    parts.append(f"查询“{question}”返回 {result.row_count} 行。")
 
     if result.source_table:
         parts.append(f"数据来源：{result.source_table}。")
+
+    if result.columns:
+        parts.append(f"字段：{', '.join(result.columns[:10])}。")
+
+    if result.rows:
+        preview_lines = []
+        for row in result.rows[:5]:
+            values = [str(value) for value in row]
+            preview_lines.append(", ".join(values))
+        parts.append(f"前 {len(preview_lines)} 行样例：{'；'.join(preview_lines)}。")
+
+    parts.append(f"执行耗时：{result.execution_time_ms}ms。")
 
     return " ".join(parts)

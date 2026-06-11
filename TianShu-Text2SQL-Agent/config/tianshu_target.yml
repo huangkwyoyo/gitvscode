@@ -10,7 +10,7 @@ tianshu:
   project_root: "../TianShu"
 
   # DuckDB 数据库文件（相对于 TianShu 项目根目录）
-  duckdb_path: "data/tian_shu.duckdb"
+  duckdb_path: "D:/ProgramData/Datawarehouse/纽约市城市交通/nyc_transport.duckdb"
 
   # 契约文件目录（相对于 TianShu 项目根目录）
   contracts_path: "contracts"

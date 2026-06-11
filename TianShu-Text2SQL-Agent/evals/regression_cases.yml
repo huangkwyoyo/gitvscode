@@ -1,0 +1,21 @@
+questions:
+  - id: regression_trip_daily_2026_01
+    question_zh: "2026年1月每天有多少行程？"
+    expected_behavior: "answer"
+    expected_source_table: "gold.dws_daily_trip_summary"
+    expected_columns: ["date", "trip_count"]
+    expected_row_count: 31
+
+  - id: regression_parking_daily_2026_02
+    question_zh: "2026年2月每天停车罚单数量是多少？"
+    expected_behavior: "answer"
+    expected_source_table: "gold.dws_daily_parking_summary"
+    expected_columns: ["date", "parking_violation_count"]
+    expected_row_count: 28
+
+  - id: regression_crash_daily_2026_03
+    question_zh: "2026年3月每天事故数是多少？"
+    expected_behavior: "answer"
+    expected_source_table: "gold.dws_daily_crash_summary"
+    expected_columns: ["date", "crash_count"]
+    expected_row_count: 31
