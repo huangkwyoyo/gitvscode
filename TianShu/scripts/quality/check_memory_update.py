@@ -145,9 +145,25 @@ def main() -> int:
         return 0
 
     print("[FAIL] 关键变更未同步更新核心记忆文件。")
+    print()
     print("请更新以下任一文件:")
     for path in CORE_MEMORY_FILES:
         print(f"  - {path}")
+    print()
+    print("─" * 60)
+    print("[*] 下一步操作（二选一）：")
+    print()
+    print("  A) 如果本次变更涉及新发现的问题/经验/规则：")
+    print("     在对话中说「把这次经验写入记忆」，让 Agent 帮你更新记忆文件。")
+    print("     更新完成后重新 git commit。")
+    print()
+    print("  B) 如果本次变更不涉及新经验（如纯重构、格式修正、注释调整）：")
+    print("     在 commit message 中注明「无新增经验」，然后重新提交。")
+    print()
+    print("[!] Memory Gate 不会自动生成复盘内容——它只检测记忆文件是否被更新。")
+    print("    Harness 的自动化在执行层（检查做了没），不在创建层（帮你写）。")
+    print("    参考：AGENTS.md §13.4 记忆写入强制要求。")
+    print("─" * 60)
     return 1
 
 

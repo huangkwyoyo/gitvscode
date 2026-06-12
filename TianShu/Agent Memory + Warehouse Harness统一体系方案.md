@@ -6,15 +6,16 @@
 
 它不是单纯的“记忆文档”，也不是单纯的“测试脚本集合”，而是一个把 **规则、文档、复盘、测试、审核、一致性检查、Agent 协作规范** 连接起来的项目治理机制。
 
-本项目当前已经进入以下阶段：
+本项目当前已经进入以下阶段（2026-06-12 更新）：
 
 - 数据源已经覆盖纽约市城市交通多域数据。
 - Bronze 层已完成入库（16 张表，约 1.5 亿行）。
 - Silver 层 11 张表已全部建成并完成修复（~9,738 万行，字段数 211，meta 注释全覆盖）。
-- Harness 质量门禁体系已完成 6 个检查脚本 + 3 个测试模块 + Git pre-commit hook。
-- 已出现多 Agent 协作（Codex、Claude Code），并已验证 AGENTS.md 路由机制和 Memory Gate。
-- 已通过 Silver 层实战验证：字段漂移、TRY_CAST 静默失败、阶段感知缺失均已被门禁拦截。
-- 下一阶段：Gold 层星型模型设计与建设。
+- **Gold 层已全部建成**：G0 公共维表（2 张）、G1 业务维表（4 张）、G2 明细事实表（6 张）、G3 汇总与语义层（4 张）+ 中文指标口径 + Text2SQL 问数模板。
+- Harness 质量门禁体系已完成 **13 个检查脚本 + 5 个测试模块 + Git pre-commit hook**。
+- 子项目 **TianShu-Text2SQL-Agent** 已独立建立，拥有自己的 5 个 Harness 检查脚本 + 4 个评测问题集。
+- 已通过 Silver + Gold 实战验证：字段漂移、TRY_CAST 静默失败、阶段感知缺失、日期越界、语义层映射断裂均已被门禁拦截。
+- 当前阶段：**Gold G3 语义层建成，运维与持续优化**。下一重点：元治理漏洞修复（见 §19.5）。
 
 因此，项目已经不能只依赖一次对话上下文、单个 Agent 的临时记忆，或者人工口头提醒来保证质量。
 
@@ -156,7 +157,7 @@ Codex 给出的三层建议是：
   │ TianShu/agents/review/AGENTS.md         │ 审核 Agent 规则（守门人，只拦截不圆场）                                 │
   └─────────────────────────────────────────┴─────────────────────────────────────────────────────────────────────────┘
 
-  共 7 个 AGENTS.md，形成从全局到分层的规则树。
+  共 **8 个 AGENTS.md**，形成从全局到分层的规则树（较初版新增 `agents/dev/AGENTS.md` 数据开发 Agent 专项规则）。
 
   ---
   第二层：项目 README（上下文层）
@@ -318,6 +319,27 @@ Harness 的核心闭环是：
   ↓
 同类错误直接拦截
 ```
+
+> **📌 2026-06-12 补充——闭环的自动化边界**：以上流程图展示的是 Harness 的**理想完整链路**，但其中存在一个关键的自动化分界：
+>
+> ```text
+> 发现问题              ← 人工审查或 Agent 运行门禁发现
+>   ↓
+> 写入经验复盘          ← ❌ 手动（人说"写入记忆"或 Agent 判断后执行）
+> 抽象为项目规则        ← ❌ 手动
+> 更新数据库设计文档    ← ❌ 手动
+> 新增质量检查脚本      ← ❌ 手动（最耗时）
+> 新增测试用例          ← ❌ 手动
+>   ↓
+> 以后每次变更自动检查  ← ✅ 自动（pre-commit hook + check_*.py）
+> 同类错误直接拦截      ← ✅ 自动
+> ```
+>
+> **核心认知**：Harness 的自动化在**执行层**（变更后的检查与拦截），不在**创建层**（经验→规则→脚本→测试的转化）。Memory Gate 不帮你写复盘——它只在你没写复盘时拒绝你的提交。从"发现问题"到"沉淀为新防线"的转化，**必须由人或 Agent 主动完成**。当前 TianShu 采用的是 **"人+Agent 协同创建，门禁自动兜底"** 的协作模式。
+>
+> **🔧 执行层的改进——"引导式阻断"（2026-06-12 落地）**：基于以上认知，对 pre-commit hook 和 Memory Gate 做了关键改造：失败时不再吞咽输出（去掉 `> /dev/null`），而是展示 Memory Gate 完整检查详情 + A/B 二选一操作指引（"说「把这次经验写入记忆」让 Agent 更新" / "commit message 注明「无新增经验」"）。设计原则：**不在创建层替人做判断，但在阻断时确保人无法以"不知道发生了什么"为由绕过门禁。** 这相当于在创建层（手动）和执行层（自动）之间架了一座桥——不修复断裂点 4 的根因（判断"什么值得记录"无法自动化），但缓解它的症状（人不知道被拦了该做什么）。
+>
+> 延伸阅读：[[Agent Harness 项目治理框架]] "闭环的自动化边界"章节从五步流程视角展开分析并详述了 pre-commit 改进方案；[[AGENTS规则与自动触发机制的区别]] §10.4 从创建层/执行层分界维度用表格展示；[[Harness体系元治理漏洞深度分析]] §3.3 断裂点 4 分析了"发现→复盘"触发缺失及缓解措施。
 
 这比普通记忆系统多了两个关键环节：
 
@@ -920,23 +942,21 @@ Codex 修复了前两类，但遗漏了第三类（`base_detail.total_dispatched
 
 **经验编码为检查规则**：`check_silver_null.py` 现在默认启用，每次门禁自动扫描所有 Silver 表。任何全 NULL 的日期/金额/数值字段都会被立即发现，不再依赖人工逐列检查。
 
-### 9.6 Harness 当前完整状态
+### 9.6 Harness 当前完整状态（2026-06-12 更新）
 
 ```
-第一层·规则声明    AGENTS.md（路由表）+ docs/warehouse/*/AGENTS.md + docs/standards/
+第一层·规则声明    AGENTS.md（路由表，530 行）+ 8 个 AGENTS.md + docs/standards/
                    ↓
-第二层·检查脚本    check_silver_dictionary.py / check_dangerous_patterns.py /
-                   check_schema_consistency.py / check_silver_null.py /
-                   check_memory_update.py  ← 共 5 个
+第二层·检查脚本    13 个检查脚本（Silver 5 + Gold 4 + 通用 4）
                    ↓
-第三层·统一门禁    run_all_checks.py（阶段感知：post_silver_build 自动启用强校验）
+第三层·统一门禁    run_all_checks.py（16 步，阶段感知：当前 gold_g3_semantic_layer）
                    ↓
-第四层·自动触发    .githooks/pre-commit（Memory Gate + 危险模式 + pytest，不依赖 DuckDB）
+第四层·自动触发    .githooks/pre-commit（Memory Gate + 危险模式 + pytest）
                    ↓
 第五层·CI/PR       待建立（GitHub Actions / PR required checks）
 ```
 
-已落地的检查矩阵：
+已落地的检查矩阵（TianShu 主项目）：
 
 | 检查项 | 脚本 | 依赖 DuckDB | 已接入门禁 |
 |---|---|---|---|
@@ -945,8 +965,27 @@ Codex 修复了前两类，但遗漏了第三类（`base_detail.total_dispatched
 | schema 文档-实表一致性 | `check_schema_consistency.py` | 是 | ✓ |
 | Silver 空值画像 | `check_silver_null.py` | 是 | ✓ |
 | 经验沉淀强制执行 | `check_memory_update.py` | 否 | ✓ |
+| Gold 设计文档一致性 | `check_gold_design.py` | 是 | ✓ |
+| Gold 物理表校验 | `check_gold_physical.py` | 是 | ✓ |
+| Gold NULL 率突变 | `check_gold_null.py` | 是 | ✓ |
+| Gold 日期质量 | `check_gold_date_quality.py` | 是 | ✓ |
+| 语义层映射完整性 | `check_semantic_layer.py` | 否 | ✓ |
+| Text2SQL 安全与正确性 | `check_text2sql.py` | 是 | ✓ |
 | 字典回归测试 | `test_silver_dictionary.py`（6 用例） | 否 | ✓ |
 | Harness 自检 | `test_harness_quality.py`（5 用例） | 否 | ✓ |
+| Gold 设计质量 | `test_gold_design_quality.py` | 否 | ✓ |
+| Gold 构建质量 | `test_gold_build_quality.py` | 是 | ✓ |
+| Text2SQL 回归 | `test_text2sql.py` | 是 | ✓ |
+
+TianShu-Text2SQL-Agent 子项目检查矩阵（独立 Harness）：
+
+| 检查项 | 脚本 | 已接入门禁 |
+|---|---|---|
+| SQL 只读安全检查 | `check_sql_readonly.py` | ✓ |
+| IR 数据结构正确性 | `check_ir_schema.py` | ✓ |
+| 反问/拒绝策略覆盖 | `check_refusal_policy.py` | ✓ |
+| 查询层级合规 | `check_layer_compliance.py` | ✓ |
+| 指标注册完整性 | `check_metric_registered.py` | ✓ |
 
 ### 9.7 本次认知的核心
 
@@ -1047,7 +1086,154 @@ hook 文件存在 ≠ hook 已激活。
 
 ---
 
-## 10. 本项目为什么尤其需要这个体系
+## 9.9 第九次认知提升：Gold 层建成与 Harness 能力倍增
+
+### 背景
+
+第七次认知升级（Silver 生产强化）后，Harness 拥有 6 个检查脚本和 3 个测试模块。阶段处于 `post_silver_build`。
+
+2026-06-10 ~ 2026-06-12，Gold 层从零建成 G0/G1/G2/G3 全流程——6 张维表、6 张事实表、4 张汇总表、中文语义层，并同步落地了配套的质量门禁。
+
+### 黄金教训：Silver 的坑一个都没重犯
+
+Silver 层建设时暴露了三个关键缺口——阶段感知缺失、空值检查无基线、Memory Gate 缺失。Gold 层建设中，这三个缺口全部被前置补上：
+
+| Silver 踩的坑 | Gold 的前置防护 |
+|--------------|---------------|
+| 阶段感知缺失：建完表后仍按"未建成"模式检查 | `harness_targets.yml` stage 推进到 `gold_g3_semantic_layer`，自动启用 Gold 强校验 |
+| 空值检查无基线：分不清信号和噪音 | 提前建立 `gold_sparsity_baseline.yml`，与 Gold 实表同步上线 |
+| Memory Gate 缺失：经验没沉淀 | `check_memory_update.py` 已就位，Gold 建设过程的每次关键变更都被 Memory Gate 覆盖 |
+
+### Harness 能力翻倍
+
+Gold 层建设直接催生了 **7 个新检查脚本**：
+
+| 新增脚本 | 职责 | 行数 |
+|----------|------|------|
+| `check_gold_design.py` | Gold 设计文档 vs 实表一致性 + 中文注释覆盖率 | 217 |
+| `check_gold_physical.py` | Gold 物理表字段类型校验 | 159 |
+| `check_gold_null.py` | Gold NULL 率突变检测（基于 gold_sparsity_baseline.yml） | 226 |
+| `check_gold_date_quality.py` | Gold 日期字段受 dim_date 有效范围约束 | 231 |
+| `check_semantic_layer.py` | 语义层指标必须有 Silver/Gold 字段来源映射 | 130 |
+| `check_text2sql.py` | Text2SQL 生成的 SQL 安全检查 + 语义正确性 | 978 |
+| `harness_config.py` | 共享配置加载器 | 64 |
+
+检查脚本从 6 → 13，测试模块从 3 → 5。`run_all_checks.py` 的步骤从 9 步增长到 16 步。
+
+### 本次认知的核心
+
+```text
+Harness 的成熟度不由脚本数量定义，而由"上一个阶段的坑是否在下一个阶段自动被拦截"定义。
+
+Gold 层建设没有重犯 Silver 层的任何一个系统性错误。
+不是因为人更小心了，而是因为 Harness 把这些错误变成了自动门禁。
+这就是 Harness 的核心价值——不是让人少犯错，而是让错犯不进来。
+```
+
+---
+
+## 9.10 第十次认知提升：Harness 模式复制——TianShu-Text2SQL-Agent
+
+### 背景
+
+2026-06-11 ~ 2026-06-12，TianShu 项目拆出独立的 `TianShu-Text2SQL-Agent` 子项目——一个专门负责将中文自然语言问题转化为 SQL 的 Agent。
+
+这个子项目面临与主项目相同的一阶问题：Agent 可能写出危险 SQL、可能跳过 Silver 直接读 Bronze、可能编造未注册的指标。而 TianShu 主项目的 Harness 已经证明了"规则 + 检查 + 门禁"模式的有效性。
+
+### Harness 模式的复制
+
+子项目没有另起炉灶，而是直接复制了主项目的 Harness 架构：
+
+```text
+TianShu 主项目 Harness                    TianShu-Text2SQL-Agent Harness
+├── AGENTS.md 规则入口 + 路由表      →   AGENTS.md（119 行，5 步工作流 + 查询优先级表）
+├── scripts/quality/ 13 个检查脚本    →   harness/checks/ 5 个检查脚本
+├── run_all_checks.py 编排器          →   run_harness.py（177 行，Markdown 报告）
+├── docs/memory/ 经验复盘             →   契约文件（YAML）×5
+├── harness/config/ 配置              →   harness/config.py
+└── tests/ 回归测试                   →   evals/ 评测问题集 ×4
+```
+
+五个 Agent 专用检查脚本各司其职：
+
+| 检查脚本 | 职责 | 防止的问题 |
+|----------|------|-----------|
+| `check_sql_readonly.py` | 生成的 SQL 必须是只读的 | DROP/DELETE/INSERT |
+| `check_ir_schema.py` | 中间表示（IR）的数据结构正确性 | 字段名/表名幻觉 |
+| `check_refusal_policy.py` | 反问/拒绝策略覆盖未注册指标 | 编造不存在的指标 |
+| `check_layer_compliance.py` | 查询必须优先 Gold → Silver → Bronze | 跳过 Gold 直查 Bronze |
+| `check_metric_registered.py` | 所有引用的指标必须在 metric_contract.yml 中注册 | 指标口径不一致 |
+
+### 关键差异
+
+Agent Harness 与 Warehouse Harness 有两个关键差异：
+
+1. **关注点不同**：Warehouse Harness 关注"数据是否正确"（schema 一致性、NULL 率、字段来源），Agent Harness 关注"Agent 行为是否安全"（SQL 只读、反问策略、层级合规）。
+2. **编排器更强**：Agent 的 `run_harness.py` 包含超时（60s）、stdout 捕获、结构化结果字典，并自动生成 Markdown 报告。Warehouse 的 `run_all_checks.py` 仍然是简单的串行 subprocess 调用。
+
+### 本次认知的核心
+
+```text
+一个好的治理模式，不应该只在诞生它的项目里有效。
+
+TianShu 主项目的 Harness 模式（AGENTS.md 路由表 → 检查脚本 → 统一门禁 → Git hook）
+被完整复制到了 Text2SQL-Agent 子项目，只替换了检查脚本的内容。
+架构不变，检查内容变——这就是 Harness 作为"模式"的可迁移性。
+
+如果未来出现第三个子项目（如数据分析 Agent、报表 Agent），
+也应该复制同样的 Harness 骨架，而不是另建一套机制。
+```
+
+---
+
+## 9.11 第十一次认知提升：Opencode 审计——元治理盲区暴露
+
+### 背景
+
+2026-06-12，在完成了前十个认知升级、Gold 层全流程建成、Text2SQL-Agent Harness 落地之后，Opencode 对项目进行了一次外部审计。
+
+审计没有发现新的代码缺陷。但它暴露了 Harness 体系一个系统性的结构问题——**元治理真空**。
+
+### 审计的核心发现
+
+Harness 体系定义了"如何防止系统腐化"的规则，但自身面临四个维度的腐化风险：
+
+| 维度 | 当前规模 | 退化临界点 | 现有保护 |
+|------|----------|-----------|---------|
+| ADR | 6 份 | ~30 份时 README 索引失效 | 手工 Markdown 表格 |
+| 检查脚本 | 13 个（主）+ 5 个（Agent） | ~20 个时全量串行 >3 分钟 | 无分层，无并行 |
+| 经验复盘 | 22 条（226 行） | ~1000 行时前置阅读不可行 | 无分层摘要，无归档 |
+| AGENTS.md | 530 行 | 已达可维护边界 | 路由表硬编码，无外部化 |
+
+更关键的是，AGENTS.md §13 定义了 13 个文件的变更传播清单，但**没有任何规则定义 AGENTS.md 自身的变更如何被检测和传播**。Memory Gate 的 CI 阻断链路也未接通——门造好了，没有接入门框。
+
+### 为什么之前没看到
+
+启动时的目标函数是"快速建立一套能约束 Agent 的机制"——这是**一阶问题**。Opencode 指出的是**二阶问题**：约束 Agent 的机制本身在退化怎么办。
+
+在项目启动阶段，二阶问题根本不在视野范围内。这不是疏忽，是**目标函数决定的视野边界**。一阶问题没解决完，没人会去想"解决一阶问题的工具自身的维护问题"。
+
+但这不是借口。当体系从 6 个脚本长到 13 个、从 14 条经验长到 22 条——退化已经从"理论风险"变成了"需要规划应对"的现实问题。
+
+### 本次认知的核心
+
+```text
+任何治理体系在设计时都应该预留自身被治理的接口。
+
+Harness 的元治理不能完全自动化——判断经验是否值得记录需要人的判断力。
+但可以做到三件事：
+1. 显式声明自动化边界（本文档 §18.1）
+2. 给体系的每个组件设生命周期管理（status/expires_at/归档策略）
+3. 接通阻断链路的最后一公里（CI 管线消费退出码）
+
+审计不是来找 bug 的，是来找盲区的。
+这次审计发现的最大的盲区是：我们设计了约束 Agent 的规则，
+但忘了设计约束规则自身的规则。
+```
+
+> **延伸阅读**：本次审计的完整诊断和修复路线图，详见 [[Harness体系元治理漏洞深度分析_20260612_1018]]。
+
+---
 
 ### 9.1 数据域复杂
 
@@ -1128,17 +1314,18 @@ Agent 只能整理事实，不能创造事实。
 
 ---
 
-## 11. 统一体系的目录规划
+## 11. 统一体系的目录规划（2026-06-12 更新）
 
-建议在 `D:\Program Files\gitvscode\TianShu` 中采用以下结构：
+当前 `D:\Program Files\gitvscode\TianShu` 的实际结构（与规划基本一致，标注了 Gold 阶段新增项）：
 
 ```text
 D:\Program Files\gitvscode\TianShu
-├─ AGENTS.md
-├─ PROJECT_STATUS.md
+├─ AGENTS.md                              ← 530 行，全局规则入口 + 路由表
+├─ PROJECT_STATUS.md                      ← 当前阶段：gold_g3_semantic_layer
+├─ Agent Memory + Warehouse Harness统一体系方案.md  ← 本文档
 ├─ docs
 │  ├─ decisions
-│  │  ├─ README.md
+│  │  ├─ README.md                        ← ADR 索引（手工维护）
 │  │  ├─ 001-duckdb-as-warehouse-engine.md
 │  │  ├─ 002-bronze-silver-gold-layering.md
 │  │  ├─ 003-silver-three-batch-strategy.md
@@ -1146,83 +1333,85 @@ D:\Program Files\gitvscode\TianShu
 │  │  ├─ 005-agent-memory-harness-system.md
 │  │  └─ 006-parking-violation-amount-in-gold.md
 │  ├─ memory
-│  │  ├─ 经验复盘.md
-│  │  ├─ 风险清单.md
-│  │  ├─ 规则来源索引.md
+│  │  ├─ 经验复盘.md                       ← 22 条（R001-R022）
+│  │  ├─ 风险清单.md                       ← 28 项（RISK-001~028）
+│  │  ├─ 规则来源索引.md                   ← 21 条映射
 │  │  └─ 变更复盘模板.md
 │  ├─ warehouse
 │  │  ├─ AGENTS.md
-│  │  ├─ bronze
-│  │  │  └─ AGENTS.md
-│  │  ├─ silver
-│  │  │  └─ AGENTS.md
-│  │  ├─ gold
-│  │  │  └─ AGENTS.md
+│  │  ├─ bronze/AGENTS.md
+│  │  ├─ silver/AGENTS.md
+│  │  ├─ gold/AGENTS.md
 │  │  ├─ database_design
 │  │  │  ├─ README.md
 │  │  │  ├─ bronze_database_design.md
 │  │  │  ├─ silver_database_design.md
-│  │  │  └─ gold_database_design.md
+│  │  │  └─ gold_database_design.md        ← Gold 阶段新增
 │  │  └─ data_dictionary
 │  │     ├─ README.md
 │  │     ├─ 枚举值识别方法论.md
 │  │     └─ bronze_enum_values.md
-│  ├─ standards
-│  │  ├─ README.md
-│  │  └─ 数据仓库文档规范.md
-│  ├─ meta
-│  ├─ modeling
-│  └─ silver
+│  ├─ standards/
+│  ├─ meta/
+│  ├─ modeling/
+│  └─ silver/
 ├─ agents
-│  ├─ text2sql
-│  │  └─ AGENTS.md
-│  └─ review
-│     └─ AGENTS.md
+│  ├─ dev/AGENTS.md                       ← 新增：数据开发 Agent 规则
+│  ├─ text2sql/AGENTS.md
+│  └─ review/AGENTS.md
 ├─ scripts
-│  ├─ memory
-│  │  └─ append_lesson.py
 │  ├─ quality
 │  │  ├─ check_silver_dictionary.py
 │  │  ├─ check_dangerous_patterns.py
 │  │  ├─ check_schema_consistency.py
 │  │  ├─ check_silver_null.py
 │  │  ├─ check_memory_update.py
-│  │  ├─ check_gold_design.py
-│  │  ├─ check_gold_physical.py
-│  │  ├─ run_all_checks.py
-│  │  └─ harness_config.py
-│  ├─ bronze
-│  ├─ silver
+│  │  ├─ check_gold_design.py             ← Gold 阶段新增
+│  │  ├─ check_gold_physical.py           ← Gold 阶段新增
+│  │  ├─ check_gold_null.py               ← Gold 阶段新增
+│  │  ├─ check_gold_date_quality.py       ← Gold 阶段新增
+│  │  ├─ check_semantic_layer.py          ← Gold 阶段新增
+│  │  ├─ check_text2sql.py               ← Gold 阶段新增（978 行）
+│  │  ├─ harness_config.py
+│  │  └─ run_all_checks.py
+│  ├─ bronze/
+│  ├─ silver/
 │  │  ├─ build_silver_duckdb.py
 │  │  └─ _gen_xlsx.py
-│  ├─ gold
-│  └─ meta
+│  ├─ gold/
+│  │  └─ build_gold_duckdb.py             ← Gold 阶段新增（46KB）
+│  └─ meta/
 ├─ .githooks
-│  └─ pre-commit
+│  └─ pre-commit                          ← 已激活（2026-06-10）
 ├─ harness
 │  ├─ README.md
-│  ├─ checklists
+│  ├─ checklists/
 │  │  ├─ pre_silver_build.md
 │  │  ├─ schema_change_review.md
 │  │  └─ pr_review.md
 │  ├─ config
 │  │  ├─ harness_targets.yml
-│  │  └─ silver_sparsity_baseline.yml
-│  ├─ reports
-│  │  └─ README.md
-│  └─ lessons
+│  │  ├─ silver_sparsity_baseline.yml
+│  │  └─ gold_sparsity_baseline.yml       ← Gold 阶段新增
+│  ├─ questions/
+│  │  └─ gold_standard_questions.yml      ← Gold 阶段新增
+│  ├─ reports/
+│  │  ├─ README.md
+│  │  ├─ text2sql_report_latest.md
+│  │  └─ text2sql_signature_baseline.yml
+│  └─ lessons/
 │     └─ README.md
 ├─ sql
-│  ├─ bronze
-│  ├─ silver
-│  ├─ gold
-│  └─ meta
+│  ├─ bronze/
+│  ├─ silver/
+│  ├─ gold/
+│  └─ meta/
 └─ tests
-   ├─ test_database_design.py
    ├─ test_silver_dictionary.py
-   ├─ test_schema_consistency.py
-   ├─ test_agent_rules.py
-   └─ test_dangerous_patterns.py
+   ├─ test_harness_quality.py
+   ├─ test_gold_design_quality.py         ← Gold 阶段新增
+   ├─ test_gold_build_quality.py          ← Gold 阶段新增
+   └─ test_text2sql.py                   ← Gold 阶段新增
 ```
 
 ---
@@ -1282,7 +1471,7 @@ AGENTS.md 不是知识垃圾桶，而是规则入口 + 路由表。
 
 这条原则应该长期保留。
 
-**AGENTS.md长度** 目前长度：523 行，在可接受范围
+**AGENTS.md长度** 目前长度：**530 行**，在可接受范围
      
   AGENTS.md 注入 System Prompt 后约占用 2000+ tokens。Claude Code 的上下文窗口是 200K tokens，占比约 1%。当前长度不是问题，但如果未来继续膨胀（超过   
   800 行），需要考虑把详细规范（如代码规范、DuckDB 建表规范）拆分到 docs/standards/ 下，AGENTS.md 只保留路由指令 + 最高原则。
@@ -1730,24 +1919,22 @@ PR 才能合并
 
 ---
 
-## 15. 自动触发还是人工触发
+## 15. 触发机制：当前状态与演进
 
-### 14.1 当前状态
+> **2026-06-12 更新**：以下内容写于 Harness 早期设计阶段。Memory Gate 和 pre-commit hook 已落地，三触发机制部分实现。
 
-当前项目中的记忆更新不是自动触发的。
+### 15.1 当前触发状态
 
-也就是说，如果没有明确流程，Agent 不会天然地在每次出错后自动：
+| 触发方式 | 机制 | 状态 |
+|----------|------|------|
+| **变更检测** | `check_memory_update.py` 扫描 git diff，检测关键路径变更是否伴随记忆层更新 | ✅ 已实现 |
+| **Pre-commit 阻断** | `.githooks/pre-commit` 自动运行 Memory Gate + 危险模式 + pytest | ✅ 已激活（2026-06-10） |
+| **阶段感知** | `run_all_checks.py` 根据 `harness_targets.yml` 的 stage 自动调整严格程度 | ✅ 已实现 |
+| **人工触发** | 用户说"把这次经验写入记忆" → Agent 执行写入 | ✅ 依赖人主动发起 |
+| **阶段复盘** | 阶段切换时自动复盘 | ⚠️ 有规则（§13），无自动执行 |
+| **CI 管线阻断** | PR 合并前自动运行全部门禁，失败则阻止合入 | ❌ 未接入（docstring 写"后续可接入"） |
 
-- 写入经验复盘
-- 更新规则文档
-- 增加检查脚本
-- 增加测试
-
-因此，需要把触发机制显式写入 Harness。
-
-### 14.2 推荐触发方式
-
-建议采用三类触发。
+### 15.2 三类触发（设计文档）
 
 #### 人工触发
 
@@ -1766,17 +1953,7 @@ Agent 必须执行：
 
 #### 阶段触发
 
-每完成一个阶段时，自动进行复盘。
-
-例如：
-
-- Bronze 阶段完成
-- Silver 规划完成
-- Silver 建表完成
-- Gold 建模完成
-- Text2SQL Agent 接入完成
-
-阶段复盘应回答：
+每完成一个阶段时，自动进行复盘。阶段复盘应回答：
 
 - 本阶段新增了哪些事实？
 - 本阶段发现了哪些问题？
@@ -1784,30 +1961,28 @@ Agent 必须执行：
 - 哪些问题需要变成规则？
 - 哪些规则需要自动检查？
 
-#### 变更触发
+#### 变更触发（已落地）
 
-每次修改以下内容时，必须运行一致性检查：
+每次修改以下内容时，`check_memory_update.py` 自动检测是否伴随记忆层更新：
 
 - 数据库设计文档
 - 字段字典
-- Silver 规划
-- Gold 指标规划
-- SQL 建表脚本
-- DuckDB schema
+- Silver/Gold 构建脚本
+- 质量检查脚本
+- Harness 配置
 - Agent 规则文件
-- Harness 检查清单和配置
+
+### 15.3 当前缺口
+
+从触发到阻断的最后一公里尚未接通：`check_memory_update.py` 检测到违规 → 退出码 1 → `run_all_checks.py` 汇总 → **无 CI 管线消费** → 人可以选择忽略。详见 §18.1。
 
 ---
 
-## 16. 最小可行版本
+## 16. 最小可行版本（回顾）
 
-不要一开始就把 Harness 做得过重。
+> **2026-06-12 注**：以下五阶段 MVP 计划写于项目早期。截至当前，前四个阶段已全部完成，第五阶段（PR 审核流程）尚未接入 CI。
 
-建议先建设最小可行版本。
-
-### 15.1 第一阶段：目录和文档
-
-先建立：
+### 16.1 第一阶段：目录和文档 ✅ 已完成
 
 ```text
 docs/memory/经验复盘.md
@@ -1819,11 +1994,7 @@ PROJECT_STATUS.md
 harness/README.md
 ```
 
-目标是让记忆、事实源、状态和 Harness 执行入口都有固定位置。
-
-### 15.2 第二阶段：Harness 工程入口
-
-建立：
+### 16.2 第二阶段：Harness 工程入口 ✅ 已完成
 
 ```text
 harness/README.md
@@ -1831,170 +2002,213 @@ harness/checklists/pre_silver_build.md
 harness/checklists/schema_change_review.md
 harness/checklists/pr_review.md
 harness/config/harness_targets.yml
+harness/config/silver_sparsity_baseline.yml
+harness/config/gold_sparsity_baseline.yml     ← Gold 阶段新增
 harness/reports/README.md
 harness/lessons/README.md
+harness/questions/gold_standard_questions.yml ← Gold 阶段新增
 ```
 
-这一阶段只定义运行入口和检查清单，不复制 `database_design/`、`data_dictionary/` 和 `docs/memory/` 的内容。
+### 16.3 第三阶段：第一批检查脚本 ✅ 已完成（已扩展至 13 个）
 
-### 15.3 第三阶段：第一批检查脚本
-
-先实现：
+首批 3 个 → 现已扩展至 13 个（含 Silver 5 + Gold 4 + 通用 4）：
 
 ```text
 scripts/quality/check_silver_dictionary.py
 scripts/quality/check_dangerous_patterns.py
 scripts/quality/check_schema_consistency.py
+scripts/quality/check_silver_null.py          ← Silver 阶段追加拿
+scripts/quality/check_memory_update.py        ← Memory Gate
+scripts/quality/check_gold_design.py          ← Gold 阶段追加
+scripts/quality/check_gold_physical.py        ← Gold 阶段追加
+scripts/quality/check_gold_null.py            ← Gold 阶段追加
+scripts/quality/check_gold_date_quality.py    ← Gold 阶段追加
+scripts/quality/check_semantic_layer.py       ← Gold 阶段追加
+scripts/quality/check_text2sql.py             ← Gold 阶段追加
+scripts/quality/harness_config.py
+scripts/quality/run_all_checks.py
 ```
 
-第一批检查聚焦已经发生过的问题：
-
-- Silver 中无来源金额字段
-- `DATE::INT`
-- 无序 `ROW_NUMBER() OVER ()`
-- 文档字段数与 Excel 字典字段数不一致
-- 英文名缺少中文名
-
-### 15.4 第四阶段：测试固化
-
-建立：
+### 16.4 第四阶段：测试固化 ✅ 已完成（已扩展至 5 个模块）
 
 ```text
 tests/test_silver_dictionary.py
-tests/test_dangerous_patterns.py
-tests/test_schema_consistency.py
+tests/test_harness_quality.py
+tests/test_gold_design_quality.py
+tests/test_gold_build_quality.py              ← Gold 阶段追加
+tests/test_text2sql.py                        ← Gold 阶段追加
 ```
 
-目标不是测试业务结果，而是测试项目规则是否被执行。
+### 16.5 第五阶段：PR 审核流程 ⏳ 未完成
 
-### 15.5 第五阶段：PR 审核流程
+待 CI 管线接入后，PR 合并前须通过全部门禁。
 
-后续再把 Harness 接入 PR 流程。
+### 16.6 可扩展性考量（2026-06-12 Opencode 审计更新）
 
-PR 合并前必须通过：
+> **原可扩展性考量写于 MVP 规划时。Opencode 审计暴露了三个额外风险，已整合如下。**
 
-- 数据库设计检查
-- 字段字典检查
-- schema 一致性检查
-- 危险模式扫描
-- Agent 规则检查
+**原则一：事实源不能随规模扩散。** 当 ADR 积累到 50 份、经验复盘到 5000 行时，不能通过"再新建一个目录"来解决组织问题。正确做法是在现有目录内部建立子索引。
 
-### 15.6 可扩展性考量
+**原则二：检查脚本的运行成本必须可控。** 当前 13 个脚本全部串行执行。当积累到 20+ 个时，需引入 `--gate` 分层参数（design/physical/semantic）和并行执行。
 
-以上是最小可行版本。当项目规模增长时，Harness 自身也需要演进，但演进应遵循三条原则：
+**原则三：复盘文档必须有生命周期管理。** 当前 22 条复盘无 status/expires_at 标记。每条经验沉淀后，核心规则必须提取到分层 `AGENTS.md`，复盘原文降级为"详细背景说明"。
 
-**原则一：事实源不能随规模扩散。** 当 ADR 积累到 50 份、经验复盘到 5000 行时，不能通过"再新建一个目录"来解决组织问题——那会制造新的事实源。正确做法是在现有目录内部建立子索引。例如 `docs/decisions/README.md` 的索引表已经提供了按状态和日期筛选的能力，`docs/memory/规则来源索引.md` 已经提供了经验到规则的映射。
-
-**原则二：检查脚本的运行成本必须可控。** 当检查脚本积累到 30 个时，全量运行可能需要数分钟。`run_all_checks.py` 应支持按层级筛选（如 `--layer silver`）和按变更范围筛选（如 `--changed-files`），让日常开发只运行相关检查，全量检查留给 PR 门禁。
-
-**原则三：复盘文档必须有生命周期管理。** `docs/memory/经验复盘.md` 如果涨到 5000 行，本身就会变成另一个"上下文过长"的问题——Agent 需要从 5000 行复盘中找到与当前任务相关的 2 条。解决方式不是让 Agent 全量阅读，而是：每条经验沉淀后，其核心规则必须提取到分层 `AGENTS.md`，复盘原文降级为"详细背景说明"，日常 Agent 只读 `AGENTS.md` 规则，只有需要深入理解时才查看复盘原文。
+**原则四（Opencode 新增）：Harness 自身需要被治理。** 路由表应外部化为 YAML，AGENTS.md 自身的变更也应触发传播检查，Memory Gate 的 CI 阻断链路必须接通。详见 §18.1 和 [[Harness体系元治理漏洞深度分析_20260612_1018]]。
 
 ---
 
 ## 17. 落地进展与下一步计划
 
-> 本章节反映当前实际状态，每次阶段切换时更新。
+> 本章节反映当前实际状态，每次阶段切换时更新。**当前版本：2026-06-12**
 
-### 17.1 已落地（2026-05 ~ 2026-06-09）
+### 17.1 已落地（2026-05 ~ 2026-06-12）
+
+#### 基础设施（2026-05 ~ 2026-06-07）
 
 - [x] 建立 `docs/memory`（经验复盘、风险清单、规则来源索引、变更复盘模板）
 - [x] 建立 `docs/warehouse/database_design`（Bronze/Silver/Gold 三层数据库设计文档）
 - [x] 建立 `docs/warehouse/data_dictionary`（字段字典 + 枚举值识别方法论 + Bronze 枚举值）
-- [x] 建立 `scripts/quality`（6 个检查脚本：dictionary、dangerous_patterns、schema_consistency、silver_null、memory_update、gold_design）
-- [x] 建立 `tests`（test_silver_dictionary 6 用例、test_harness_quality 5 用例、test_gold_design_quality）
 - [x] 建立 `docs/decisions`（6 份架构决策记录 + 索引）
 - [x] 建立 `harness/` 工程入口（checklists、config、reports、lessons）+ `harness_targets.yml` 阶段配置
-- [x] 建立 7 个分层 AGENTS.md，根 AGENTS.md 从索引升级为路由表
+- [x] 建立 8 个分层 AGENTS.md（1 全局 + 4 分层 + 3 Agent 专项），根 AGENTS.md 从索引升级为路由表
+
+#### Silver 层建设 + 首批 Harness（2026-06-07 ~ 2026-06-09）
+
 - [x] Silver 层 11 张表全部建成（~9,738 万行）+ 数据字典 xlsx（12 sheets，211 字段）
 - [x] Silver 数据质量校验通过（schema 一致性、空值画像、主键唯一性、金额/日期转换）
-- [x] `run_all_checks.py` 全量门禁通过（7 项检查，11 个 pytest 全部通过）
+- [x] 首批 6 个检查脚本落地：`check_silver_dictionary`、`check_dangerous_patterns`、`check_schema_consistency`、`check_silver_null`、`check_memory_update`、`check_gold_design`
+- [x] 首批 3 个测试模块：`test_silver_dictionary`（6 用例）、`test_harness_quality`（5 用例）、`test_gold_design_quality`
+- [x] `run_all_checks.py` 全量门禁通过
 - [x] **Memory Gate** 落地：`check_memory_update.py` 强制关键变更同步更新 `docs/memory`
 - [x] **预期稀疏基线**体系建立：`silver_sparsity_baseline.yml`（17 条基线，三级分类）
 - [x] **阶段感知 Harness**：`stage: post_silver_build` 自动启用 `--require-silver-tables`
 - [x] **Git pre-commit hook**：`.githooks/pre-commit` 自动运行 Memory Gate + 危险模式 + pytest
-- [x] **Git hook 激活**（2026-06-10）：`git config core.hooksPath TianShu/.githooks`——hook 文件存在不等于 hook 已激活。审计发现 hooksPath 此前未设置，所有提交实际绕过了 pre-commit 门禁。详见本文 §9.8"第八次认知提升"。
-- [x] `docs/standards/`、`docs/silver/`、`sql/silver/` 已同步更新，明确"规范不自动生效，需 Harness 执行"
+- [x] **Git hook 激活**（2026-06-10）：`git config core.hooksPath TianShu/.githooks`——hook 文件存在不等于 hook 已激活。审计发现 hooksPath 此前未设置，所有提交实际绕过了 pre-commit 门禁。详见 §9.8。
 - [x] Silver 构建脚本日期/金额转换修复（美国日期、货币字符串、千位分隔整数）
 
-### 17.2 经验已沉淀（共 14 条经验 + 6 条规则 + 19 个风险）
+#### Gold 层建设 + Harness 倍增（2026-06-10 ~ 2026-06-12）
 
-**经验复盘（R001-R014）：**
-1. R001：Silver 不得凭空新增 Bronze 不存在的金额字段 → `check_silver_dictionary.py`
-2. R002：DuckDB 禁用 `DATE::INT` → `check_dangerous_patterns.py`
-3. R003：稳定主键不得使用无序 `ROW_NUMBER() OVER ()` → `check_dangerous_patterns.py`
-4. R004：枚举值不得硬编码 → `check_silver_dictionary.py`
-5. R005：字段数字典、Markdown 和设计文档必须一致 → `check_schema_consistency.py`
-6. R006：金额字段必须使用 `DECIMAL` → `test_silver_dictionary.py`
-7. R007：MD5 代理键在 8,000 万行规模下可能碰撞 → `build_silver_duckdb.py` 内置校验
-8. R008：DuckDB `TRY_CAST` 无法解析 ISO 日期格式拼接时间 → `build_silver_duckdb.py` 修复
-9. R009：DuckDB `ROW_NUMBER` 不能引用同层 SELECT 的别名 → `build_silver_duckdb.py` 修复
-10. R010：DuckDB `INSERT OR REPLACE` 需要唯一约束 → `build_silver_duckdb.py` 修复
-11. R011：建表完成后未同步更新关联文档 → `AGENTS.md` §13 变更传播规则
-12. R012：AGENTS 规则不是自动触发器 → `check_memory_update.py` + `run_all_checks.py`
-13. R013：Silver 建成后必须启用实表强校验 → `harness_targets.yml` + `--require-silver-tables`
-14. R014：`TRY_CAST` 静默失败必须用格式化解析和空值检查兜底 → `try_strptime` + `regexp_replace` + `check_silver_null.py`
+- [x] **Gold G0 公共维表**建成：`dim_date`、`dim_taxi_zone`
+- [x] **Gold G1 业务维表**建成：`dim_vehicle`、`dim_driver`、`dim_base`、`dim_violation_type`
+- [x] **Gold G2 明细事实表**建成：`fact_trips`、`fact_parking_violations`、`fact_tif_payments`、`fact_driver_applications`、`fact_crashes`、`fact_crash_persons`
+- [x] **Gold G3 汇总与语义层**建成：`dws_daily_trip_summary`、`dws_zone_trip_summary`、`dws_daily_parking_summary`、`dws_daily_crash_summary` + 中文指标口径定义 + Text2SQL 问数模板
+- [x] Gold 数据库设计文档：`docs/warehouse/database_design/gold_database_design.md`
+- [x] Gold 构建脚本：`scripts/gold/build_gold_duckdb.py`（46KB）
+- [x] Gold 专用检查脚本落地 4 个：`check_gold_design`、`check_gold_physical`、`check_gold_null`、`check_gold_date_quality`
+- [x] Gold 空值基线：`harness/config/gold_sparsity_baseline.yml`
+- [x] 语义层检查：`check_semantic_layer.py`
+- [x] Text2SQL 能力检查：`check_text2sql.py`（978 行，最复杂的检查脚本）
+- [x] Gold 专用测试：`test_gold_build_quality.py`、`test_text2sql.py`
+- [x] 检查脚本总数从 6 个增长到 **13 个**，测试模块从 3 个增长到 **5 个**
+- [x] 阶段推进到 `gold_g3_semantic_layer`
+- [x] 标准中文问数问题集：`harness/questions/gold_standard_questions.yml`
 
-**风险清单（RISK-001 ~ RISK-019）：** 覆盖 DuckDB 方言、主键碰撞、文档漂移、`TRY_CAST` 陷阱、阶段感知缺失、规则无执行器等 19 项风险。
+#### 子项目 TianShu-Text2SQL-Agent（2026-06-11 ~ 2026-06-12）
 
-### 17.3 下一步：Gold 层建设
+- [x] 独立 Agent 项目建立，含自己的 `AGENTS.md`、契约文件（5 个 YAML）
+- [x] Agent Harness 落地：`harness/run_harness.py` + 5 个专用检查脚本（`check_sql_readonly`、`check_ir_schema`、`check_refusal_policy`、`check_layer_compliance`、`check_metric_registered`）
+- [x] 评测体系：4 个问题集（标准问题、模糊问题、回归用例、不安全问题）
+- [x] Harness 报告自动生成：`harness/reports/harness_report_latest.md`
 
-**核心原则**：Silver 层的教训是"表建出来了，文档、字典、注释、门禁没跟上"。Gold 层不重复这个模式——**先建维表 + 同步补 Gold post-build gate，不一次性建所有事实表**。
+### 17.2 经验已沉淀（共 22 条经验 + 28 个风险 + 21 条规则映射）
 
-#### Gold 建设批次
+**经验复盘（R001-R022）：**
+
+| 编号 | 标题 | 落地检查/测试 |
+|------|------|-------------|
+| R001 | Silver 不得凭空新增 Bronze 不存在的金额字段 | `check_silver_dictionary.py` |
+| R002 | DuckDB 禁用 `DATE::INT` | `check_dangerous_patterns.py` |
+| R003 | 稳定主键不得使用无序 `ROW_NUMBER() OVER ()` | `check_dangerous_patterns.py` |
+| R004 | 枚举值不得硬编码 | `check_silver_dictionary.py` |
+| R005 | 字段数字典、Markdown 和设计文档必须一致 | `check_schema_consistency.py` |
+| R006 | 金额字段必须使用 `DECIMAL` | `test_silver_dictionary.py` |
+| R007 | MD5 代理键在 8,000 万行规模下可能碰撞 | `build_silver_duckdb.py` 内置校验 |
+| R008 | DuckDB `TRY_CAST` 无法解析 ISO 日期格式拼接时间 | `build_silver_duckdb.py` |
+| R009 | DuckDB `ROW_NUMBER` 不能引用同层 SELECT 的别名 | `build_silver_duckdb.py` |
+| R010 | DuckDB `INSERT OR REPLACE` 需要唯一约束 | `build_silver_duckdb.py` |
+| R011 | 建表完成后未同步更新关联文档 | `AGENTS.md` §13 变更传播规则 |
+| R012 | AGENTS 规则不是自动触发器 | `check_memory_update.py` |
+| R013 | Silver 建成后必须启用实表强校验 | `harness_targets.yml` |
+| R014 | `TRY_CAST` 静默失败必须用格式化解析和空值检查兜底 | `check_silver_null.py` |
+| R015 | Gold 事实表维度键必须引用 dim 表有效主键 | `check_gold_design.py` |
+| R016 | Gold 物理表字段类型必须与设计文档一致 | `check_gold_physical.py` |
+| R017 | Gold 表 NULL 率突变需门禁拦截 | `check_gold_null.py` |
+| R018 | 日期字段必须受 dim_date 有效日期范围约束 | `check_gold_date_quality.py` |
+| R019 | 语义层指标必须有 Silver/Gold 字段来源映射 | `check_semantic_layer.py` |
+| R020 | Text2SQL 生成的 SQL 必须是只读的 | `check_sql_readonly.py`（Agent Harness） |
+| R021 | Agent 反问/拒绝策略必须覆盖未注册指标 | `check_refusal_policy.py`（Agent Harness） |
+| R022 | Gold 事实表日期键必须受 dim_date 有效范围约束 | `check_gold_date_quality.py` |
+
+**风险清单（RISK-001 ~ RISK-028）：** 覆盖 DuckDB 方言、主键碰撞、文档漂移、`TRY_CAST` 陷阱、阶段感知缺失、规则无执行器、Gold 日期越界、语义层映射断裂、Agent 幻觉 SQL、Harness 自身腐化等 28 项风险。
+
+**规则来源索引：** 21 条映射（R001-R021），R022 待补充。
+
+### 17.3 Gold 层建设回顾
+
+> **本节原为"下一步计划"（2026-06-09）。Gold 层已于 2026-06-12 全部建成，以下为建成后的回顾。**
+
+#### 建设策略验证
+
+Silver 层的教训是"表建出来了，文档、字典、注释、门禁没跟上"。Gold 层严格执行了"**先建维表 + 同步补 post-build gate**"的策略，避免了 Silver 层的问题复现。
+
+#### 实际建成的 Gold 结构
 
 ```text
-G0 公共维表（先建，零依赖）
-  gold.dim_date           → 来源 silver.dim_date
-  gold.dim_taxi_zone      → 来源 silver.taxi_zone
-  同步：更新 Gold 设计文档 + meta.column_comments
+G0 公共维表（零依赖）
+  gold.dim_date           ← silver.dim_date
+  gold.dim_taxi_zone      ← silver.taxi_zone
 
 G1 业务维表（依赖 G0）
-  gold.dim_vehicle        → 来源 silver.vehicle_detail
-  gold.dim_driver         → 来源 silver.driver_detail
-  gold.dim_base           → 来源 silver.base_detail
-  gold.dim_violation_type → 来源官方违章代码字典
-  同步：扩展 check_schema_consistency.py 增加 Gold schema 对比
+  gold.dim_vehicle        ← silver.vehicle_detail
+  gold.dim_driver         ← silver.driver_detail
+  gold.dim_base           ← silver.base_detail
+  gold.dim_violation_type ← 官方违章代码字典
 
 G2 明细事实表（依赖 G0+G1）
-  gold.fact_trips               → 来源 silver.trip_detail
-  gold.fact_parking_violations  → 来源 silver.parking_violation_detail
-  gold.fact_tif_payments        → 来源 silver.tif_payment_detail
-  gold.fact_driver_applications → 来源 silver.driver_application_detail
-  gold.fact_crashes             → 来源 silver.crash_detail
-  gold.fact_crash_persons       → 来源 silver.crash_person_detail
-  同步：增加 Gold 指标来源校验
+  gold.fact_trips               ← silver.trip_detail
+  gold.fact_parking_violations  ← silver.parking_violation_detail
+  gold.fact_tif_payments        ← silver.tif_payment_detail
+  gold.fact_driver_applications ← silver.driver_application_detail
+  gold.fact_crashes             ← silver.crash_detail
+  gold.fact_crash_persons       ← silver.crash_person_detail
 
 G3 汇总与语义层
-  每日出行汇总、区域 OD 汇总、每日罚单汇总、每日事故汇总
-  中文指标口径定义、Text2SQL 问数模板
+  gold.dws_daily_trip_summary、gold.dws_zone_trip_summary
+  gold.dws_daily_parking_summary、gold.dws_daily_crash_summary
+  中文指标口径定义 + Text2SQL 问数模板
 ```
 
-#### Gold 专用强校验（建 Gold 实表时同步扩展）
+#### Gold 专用强校验（已全部落地）
 
-当前 Harness 已能拦截 Silver 层的大部分错误。Gold 实表落地时需在 `check_schema_consistency.py` 中增加：
-
-| 检查项 | 说明 | 优先级 |
+| 检查项 | 对应脚本 | 状态 |
 |---|---|---|
-| Gold 设计文档 vs DuckDB gold schema | 表存在性、字段数、字段名、数据类型双向一致 | P0 |
-| Gold 字段中文注释覆盖率 | `meta.column_comments` 中 gold 注释 = 实表字段数，必须 100% | P0 |
-| Gold 指标来源字段校验 | 每个 Gold 指标字段必须标注来源 Silver 表/字段或派生逻辑 | P1 |
-| Gold 禁止直接 `FROM bronze` | 扫描 Gold SQL，`FROM bronze.` 必须报错（白名单例外）。**原因**：Gold 如果跳过 Silver 直接读 Bronze，会丢失 Silver 层做的类型标准化（如 VARCHAR→DECIMAL）、质量标记（is_time_anomaly 等）和字段统一命名，导致指标口径不一致。 | P1 |
+| Gold 设计文档 vs DuckDB gold schema | `check_schema_consistency.py`（已扩展 Gold 对比） | ✅ |
+| Gold 字段中文注释 100% 覆盖 | `check_gold_design.py` | ✅ |
+| Gold 物理表字段类型一致性 | `check_gold_physical.py` | ✅ |
+| Gold NULL 率突变检测 | `check_gold_null.py` | ✅ |
+| Gold 日期字段受 dim_date 约束 | `check_gold_date_quality.py` | ✅ |
+| Gold 指标来源 Silver 字段可追溯 | `check_semantic_layer.py` | ✅ |
+| Gold 禁止直接 `FROM bronze` | `check_layer_compliance.py`（Agent Harness） | ✅ |
 
-#### 中文字段名原则
+### 17.4 待办事项
 
-Gold 中文名不得用 LLM 翻译直接生成。必须来源于：
-1. `meta.column_comments`（Silver 已有中文注释直接复用）
-2. Silver 数据字典 xlsx（已有中文名延续使用）
-3. 官方数据字典整理结果
-4. 项目术语表（待建）
-5. 人工审核
+#### 近期（本周）
 
-> 原则：中文名必须可追溯来源，与上游保持一致。LLM 翻译只能做草稿，不能作为最终事实源。
+1. [ ] AGENTS.md 路由表外部化为 `harness/config/ROUTE_TABLE.yml`
+2. [ ] `run_all_checks.py` 加 `--gate design|physical|semantic` 分层参数
 
-### 17.4 远期待办
+#### 中期（本月）
 
-1. [ ] 实现 `check_agent_rules.py`（Gold 不跳过 Silver 的检查）
-2. [ ] CI/PR 审核流程接入 Harness（GitHub Actions 自动运行全部门禁）
+3. [ ] CI/PR 审核流程接入 Harness（GitHub Actions 自动运行全部门禁）
+4. [ ] ADR README 自动生成脚本 + superseded 标记启用
+5. [ ] 复盘条目标记 `status: active | superseded | archived` + `expires_at`
+6. [ ] 规则来源索引补全 R022
+
+#### 长期（下月+）
+
+7. [ ] 复盘分层摘要（前置 50 行摘要 + 详细条目在后）
+8. [ ] 超过 1 年的已闭环条目归档到 `harness/lessons/YYYY/`
+9. [ ] `check_agent_rules.py`（AGENTS.md 每条规则是否都有对应 quality 脚本）
 
 ---
 
@@ -2027,43 +2241,123 @@ Agent 可以忘记上下文。
 
 ### 18.1 Harness 的元治理：谁来保证 Harness 本身的质量不下滑？
 
-一个自然的疑问是：Harness 约束 Agent，但谁来约束 Harness 的维护者？
+> **本节于 2026-06-12 经 Opencode 审计后重写**，替换了原先”当前阶段 Harness 维护者是项目负责人自己”的初步讨论。
 
-答案是：**当前阶段，Harness 的维护者是项目负责人自己。** Harness 不是自动运行的 AI——它是人在发现错误后，主动写复盘、写检查、写测试，然后把检查接入 `run_all_checks.py`。这套动作的触发依赖于人的纪律，而非自动化。
+#### 18.1.1 元治理问题的正式定义
 
-但这并不意味着元治理问题不重要。随着项目演进，以下机制可以逐步引入：
+Harness 约束 Agent 的行为。但 Harness 自身的检查脚本、复盘文档、ADR 是人写的。人会忘、会偷懒、会离职。谁来约束”人有没有按时写复盘”这件事？
 
-1. **Harness 自我检查**：`check_agent_rules.py`（待实现）会检查 AGENTS.md 中的每条规则是否都有对应的 quality 脚本——如果一条规则没有执行机制，检查脚本本身就会报 Warning。
-2. **阶段复盘强制触发**：每次 `PROJECT_STATUS.md` 的阶段状态变更时，Review Agent 检查是否伴随了经验复盘更新。
-3. **Harness 腐烂检测**：如果 `run_all_checks.py` 超过 N 天未运行或未更新，在下次运行时给出提示——"Harness 自身可能已过时，请检查是否有新的问题未被覆盖"。
+这是 **”谁来看守看守者”（Quis custodiet ipsos custodes?）** 问题在 Harness 体系中的具象化。
 
-这些机制的核心思路是一致的：**用 Harness 的一部分能力来检查 Harness 本身的完整性。** 这不是完美的自举（完全自举是不可能的），但足以防止最常见的腐化模式——"规则写了但检查没跟上"。
+#### 18.1.2 当前覆盖与缺口
+
+| 层级 | 机制 | 状态 |
+|------|------|------|
+| 检测遗忘 | `check_memory_update.py` 检测关键变更未归档 | ✅ 已实现 |
+| 纸面阻断 | `run_all_checks.py` 失败时返回退出码 1 | ✅ 已实现 |
+| 实际阻断 | CI 管线消费退出码并阻止合入 | ❌ 未接入（docstring 写”后续可接入 PR 检查”） |
+| 质量审查 | 验证复盘内容是否敷衍 | ❌ 不存在（写一行 `R023: 修了个 bug` 即可通过） |
+| 知识传承 | 接手者知道哪些复盘还适用 | ❌ 不存在（22 条复盘无 status/expires_at 标记） |
+| Harness 自身回归 | 检查脚本本身的正确性被测试 | ✅ 已存在（`tests/test_harness_quality.py`） |
+| 元治理边界声明 | 体系显式声明自动化边界 | ❌ 不存在（本文档此次重写即为首次声明） |
+
+#### 18.1.3 核心断裂点
+
+三个关键断裂点导致 Harness 的强制力从”阻断”退化为”建议”：
+
+1. **阻断链路不完整**：`check_memory_update.py` 返回退出码 1 的逻辑正确，但 `run_all_checks.py` 消费了退出码后，没有 CI 管线读取最终返回码来阻止合入。`检测到违规 → 退出码 1 → ??? → 人可以选择忽略`。
+
+2. **质量校验不存在**：只检查文件是否被修改，不检查内容。写一行 `R023: 修了个 bug` 就能通过。
+
+3. **知识传承缺失**：22 条复盘没有 `status: active | superseded | archived` 和 `expires_at` 字段，接手者无法区分哪些规则还适用。
+
+#### 18.1.4 诚实答案
+
+**这个闭环不可能完全自动化。** 判断”这条经验是否值得写入复盘”需要工程判断力，无法用脚本替代。
+
+但可以做四件事降低退化速度：
+
+| 措施 | 解决的问题 | 状态 |
+|------|-----------|------|
+| Memory Gate 从”报告”升级为”阻断” | 人能选择忽略 | 待 CI 接入 |
+| 复盘条目加生命周期标记 | 无法区分活跃/历史 | 待实现 |
+| Harness 自身回归测试 | 检查脚本本身有 bug | `test_harness_quality.py` 已落地 |
+| 显式承认边界 | 体系被误解为”全自动” | **本文档 §18.1 即为首次声明** |
+
+#### 18.1.5 元治理边界声明
+
+```text
+本 Harness 体系可以自动检测规则违反，但无法替代人的纪律。
+
+以下事项不在自动化范围内，依赖 PR Review 环节的人工判断：
+- 复盘条目的内容质量（是否敷衍）
+- 新 ADR 的决策质量（是否充分论证）
+- 检查脚本自身的正确性（即使有回归测试，测试本身也可能有盲区）
+- 已归档条目的适用性判断（是否该重新激活）
+
+本体系的元治理最终依赖人工审核。不承认这一边界的治理体系才是最有风险的体系。
+```
+
+#### 18.1.6 与 Opencode 审计的关系
+
+2026-06-12 的 Opencode 审计暴露了 Harness 体系在元治理层面的三个结构性漏洞——可扩展性腐化、元治理真空、设计盲区。这些漏洞不是代码缺陷，而是体系设计时 **”一阶问题优先”的目标函数导致的视野边界**。详细分析见配套文档：[[Harness体系元治理漏洞深度分析_20260612_1018]]。
+
+本体系已经从审计中吸取了关键教训：**任何治理体系在设计时都应该预留自身被治理的接口**。§19.5 的修复路线图即为本次审计的直接产出。
 
 ---
 
 ## 19. 总结
 
-本项目不应该只建设一个“记忆系统”，也不应该只建设一个“测试 Harness”。
-
-正确方向是建设统一的：
+### 19.1 体系当前规模（2026-06-12）
 
 ```text
-Agent Memory + Warehouse Harness
+TianShu Agent Memory + Warehouse Harness 统一体系
+├── 8 个 AGENTS.md（1 全局 + 4 分层 + 3 Agent 专项）
+├── 13 个质量检查脚本（Silver 5 + Gold 4 + 通用 4）
+├── 5 个回归测试模块
+├── 6 份架构决策记录（ADR）
+├── 22 条经验复盘（R001-R022）
+├── 28 项风险登记（RISK-001 ~ RISK-028）
+├── 21 条规则来源映射
+├── 3 份检查清单（建表前 / Schema 变更 / PR 审核）
+├── 3 份空值基线（Silver / Gold）
+├── 1 个标准问题集（Text2SQL 评测）
+├── Git pre-commit hook（Memory Gate + 危险模式 + pytest）
+├── 阶段感知门禁编排器（run_all_checks.py）
+└── 子项目 TianShu-Text2SQL-Agent（5 个独立 Harness 检查脚本）
 ```
 
-其中：
+### 19.2 核心原则（不变）
 
 - Agent Memory 负责记录经验、复盘问题、解释规则来源。
 - Warehouse Harness 负责把规则变成检查、测试和审核门禁。
 - 数据库设计文档是最高事实源。
-- AGENTS.md 是规则入口，不是知识垃圾桶。
+- AGENTS.md 是规则入口 + 路由表，不是知识垃圾桶。
 - 每次 schema 变更都必须更新设计文档、字段字典，并通过一致性检查。
 
-这套体系的核心价值是：
+### 19.3 体系的核心价值
 
 ```text
 让每一次错误都变成下一次的自动防线。
 ```
+
+### 19.4 已知边界（2026-06-12 Opencode 审计后追加）
+
+本体系经过 Opencode 审计，暴露了三个结构性漏洞：
+- **可扩展性腐化**：ADR/检查脚本/复盘/AGENTS.md 均未设生命周期管理
+- **元治理真空**：Memory Gate 的 CI 阻断链路未接通，复盘质量校验不存在
+- **设计盲区**：启动时聚焦一阶问题（约束 Agent），二阶问题（约束约束机制自身）不在视野内
+
+详见配套文档 [[Harness体系元治理漏洞深度分析_20260612_1018]]。这些漏洞的修复已排入路线图（§19.5），目前尚未执行。
+
+### 19.5 下一步方向
+
+1. **立即**: AGENTS.md 路由表外部化为 YAML，降低 AGENTS.md 行数
+2. **近期**: run_all_checks.py 加 `--gate` 分层参数 + 并行化
+3. **中期**: ADR README 自动生成 + 复盘生命周期标记
+4. **长期**: 复盘分层摘要 + 按年归档 + CI 管线接入
+
+> **维护提示**：本文档是项目治理体系的宪法级文档。每次阶段切换后必须更新 §18 的落地进展。当前版本反映 2026-06-12 状态。
 
 ---
 

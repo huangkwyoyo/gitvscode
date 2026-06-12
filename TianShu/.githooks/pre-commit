@@ -27,12 +27,24 @@ run_check() {
     local name="$1"
     shift
     printf "${YELLOW}[RUN]${NC} %s ... " "$name"
-    if "$@" > /dev/null 2>&1; then
+    local tmpout
+    tmpout="$(mktemp)"
+    if "$@" > "$tmpout" 2>&1; then
         printf "${GREEN}OK${NC}\n"
         pass_count=$((pass_count + 1))
+        rm -f "$tmpout"
         return 0
     else
         printf "${RED}FAIL${NC}\n"
+        # 显示失败详情，帮助定位问题
+        if [ -s "$tmpout" ]; then
+            echo ""
+            cat "$tmpout" | while IFS= read -r line; do
+                printf "  ${RED}▎${NC} %s\n" "$line"
+            done
+            echo ""
+        fi
+        rm -f "$tmpout"
         fail_count=$((fail_count + 1))
         return 1
     fi
@@ -62,8 +74,12 @@ if [ $fail_count -eq 0 ]; then
 else
     printf "${RED}Pre-commit 失败: %d 项未通过${NC}\n" $fail_count
     echo ""
-    echo "提示：如果失败与 docs/memory 更新相关，请更新对应文件后重新提交。"
-    echo "完整 Harness 检查（含 DB）：python scripts/quality/run_all_checks.py"
+    echo "修复指引："
+    echo "  • Memory Gate 失败 → 在对话中说「把这次经验写入记忆」，让 Agent 帮你更新"
+    echo "  • 危险模式扫描失败 → 检查上方的违规项，修复后重新提交"
+    echo "  • pytest 失败 → 检查测试输出，确保数据字典与实表一致"
+    echo ""
+    echo "完整 Harness（含 DB 检查）：python scripts/quality/run_all_checks.py"
     echo ""
     exit 1
 fi
