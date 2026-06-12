@@ -1,0 +1,34 @@
+# TianShu CODEOWNERS
+#
+# 本文件定义了关键治理文件的强制人工审批规则。
+# 修改这些文件/目录的 PR 必须获得对应所有者的审批后才能合入。
+#
+# 详见 docs/governance/03_schema_governance.md §3.1
+
+# 数据库设计事实源 —— 最高优先级保护
+docs/warehouse/database_design/    @data-architect
+
+# 契约文件 —— Agent 行为的硬约束
+contracts/                         @data-architect
+
+# 分层规则文件 —— 约束各层 Agent 行为
+docs/warehouse/gold/AGENTS.md      @data-architect
+docs/warehouse/silver/AGENTS.md    @data-architect
+docs/warehouse/bronze/AGENTS.md    @data-architect
+docs/warehouse/AGENTS.md           @data-architect
+
+# 根规则文件
+AGENTS.md                          @data-architect
+
+# 记忆层核心文件
+docs/memory/                       @data-architect
+
+# 治理体系文件
+docs/governance/                   @data-architect
+
+# Harness 配置
+harness/config/                    @data-architect
+.githooks/                         @data-architect
+
+# 质量检查脚本
+scripts/quality/                   @data-architect

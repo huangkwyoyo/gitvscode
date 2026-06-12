@@ -4,16 +4,19 @@
 # 此文件是 TianShu 对外暴露的"API 文档"的一部分，
 # Agent 项目通过读取此文件获取连接方式和安全约束。
 
-# DuckDB 数据库文件路径（相对于 TianShu 项目根目录）
+# DuckDB 数据库文件路径
 duckdb:
-  relative_path: "data/tian_shu.duckdb"
+  # 当前生产/开发共用的真实 DuckDB 文件路径。
+  # Text2SQL Agent 应优先读取 absolute_path；relative_path 仅用于未来把数据库文件放入项目 data/ 目录的场景。
+  absolute_path: "D:\\ProgramData\\Datawarehouse\\纽约市城市交通\\nyc_transport.duckdb"
+  relative_path: null
   # Agent 必须使用只读模式连接
   read_only: true
   # 连接超时（秒）
   connect_timeout: 30
 
 # 连接字符串模板（Agent 项目据此构造连接）
-connection_string: "duckdb:///{tianshu_root}/data/tian_shu.duckdb?read_only=true"
+connection_string: "duckdb:///D:/ProgramData/Datawarehouse/纽约市城市交通/nyc_transport.duckdb?read_only=true"
 
 # 数据库引擎信息
 engine:

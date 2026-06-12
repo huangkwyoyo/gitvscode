@@ -1,8 +1,8 @@
 # Text2SQL 中文问数能力评测报告
 
-**生成时间**: 2026-06-10 21:35:48
+**生成时间**: 2026-06-12 21:20:38
 **评测问题数**: 22
-**通过**: 19 | **警告**: 3 | **失败**: 0
+**通过**: 22 | **警告**: 0 | **失败**: 0
 
 ## 评测汇总
 
@@ -23,12 +23,12 @@
 | q_trip_by_vehicle_type | 2026 年 Q1 不同牌照类... | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ 通过 |
 | q_driver_expiration_2026 | 有多少司机的牌照在 2026 ... | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ 通过 |
 | q_driver_applications_daily | 2026 年 Q1 每天有多少... | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ 通过 |
-| q_violation_type_top | 最常发生的违章类型是哪些？ | ✅ | ⚠️ | ✅ | ✅ | ✅ | ⚠️ 警告 |
+| q_violation_type_top | 最常发生的违章类型是哪些？ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ 通过 |
 | q_tif_payment_daily | 2026 年 Q1 每天的 T... | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ 通过 |
 | q_violation_fine_avg | 不同违章类型的标准罚款金额排序... | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ 通过 |
-| q_zone_fare_per_trip | 哪个行政区平均每程车费最高？ | ✅ | ⚠️ | ✅ | ✅ | ✅ | ⚠️ 警告 |
+| q_zone_fare_per_trip | 哪个行政区平均每程车费最高？ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ 通过 |
 | q_borough_crash_density | 各行政区的事故数量对比如何？ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ 通过 |
-| q_parking_date_filtered | 2026 年 1 月每天的有效... | ✅ | ⚠️ | ✅ | ✅ | ✅ | ⚠️ 警告 |
+| q_parking_date_filtered | 2026 年 1 月每天的有效... | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ 通过 |
 | q_empty_date_range | 2025 年 12 月 25 ... | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ 通过 |
 
 ## 逐题详情
@@ -123,7 +123,7 @@
 
 | 维度 | 结果 | 详情 | 修复建议 |
 |------|------|------|----------|
-| 表选择 | ✅ PASS | SQL 正确引用了推荐表: `gold.dim_date` (G0 公共维表，仅维度属性，无事实指标), `gold.fact_trips` (G2 明细事实表，可接受但非最优) | — |
+| 表选择 | ✅ PASS | SQL 正确引用了推荐表: `gold.fact_trips` (G2 明细事实表，可接受但非最优), `gold.dim_date` (G0 公共维表，仅维度属性，无事实指标) | — |
 | 指标 | ✅ PASS | 指标已注册: ['trip_count'] | — |
 | SQL 可执行性 | ✅ PASS | SQL 语法正确，可执行 | — |
 | 结果一致性 | ✅ PASS | 与基线一致: 360 行, 3 列 (date, trip_source, trip_count) | — |
@@ -183,7 +183,7 @@
 
 | 维度 | 结果 | 详情 | 修复建议 |
 |------|------|------|----------|
-| 表选择 | ✅ PASS | SQL 正确引用了推荐表: `gold.dim_vehicle` (G1 业务维表，仅维度属性，无事实指标), `gold.dim_date` (G0 公共维表，仅维度属性，无事实指标), `gold.fact_trips` (G2 明细事... | — |
+| 表选择 | ✅ PASS | SQL 正确引用了推荐表: `gold.fact_trips` (G2 明细事实表，可接受但非最优), `gold.dim_vehicle` (G1 业务维表，仅维度属性，无事实指标), `gold.dim_date` (G0 公共维表，仅... | — |
 | 指标 | ✅ PASS | 指标已注册: ['trip_count'] | — |
 | SQL 可执行性 | ✅ PASS | SQL 语法正确，可执行 | — |
 | 结果一致性 | ✅ PASS | 与基线一致: 0 行, 2 列 (license_type, trip_count) | — |
@@ -213,14 +213,14 @@
 | 结果一致性 | ✅ PASS | 与基线一致: 65 行, 2 列 (date, cnt) | — |
 | 层级合规 | ✅ PASS | 表层级使用正确: `gold.dim_date` (G0 公共维表，仅维度属性，无事实指标), `gold.fact_driver_applications` (G2 明细事实表，可接受但非最优) | — |
 
-### q_violation_type_top — ⚠️ 警告
+### q_violation_type_top — ✅ 通过
 
 > **问题**: 最常发生的违章类型是哪些？
 
 | 维度 | 结果 | 详情 | 修复建议 |
 |------|------|------|----------|
-| 表选择 | ✅ PASS | SQL 正确引用了推荐表: `gold.dim_violation_type` (G1 业务维表，仅维度属性，无事实指标), `gold.fact_parking_violations` (G2 明细事实表，可接受但非最优) | — |
-| 指标 | ⚠️ WARN | SQL 返回值列在引用表中找不到: ['violation_count'] | 确保指标已在 meta.metric_definitions 注册，且 SELECT 列名与引用表的物理列名一致 |
+| 表选择 | ✅ PASS | SQL 正确引用了推荐表: `gold.fact_parking_violations` (G2 明细事实表，可接受但非最优), `gold.dim_violation_type` (G1 业务维表，仅维度属性，无事实指标) | — |
+| 指标 | ✅ PASS | 指标已注册: ['parking_violation_count'] | — |
 | SQL 可执行性 | ✅ PASS | SQL 语法正确，可执行 | — |
 | 结果一致性 | ✅ PASS | 与基线一致: 20 行, 2 列 (violation_description, violation_count) | — |
 | 层级合规 | ✅ PASS | 表层级使用正确: `gold.dim_violation_type` (G1 业务维表，仅维度属性，无事实指标), `gold.fact_parking_violations` (G2 明细事实表，可接受但非最优) | — |
@@ -249,14 +249,14 @@
 | 结果一致性 | ✅ PASS | 与基线一致: 20 行, 2 列 (violation_description, standard_fine_amount) | — |
 | 层级合规 | ✅ PASS | 表层级使用正确: `gold.dim_violation_type` (G1 业务维表，仅维度属性，无事实指标) | — |
 
-### q_zone_fare_per_trip — ⚠️ 警告
+### q_zone_fare_per_trip — ✅ 通过
 
 > **问题**: 哪个行政区平均每程车费最高？
 
 | 维度 | 结果 | 详情 | 修复建议 |
 |------|------|------|----------|
 | 表选择 | ✅ PASS | SQL 正确引用了推荐表: `gold.dws_zone_trip_summary` (G3 汇总表，最优) | — |
-| 指标 | ⚠️ WARN | SQL 返回值列在引用表中找不到: ['fare_per_trip'] | 确保指标已在 meta.metric_definitions 注册，且 SELECT 列名与引用表的物理列名一致 |
+| 指标 | ✅ PASS | 指标已注册: ['total_fare_amount', 'trip_count'] | — |
 | SQL 可执行性 | ✅ PASS | SQL 语法正确，可执行 | — |
 | 结果一致性 | ✅ PASS | 与基线一致: 10 行, 5 列 (borough, zone_name, trip_count, total_fare_amount, fare_per_trip) | — |
 | 层级合规 | ✅ PASS | 表层级使用正确: `gold.dws_zone_trip_summary` (G3 汇总表，最优) | — |
@@ -273,14 +273,14 @@
 | 结果一致性 | ✅ PASS | 与基线一致: 6 行, 2 列 (borough, crash_count) | — |
 | 层级合规 | ✅ PASS | 表层级使用正确: `gold.fact_crashes` (G2 明细事实表，可接受但非最优) | — |
 
-### q_parking_date_filtered — ⚠️ 警告
+### q_parking_date_filtered — ✅ 通过
 
 > **问题**: 2026 年 1 月每天的有效停车罚单量是多少？（排除异常日期）
 
 | 维度 | 结果 | 详情 | 修复建议 |
 |------|------|------|----------|
-| 表选择 | ✅ PASS | SQL 正确引用了推荐表: `gold.v_parking_violations_valid` (未知层级: gold), `gold.dim_date` (G0 公共维表，仅维度属性，无事实指标) | — |
-| 指标 | ⚠️ WARN | SQL 返回值列在引用表中找不到: ['violation_count'] | 确保指标已在 meta.metric_definitions 注册，且 SELECT 列名与引用表的物理列名一致 |
+| 表选择 | ✅ PASS | SQL 正确引用了推荐表: `gold.dim_date` (G0 公共维表，仅维度属性，无事实指标), `gold.v_parking_violations_valid` (未知层级: gold) | — |
+| 指标 | ✅ PASS | 指标已注册: ['parking_violation_count'] | — |
 | SQL 可执行性 | ✅ PASS | SQL 语法正确，可执行 | — |
 | 结果一致性 | ✅ PASS | 与基线一致: 31 行, 2 列 (date, violation_count) | — |
 | 层级合规 | ✅ PASS | 表层级使用正确: `gold.dim_date` (G0 公共维表，仅维度属性，无事实指标), `gold.v_parking_violations_valid` (未知层级: gold) | — |
@@ -302,10 +302,10 @@
 | 指标 | 数值 |
 |------|------|
 | 问题总数 | 22 |
-| 全部通过 | 19 |
-| 存在警告 | 3 |
+| 全部通过 | 22 |
+| 存在警告 | 0 |
 | 存在失败 | 0 |
-| 通过率 | 86.4% |
+| 通过率 | 100.0% |
 
 ## Schema 概况
 

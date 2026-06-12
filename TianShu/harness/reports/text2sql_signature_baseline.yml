@@ -1,4 +1,4 @@
-generated_at: '2026-06-10T21:35:48'
+generated_at: '2026-06-12T21:20:38'
 description: Text2SQL 结果签名基线。删除此文件可强制重新生成。
 signatures:
   q_daily_trip_count:

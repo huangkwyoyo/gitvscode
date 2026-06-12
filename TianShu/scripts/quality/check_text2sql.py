@@ -271,6 +271,48 @@ def extract_select_columns(sql: str) -> set[str]:
     return columns
 
 
+def extract_derived_aliases(sql: str) -> set[str]:
+    """
+    提取 SELECT 子句中由表达式派生出来的别名。
+
+    这些别名不要求出现在物理表字段中，例如：
+    - count(*) AS violation_count
+    - total_fare_amount / trip_count AS fare_per_trip
+    - CASE WHEN ... END AS rate
+    """
+    select_match = re.search(r'\bSELECT\b\s+(.+?)\s+\bFROM\b', sql, re.IGNORECASE | re.DOTALL)
+    if not select_match:
+        return set()
+
+    select_clause = re.sub(r'--.*$', '', select_match.group(1), flags=re.MULTILINE)
+    aliases: set[str] = set()
+
+    for part in _split_select_parts(select_clause):
+        part = part.strip()
+        as_match = re.search(r'\bAS\s+`?(\w+)`?\s*$', part, re.IGNORECASE)
+        if not as_match:
+            continue
+
+        alias = as_match.group(1).lower()
+        expression = part[:as_match.start()].strip()
+
+        # 简单列改名仍需谨慎；只有明显计算、聚合或 CASE 表达式才视为合法派生列。
+        is_simple_column = re.fullmatch(
+            r'`?[A-Za-z][A-Za-z0-9_]*`?(?:\.`?[A-Za-z][A-Za-z0-9_]*`?)?',
+            expression,
+        ) is not None
+        has_expression_marker = bool(re.search(
+            r'\b(count|sum|avg|min|max|case|when|then|else|coalesce|nullif)\b|[+\-*/()]',
+            expression,
+            re.IGNORECASE,
+        ))
+
+        if has_expression_marker and not is_simple_column:
+            aliases.add(alias)
+
+    return aliases
+
+
 def _split_select_parts(select_clause: str) -> list[str]:
     """按逗号分割 SELECT 子句，考虑括号嵌套"""
     parts: list[str] = []
@@ -401,6 +443,7 @@ def check_metrics(
     """
     metric_names_lower = {m.lower() for m in question.metric_names}
     select_columns = extract_select_columns(sql)
+    derived_aliases = extract_derived_aliases(sql)
     actual_tables = extract_referenced_tables(sql)
 
     # 收集 SQL 引用的表中所有可用列
@@ -426,6 +469,8 @@ def check_metrics(
             c for c in unknown_columns
             if c not in registered_metrics
         }
+        # 允许 SELECT 中显式计算出来的派生别名，例如 count(*) AS violation_count。
+        unknown_columns = unknown_columns - derived_aliases
         # 排除明确的聚合函数名和字面量
         unknown_columns = {
             c for c in unknown_columns

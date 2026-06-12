@@ -27,6 +27,7 @@ run_check() {
     local name="$1"
     shift
     printf "${YELLOW}[RUN]${NC} %s ... " "$name"
+    # 捕获输出到临时文件，失败时展示（引导式阻断——不让用户面对一面沉默的墙）
     local tmpout
     tmpout="$(mktemp)"
     if "$@" > "$tmpout" 2>&1; then
@@ -46,6 +47,10 @@ run_check() {
         fi
         rm -f "$tmpout"
         fail_count=$((fail_count + 1))
+        printf "${YELLOW}── 检查输出 ──────────────────────────────────────────${NC}\n"
+        cat "$tmpout"
+        printf "${YELLOW}────────────────────────────────────────────────────${NC}\n"
+        rm -f "$tmpout"
         return 1
     fi
 }
@@ -54,6 +59,40 @@ echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "  TianShu Pre-commit Gate"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+# 0. Schema 治理：检测 database_design 和 contracts 变更
+DESIGN_FILES=(
+    "docs/warehouse/database_design/"
+    "contracts/"
+    "AGENTS.md"
+    "CODEOWNERS"
+)
+schema_change_detected=false
+for pattern in "${DESIGN_FILES[@]}"; do
+    if git diff --cached --name-only | grep -q "^$pattern"; then
+        schema_change_detected=true
+        break
+    fi
+done
+
+if $schema_change_detected; then
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    printf "${YELLOW}[治理门禁] 检测到数据库设计文档或契约文件变更${NC}\n"
+    echo ""
+    echo "以下文件属于受保护路径，变更需人工审批："
+    git diff --cached --name-only | grep -E "(docs/warehouse/database_design/|contracts/|AGENTS.md|CODEOWNERS)" | while read f; do
+        echo "  - $f"
+    done
+    echo ""
+    echo "本地 pre-commit 不做交互式人工确认，避免卡住 CI、Codex、Claude Code 或自动化脚本。"
+    echo "请在 PR 层完成："
+    echo "  1. CODEOWNERS 要求的 @data-architect 审批"
+    echo "  2. run_all_checks.py 全量门禁"
+    echo "  3. database_design 变更说明和影响范围说明"
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+fi
 
 # 1. Memory Gate (不依赖 DB)
 run_check "Memory Gate" python scripts/quality/check_memory_update.py
