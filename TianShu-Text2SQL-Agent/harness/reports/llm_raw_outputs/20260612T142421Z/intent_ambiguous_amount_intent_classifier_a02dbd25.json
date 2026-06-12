@@ -1,0 +1,41 @@
+{
+  "question_id": "intent_ambiguous_amount",
+  "question": "2026年1月每天金额是多少？",
+  "stage": "intent",
+  "prompt_name": "intent_classifier",
+  "model_name": "deepseek",
+  "raw_output": "{\n  \"domain\": null,\n  \"intent_type\": \"trend\",\n  \"metrics\": [],\n  \"time_range\": {\n    \"type\": \"absolute\",\n    \"start\": \"2026-01-01\",\n    \"end\": \"2026-01-31\",\n    \"raw_expression\": \"2026年1月\"\n  },\n  \"dimensions\": [\"date\"],\n  \"filters\": [],\n  \"needs_clarification\": true,\n  \"clarification_reason\": \"金额存在多种口径，可能指车费收入、标准罚款金额或 TIF 支付金额。\",\n  \"confidence\": 1.0,\n  \"raw_question\": \"2026年1月每天金额是多少？\",\n  \"human_review\": {\n    \"requires_review\": false,\n    \"flagged_fields\": [\n      {\n        \"field\": \"metrics\",\n        \"reason\": \"“金额”可能指车费收入、标准罚款金额或 TIF 支付金额，无法确定具体指标\"\n      }\n    ],\n    \"reason\": null\n  }\n}",
+  "parsed_output": {
+    "domain": null,
+    "intent_type": "trend",
+    "metrics": [],
+    "time_range": {
+      "type": "absolute",
+      "start": "2026-01-01",
+      "end": "2026-01-31",
+      "raw_expression": "2026年1月"
+    },
+    "dimensions": [
+      "date"
+    ],
+    "filters": [],
+    "needs_clarification": true,
+    "clarification_reason": "金额存在多种口径，可能指车费收入、标准罚款金额或 TIF 支付金额。",
+    "confidence": 1.0,
+    "raw_question": "2026年1月每天金额是多少？",
+    "human_review": {
+      "requires_review": false,
+      "flagged_fields": [
+        {
+          "field": "metrics",
+          "reason": "“金额”可能指车费收入、标准罚款金额或 TIF 支付金额，无法确定具体指标"
+        }
+      ],
+      "reason": null
+    }
+  },
+  "parse_success": true,
+  "validation_success": true,
+  "error_message": null,
+  "timestamp": "2026-06-12T14:25:08.378079+00:00"
+}

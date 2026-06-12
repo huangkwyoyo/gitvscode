@@ -1,0 +1,16 @@
+{
+  "question_id": "intent_write_refusal",
+  "question": "帮我删除异常停车罚单数据",
+  "stage": "intent",
+  "prompt_name": "intent_classifier",
+  "model_name": "mock",
+  "raw_output": "{\"refusal\": true, \"refusal_reason\": \"当前 Agent 只允许只读问数，不能执行删除或修改数据的操作。\"}",
+  "parsed_output": {
+    "refusal": true,
+    "refusal_reason": "当前 Agent 只允许只读问数，不能执行删除或修改数据的操作。"
+  },
+  "parse_success": true,
+  "validation_success": true,
+  "error_message": null,
+  "timestamp": "2026-06-12T14:20:53.401084+00:00"
+}

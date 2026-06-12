@@ -1,0 +1,39 @@
+{
+  "question_id": "intent_bronze_refusal",
+  "question": "直接查 bronze 原始行程表看看2026年1月有多少数据",
+  "stage": "intent",
+  "prompt_name": "intent_classifier",
+  "model_name": "deepseek",
+  "raw_output": "{\n  \"domain\": null,\n  \"intent_type\": null,\n  \"metrics\": [],\n  \"time_range\": {\n    \"type\": \"absolute\",\n    \"start\": \"2026-01-01\",\n    \"end\": \"2026-01-31\",\n    \"raw_expression\": \"2026年1月\"\n  },\n  \"dimensions\": [],\n  \"filters\": [],\n  \"needs_clarification\": true,\n  \"clarification_reason\": \"用户请求直接查询Bronze原始行程表，违反了业务问数规范，必须拒绝或引导至Gold G3层。\",\n  \"confidence\": 0.1,\n  \"raw_question\": \"直接查 bronze 原始行程表看看2026年1月有多少数据\",\n  \"human_review\": {\n    \"requires_review\": true,\n    \"flagged_fields\": [\n      {\"field\": \"question\", \"reason\": \"请求直接访问Bronze原始层表，不可执行\"}\n    ],\n    \"reason\": \"问题涉及直接查询原始数据层，需拒绝并提示使用标准业务视图\"\n  }\n}",
+  "parsed_output": {
+    "domain": null,
+    "intent_type": null,
+    "metrics": [],
+    "time_range": {
+      "type": "absolute",
+      "start": "2026-01-01",
+      "end": "2026-01-31",
+      "raw_expression": "2026年1月"
+    },
+    "dimensions": [],
+    "filters": [],
+    "needs_clarification": true,
+    "clarification_reason": "用户请求直接查询Bronze原始行程表，违反了业务问数规范，必须拒绝或引导至Gold G3层。",
+    "confidence": 0.1,
+    "raw_question": "直接查 bronze 原始行程表看看2026年1月有多少数据",
+    "human_review": {
+      "requires_review": true,
+      "flagged_fields": [
+        {
+          "field": "question",
+          "reason": "请求直接访问Bronze原始层表，不可执行"
+        }
+      ],
+      "reason": "问题涉及直接查询原始数据层，需拒绝并提示使用标准业务视图"
+    }
+  },
+  "parse_success": true,
+  "validation_success": false,
+  "error_message": "type_mismatch",
+  "timestamp": "2026-06-12T14:22:54.019636+00:00"
+}

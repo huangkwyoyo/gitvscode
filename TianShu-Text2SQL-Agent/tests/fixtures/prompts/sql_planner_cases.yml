@@ -1,0 +1,147 @@
+cases:
+  - id: plan_trip_daily_2026_01
+    question: "2026年1月每天有多少行程？"
+    expected_type: answer
+    confidence_min: 0.70
+    confidence_max: 1.00
+    expected_safety_status: pass
+    expected_tables:
+      - gold.dws_daily_trip_summary
+      - gold.dim_date
+    expected_fields:
+      - trip_count
+      - date
+    input_intent:
+      domain: traffic
+      intent_type: trend
+      metrics:
+        - trip_count
+      time_range:
+        type: absolute
+        start: "2026-01-01"
+        end: "2026-01-31"
+        raw_expression: "2026年1月"
+      dimensions:
+        - date
+      filters: []
+      needs_clarification: false
+      clarification_reason: null
+      confidence: 0.95
+      raw_question: "2026年1月每天有多少行程？"
+    expected_plan:
+      strategy: g3_direct
+      primary_table: gold.dws_daily_trip_summary
+      joins:
+        - table: gold.dim_date
+          "on": "gold.dim_date.date = gold.dws_daily_trip_summary.trip_date"
+          type: INNER
+      where_clauses:
+        - "gold.dim_date.date BETWEEN DATE '2026-01-01' AND DATE '2026-01-31'"
+      group_by:
+        - gold.dim_date.date
+      order_by:
+        - gold.dim_date.date
+      aggregations:
+        - expr: SUM(trip_count)
+          alias: trip_count
+      limit: null
+      downgrade_reason: null
+      confidence: 0.95
+
+  - id: plan_parking_daily_2026_02
+    question: "2026年2月每天有多少停车违章？"
+    expected_type: answer
+    confidence_min: 0.70
+    confidence_max: 1.00
+    expected_safety_status: pass
+    expected_tables:
+      - gold.dws_daily_parking_summary
+      - gold.dim_date
+    expected_fields:
+      - violation_count
+      - date
+    input_intent:
+      domain: violation
+      intent_type: trend
+      metrics:
+        - parking_violation_count
+      time_range:
+        type: absolute
+        start: "2026-02-01"
+        end: "2026-02-28"
+        raw_expression: "2026年2月"
+      dimensions:
+        - date
+      filters: []
+      needs_clarification: false
+      clarification_reason: null
+      confidence: 0.95
+      raw_question: "2026年2月每天有多少停车违章？"
+    expected_plan:
+      strategy: g3_direct
+      primary_table: gold.dws_daily_parking_summary
+      joins:
+        - table: gold.dim_date
+          "on": "gold.dim_date.date = gold.dws_daily_parking_summary.issue_date"
+          type: INNER
+      where_clauses:
+        - "gold.dim_date.date BETWEEN DATE '2026-02-01' AND DATE '2026-02-28'"
+      group_by:
+        - gold.dim_date.date
+      order_by:
+        - gold.dim_date.date
+      aggregations:
+        - expr: SUM(violation_count)
+          alias: parking_violation_count
+      limit: null
+      downgrade_reason: null
+      confidence: 0.95
+
+  - id: plan_crash_daily_2026_03
+    question: "2026年3月每天发生多少事故？"
+    expected_type: answer
+    confidence_min: 0.70
+    confidence_max: 1.00
+    expected_safety_status: pass
+    expected_tables:
+      - gold.dws_daily_crash_summary
+      - gold.dim_date
+    expected_fields:
+      - crash_count
+      - date
+    input_intent:
+      domain: safety
+      intent_type: trend
+      metrics:
+        - crash_count
+      time_range:
+        type: absolute
+        start: "2026-03-01"
+        end: "2026-03-31"
+        raw_expression: "2026年3月"
+      dimensions:
+        - date
+      filters: []
+      needs_clarification: false
+      clarification_reason: null
+      confidence: 0.95
+      raw_question: "2026年3月每天发生多少事故？"
+    expected_plan:
+      strategy: g3_direct
+      primary_table: gold.dws_daily_crash_summary
+      joins:
+        - table: gold.dim_date
+          "on": "gold.dim_date.date = gold.dws_daily_crash_summary.crash_date"
+          type: INNER
+      where_clauses:
+        - "gold.dim_date.date BETWEEN DATE '2026-03-01' AND DATE '2026-03-31'"
+      group_by:
+        - gold.dim_date.date
+      order_by:
+        - gold.dim_date.date
+      aggregations:
+        - expr: SUM(crash_count)
+          alias: crash_count
+      limit: null
+      downgrade_reason: null
+      confidence: 0.95

@@ -3,32 +3,34 @@
 # 控制 Agent 的行为、模型选择和安全设置。
 
 # ── 模型配置 ──
+# provider 可选: anthropic / deepseek / openai
+# DeepSeek 推荐模型: deepseek-v4-pro（推理）/ deepseek-v4-flash（轻量）
 model:
   # 意图分类模型（轻量即可，结构化输出）
   intent_classifier:
-    provider: "anthropic"
-    model: "claude-haiku-4-5-20251001"
+    provider: "deepseek"
+    model: "deepseek-v4-flash"
     temperature: 0.0
     max_tokens: 500
 
   # SQL 规划模型（中等推理能力）
   sql_planner:
-    provider: "anthropic"
-    model: "claude-sonnet-4-6"
+    provider: "deepseek"
+    model: "deepseek-v4-pro"
     temperature: 0.0
     max_tokens: 1000
 
   # SQL 生成模型（需要强 SQL 语法知识）
   sql_generator:
-    provider: "anthropic"
-    model: "claude-sonnet-4-6"
+    provider: "deepseek"
+    model: "deepseek-v4-pro"
     temperature: 0.0
     max_tokens: 500
 
   # 结果解释模型（自然语言生成）
   explainer:
-    provider: "anthropic"
-    model: "claude-haiku-4-5-20251001"
+    provider: "deepseek"
+    model: "deepseek-v4-flash"
     temperature: 0.3
     max_tokens: 800
 

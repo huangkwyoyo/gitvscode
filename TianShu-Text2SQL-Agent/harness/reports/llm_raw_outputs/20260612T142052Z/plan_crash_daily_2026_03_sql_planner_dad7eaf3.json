@@ -1,0 +1,41 @@
+{
+  "question_id": "plan_crash_daily_2026_03",
+  "question": "2026年3月每天发生多少事故？",
+  "stage": "plan",
+  "prompt_name": "sql_planner",
+  "model_name": "mock",
+  "raw_output": "{\"strategy\": \"g3_direct\", \"primary_table\": \"gold.dws_daily_crash_summary\", \"joins\": [{\"table\": \"gold.dim_date\", \"on\": \"gold.dim_date.date = gold.dws_daily_crash_summary.crash_date\", \"type\": \"INNER\"}], \"where_clauses\": [\"gold.dim_date.date BETWEEN DATE '2026-03-01' AND DATE '2026-03-31'\"], \"group_by\": [\"gold.dim_date.date\"], \"order_by\": [\"gold.dim_date.date\"], \"aggregations\": [{\"expr\": \"SUM(crash_count)\", \"alias\": \"crash_count\"}], \"limit\": null, \"downgrade_reason\": null, \"confidence\": 0.95}",
+  "parsed_output": {
+    "strategy": "g3_direct",
+    "primary_table": "gold.dws_daily_crash_summary",
+    "joins": [
+      {
+        "table": "gold.dim_date",
+        "on": "gold.dim_date.date = gold.dws_daily_crash_summary.crash_date",
+        "type": "INNER"
+      }
+    ],
+    "where_clauses": [
+      "gold.dim_date.date BETWEEN DATE '2026-03-01' AND DATE '2026-03-31'"
+    ],
+    "group_by": [
+      "gold.dim_date.date"
+    ],
+    "order_by": [
+      "gold.dim_date.date"
+    ],
+    "aggregations": [
+      {
+        "expr": "SUM(crash_count)",
+        "alias": "crash_count"
+      }
+    ],
+    "limit": null,
+    "downgrade_reason": null,
+    "confidence": 0.95
+  },
+  "parse_success": true,
+  "validation_success": true,
+  "error_message": null,
+  "timestamp": "2026-06-12T14:20:52.842893+00:00"
+}

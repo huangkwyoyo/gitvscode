@@ -1,0 +1,41 @@
+{
+  "question_id": "plan_parking_daily_2026_02",
+  "question": "2026年2月每天有多少停车违章？",
+  "stage": "plan",
+  "prompt_name": "sql_planner",
+  "model_name": "mock",
+  "raw_output": "{\"strategy\": \"g3_direct\", \"primary_table\": \"gold.dws_daily_parking_summary\", \"joins\": [{\"table\": \"gold.dim_date\", \"on\": \"gold.dim_date.date = gold.dws_daily_parking_summary.issue_date\", \"type\": \"INNER\"}], \"where_clauses\": [\"gold.dim_date.date BETWEEN DATE '2026-02-01' AND DATE '2026-02-28'\"], \"group_by\": [\"gold.dim_date.date\"], \"order_by\": [\"gold.dim_date.date\"], \"aggregations\": [{\"expr\": \"SUM(violation_count)\", \"alias\": \"parking_violation_count\"}], \"limit\": null, \"downgrade_reason\": null, \"confidence\": 0.95}",
+  "parsed_output": {
+    "strategy": "g3_direct",
+    "primary_table": "gold.dws_daily_parking_summary",
+    "joins": [
+      {
+        "table": "gold.dim_date",
+        "on": "gold.dim_date.date = gold.dws_daily_parking_summary.issue_date",
+        "type": "INNER"
+      }
+    ],
+    "where_clauses": [
+      "gold.dim_date.date BETWEEN DATE '2026-02-01' AND DATE '2026-02-28'"
+    ],
+    "group_by": [
+      "gold.dim_date.date"
+    ],
+    "order_by": [
+      "gold.dim_date.date"
+    ],
+    "aggregations": [
+      {
+        "expr": "SUM(violation_count)",
+        "alias": "parking_violation_count"
+      }
+    ],
+    "limit": null,
+    "downgrade_reason": null,
+    "confidence": 0.95
+  },
+  "parse_success": true,
+  "validation_success": true,
+  "error_message": null,
+  "timestamp": "2026-06-12T14:27:36.951109+00:00"
+}

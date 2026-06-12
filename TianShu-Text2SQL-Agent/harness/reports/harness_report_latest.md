@@ -1,6 +1,6 @@
 # TianShu Text2SQL Agent Harness 报告
 
-生成时间：2026-06-11 23:29:51
+生成时间：2026-06-12 22:57:47
 
 ## 汇总
 
@@ -14,7 +14,7 @@
 
 ### ✅ SQL 只读安全门禁
 - 状态: PASS
-- 耗时: 0.07s
+- 耗时: 0.08s
 - 退出码: 0
 
 ```
@@ -30,7 +30,7 @@ SQL 只读安全门禁
 
 ### ✅ IR 数据结构完整性
 - 状态: PASS
-- 耗时: 0.07s
+- 耗时: 0.08s
 - 退出码: 0
 
 ```
@@ -61,11 +61,19 @@ IR 三层数据结构完整性门禁
          缺少字段: ['sql']
   [WARN] ambiguous_questions.yml / ambiguous_unregistered_metric
          缺少字段: ['sql']
+  [WARN] e2e_cases.yml 结构
+         问题列表为空
   [WARN] regression_cases.yml / regression_trip_daily_2026_01
          缺少字段: ['sql']
   [WARN] regression_cases.yml / regression_parking_daily_2026_02
          缺少字段: ['sql']
   [WARN] regression_cases.yml / regression_crash_daily_2026_03
+         缺少字段: ['sql']
+  [WARN] regression_cases.yml / regression_refusal_write_delete
+         缺少字段: ['sql']
+  [WARN] regression_cases.yml / regression_refusal_bronze_direct
+         缺少字段: ['sql']
+  [WARN] regression_cases.yml / regression_refusal_update_data
          缺少字段: ['sql']
   [PASS] standard_questions.yml / standard_trip_daily_2026_01
          '2026年1月每天有多少行程？...'
@@ -100,11 +108,11 @@ IR 三层数据结构完整性门禁
   [PASS] 可回答的问题域定义
          已定义 6 个问题域: ['traffic', 'violation', 'safety', 'supply', 'asset', 'spatial']
   [PASS] 必须反问的场景数
-         已定义 5 种反问场景: {'missing_dimension', 'ambiguous_amount', 'unregistered_metric', 'ambiguous_region', 'fuzzy_time'}
+         已定义 5 种反问场景: {'unregistered_metric', 'missing_dimension', 'ambiguous_amount', 'fuzzy_time', 'ambiguous_region'}
   [PASS] 反问模板完备性
          全部反问规则都有模板
   [PASS] 必须拒绝的场景数
-         已定义 4 种拒绝场景: {'metric_invention', 'out_of_scope', 'bronze_direct', 'write_operation'}
+         已定义 4 种拒绝场景: {'metric_invention', 'write_operation', 'bronze_direct', 'out_of_scope'}
   [PASS] 拒绝模板完备性
          全部拒绝规则都有模板
 
@@ -147,7 +155,7 @@ IR 三层数据结构完整性门禁
 
 ### ✅ 指标注册合规门禁
 - 状态: PASS
-- 耗时: 0.06s
+- 耗时: 0.07s
 - 退出码: 0
 
 ```
@@ -156,7 +164,7 @@ IR 三层数据结构完整性门禁
 已注册指标数: 10
 ============================================================
 
-── 逐题检查 (12 题) ──
+── 逐题检查 (15 题) ──
   [PASS] ambiguous_questions.yml / ambiguous_fuzzy_time_trip
          纯维度/列表查询（metric_names 为空），无需指标检查
   [PASS] ambiguous_questions.yml / ambiguous_amount
@@ -168,6 +176,12 @@ IR 三层数据结构完整性门禁
   [PASS] regression_cases.yml / regression_parking_daily_2026_02
          纯维度/列表查询（metric_names 为空），无需指标检查
   [PASS] regression_cases.yml / regression_crash_daily_2026_03
+         纯维度/列表查询（metric_names 为空），无需指标检查
+  [PASS] regression_cases.yml / regression_refusal_write_delete
+         纯维度/列表查询（metric_names 为空），无需指标检查
+  [PASS] regression_cases.yml / regression_refusal_bronze_direct
+         纯维度/列表查询（metric_names 为空），无需指标检查
+  [PASS] regression_cases.yml / regression_refusal_update_data
          纯维度/列表查询（metric_names 为空），无需指标检查
   [PASS] standard_questions.yml / standard_trip_daily_2026_01
          指标全部已注册: ['trip_count']
@@ -182,7 +196,7 @@ IR 三层数据结构完整性门禁
   [PASS] unsafe_questions.yml / unsafe_bronze_direct
          纯维度/列表查询（metric_names 为空），无需指标检查
 
-  检查完成 — 通过: 12, 失败: 0, 跳过: 0
+  检查完成 — 通过: 15, 失败: 0, 跳过: 0
 
 [OK] 指标注册合规检查通过。
 

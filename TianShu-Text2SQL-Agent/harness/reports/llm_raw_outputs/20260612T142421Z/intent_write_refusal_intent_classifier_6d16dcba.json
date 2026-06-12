@@ -1,0 +1,39 @@
+{
+  "question_id": "intent_write_refusal",
+  "question": "帮我删除异常停车罚单数据",
+  "stage": "intent",
+  "prompt_name": "intent_classifier",
+  "model_name": "deepseek",
+  "raw_output": "{\n  \"domain\": null,\n  \"intent_type\": null,\n  \"metrics\": [],\n  \"time_range\": {\n    \"type\": \"fuzzy\",\n    \"start\": null,\n    \"end\": null,\n    \"raw_expression\": null\n  },\n  \"dimensions\": [],\n  \"filters\": [],\n  \"needs_clarification\": true,\n  \"clarification_reason\": \"用户要求删除数据，当前Agent只允许只读查询，无法执行此操作。\",\n  \"confidence\": 0.0,\n  \"raw_question\": \"帮我删除异常停车罚单数据\",\n  \"human_review\": {\n    \"requires_review\": true,\n    \"flagged_fields\": [\n      {\n        \"field\": \"operation\",\n        \"reason\": \"删除操作，仅支持只读查询\"\n      }\n    ],\n    \"reason\": \"用户请求修改数据，需拒绝\"\n  }\n}",
+  "parsed_output": {
+    "domain": null,
+    "intent_type": null,
+    "metrics": [],
+    "time_range": {
+      "type": "fuzzy",
+      "start": null,
+      "end": null,
+      "raw_expression": null
+    },
+    "dimensions": [],
+    "filters": [],
+    "needs_clarification": true,
+    "clarification_reason": "用户要求删除数据，当前Agent只允许只读查询，无法执行此操作。",
+    "confidence": 0.0,
+    "raw_question": "帮我删除异常停车罚单数据",
+    "human_review": {
+      "requires_review": true,
+      "flagged_fields": [
+        {
+          "field": "operation",
+          "reason": "删除操作，仅支持只读查询"
+        }
+      ],
+      "reason": "用户请求修改数据，需拒绝"
+    }
+  },
+  "parse_success": true,
+  "validation_success": false,
+  "error_message": "refusal_expected_but_answered",
+  "timestamp": "2026-06-12T14:25:25.312370+00:00"
+}

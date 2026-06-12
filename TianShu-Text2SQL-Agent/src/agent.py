@@ -42,6 +42,9 @@ from .ambiguity import detect_ambiguity, load_clarification_rules
 from .sql_gen import sql_plan_to_sql, validate_sql_safety
 from .executor import execute_sql
 from .explainer import explain_result
+from .llm import LLMClient, LLMRequest, PromptLoader
+from .llm_adapter import RefusalDetected
+from .llm_pipeline import extract_json_object, question_intent_from_dict, sql_plan_from_dict
 
 
 def _setup_console_encoding() -> None:
@@ -76,11 +79,22 @@ class Text2SQLAgent:
         self,
         agent_config_path: str = "config/agent_config.yml",
         tianshu_config_path: str = "config/tianshu_target.yml",
+        mode: str = "rule",
+        llm_client: Optional[LLMClient] = None,
+        prompt_loader: Optional[PromptLoader] = None,
     ):
         self._agent_config: dict[str, Any] = {}
         self._context: Optional[AgentContext] = None
         self._resolver: Optional[TianShuResolver] = None
         self._clarification_rules: list = []
+        self._mode = mode
+        self._llm_client = llm_client
+        self._prompt_loader = prompt_loader or PromptLoader()
+
+        if self._mode not in {"rule", "llm"}:
+            raise ValueError("mode 只能是 'rule' 或 'llm'")
+        if self._mode == "llm" and self._llm_client is None:
+            raise ValueError("LLM 模式必须传入 llm_client")
 
         # 加载配置
         self._load_agent_config(agent_config_path)
@@ -141,9 +155,15 @@ class Text2SQLAgent:
             response.trace.append(f"         [REFUSE] {response.refusal_reason}")
             return response
 
-        # ── Step 1: 意图分类（TODO: 接入 LLM）──
+        # ── Step 1: 意图分类 ──
         response.trace.append("[STEP 1] 意图分类...")
-        intent = self._classify_intent(question)
+        try:
+            intent = self._classify_intent(question)
+        except RefusalDetected as exc:
+            response.refusal = True
+            response.refusal_reason = exc.refusal_reason
+            response.trace.append(f"         [REFUSE] {exc.refusal_reason}")
+            return response
         response.intent = intent
         response.trace.append(f"         领域={intent.domain}, 指标={intent.metrics}, 置信度={intent.confidence:.2f}")
 
@@ -239,6 +259,47 @@ class Text2SQLAgent:
         return response
 
     def _classify_intent(self, question: str) -> QuestionIntent:
+        """根据当前模式执行意图分类"""
+        if self._mode == "llm":
+            return self._classify_intent_llm(question)
+        return self._classify_intent_rule(question)
+
+    def _classify_intent_llm(self, question: str) -> QuestionIntent:
+        """使用 LLM 生成 QuestionIntent（含 refusal 检测）。
+
+        LLM 可能返回两种格式：
+            - 格式 A（QuestionIntent）：正常回答或需反问
+            - 格式 B（Refusal）：拒绝回答（写操作 / Bronze 直查等）
+
+        Returns:
+            校验通过的 QuestionIntent 对象。
+
+        Raises:
+            RefusalDetected: LLM 检测到拒绝回答的场景。
+        """
+        assert self._llm_client is not None
+        response = self._llm_client.complete(
+            LLMRequest(
+                task="intent_classifier",
+                prompt=self._render_llm_prompt(
+                    "intent_classifier",
+                    {"question": question, "context": self._context_payload()},
+                ),
+                metadata={"question": question},
+            )
+        )
+        data = extract_json_object(response.content)
+
+        # 检测 refusal 输出 —— 拒绝类问题不返回 QuestionIntent
+        if data.get("refusal") is True and isinstance(data.get("refusal_reason"), str):
+            raise RefusalDetected(
+                refusal_reason=data["refusal_reason"],
+                question=question,
+            )
+
+        return question_intent_from_dict(data)
+
+    def _classify_intent_rule(self, question: str) -> QuestionIntent:
         """
         规则版意图分类。
 
@@ -288,6 +349,27 @@ class Text2SQLAgent:
         )
 
     def _plan_query(self, intent: QuestionIntent) -> SQLPlan:
+        """根据当前模式执行 SQL 规划"""
+        if self._mode == "llm":
+            return self._plan_query_llm(intent)
+        return self._plan_query_rule(intent)
+
+    def _plan_query_llm(self, intent: QuestionIntent) -> SQLPlan:
+        """使用 LLM 生成 SQLPlan"""
+        assert self._llm_client is not None
+        response = self._llm_client.complete(
+            LLMRequest(
+                task="sql_planner",
+                prompt=self._render_llm_prompt(
+                    "sql_planner",
+                    {"intent": intent.to_dict(), "context": self._context_payload()},
+                ),
+                metadata={"metrics": intent.metrics},
+            )
+        )
+        return sql_plan_from_dict(extract_json_object(response.content))
+
+    def _plan_query_rule(self, intent: QuestionIntent) -> SQLPlan:
         """
         规则版查询规划。
 
@@ -341,6 +423,35 @@ class Text2SQLAgent:
             aggregations=[Aggregation(expr=f"SUM({value_expr})", alias=metric)],
             confidence=0.95,
         )
+
+    def _render_llm_prompt(self, task: str, payload: dict[str, Any]) -> str:
+        """渲染 LLM 调用 Prompt"""
+        template = self._prompt_loader.load(task)
+        import json
+        return (
+            f"{template}\n\n"
+            "## 本次输入\n"
+            "```json\n"
+            f"{json.dumps(payload, ensure_ascii=False, indent=2)}\n"
+            "```"
+        )
+
+    def _context_payload(self) -> dict[str, Any]:
+        """构造供 Prompt 使用的轻量上下文"""
+        if not self._context:
+            return {}
+        return {
+            "available_tables": [
+                f"{table.schema}.{table.name}" for table in self._context.available_tables
+            ],
+            "available_metrics": [
+                metric.name for metric in self._context.available_metrics
+            ],
+            "join_whitelist": [
+                [left, right] for left, right in self._context.join_whitelist
+            ],
+            "forbidden_sql_keywords": self._context.forbidden_sql_keywords,
+        }
 
     def _is_write_request(self, question: str) -> bool:
         """识别明显写操作请求"""

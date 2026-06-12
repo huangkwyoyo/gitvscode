@@ -1,0 +1,33 @@
+{
+  "question_id": "intent_parking_daily_2026_02",
+  "question": "2026年2月每天有多少停车违章？",
+  "stage": "intent",
+  "prompt_name": "intent_classifier",
+  "model_name": "mock",
+  "raw_output": "{\"domain\": \"violation\", \"intent_type\": \"trend\", \"metrics\": [\"parking_violation_count\"], \"time_range\": {\"type\": \"absolute\", \"start\": \"2026-02-01\", \"end\": \"2026-02-28\", \"raw_expression\": \"2026年2月\"}, \"dimensions\": [\"date\"], \"filters\": [], \"needs_clarification\": false, \"clarification_reason\": null, \"confidence\": 0.95, \"raw_question\": \"2026年2月每天有多少停车违章？\"}",
+  "parsed_output": {
+    "domain": "violation",
+    "intent_type": "trend",
+    "metrics": [
+      "parking_violation_count"
+    ],
+    "time_range": {
+      "type": "absolute",
+      "start": "2026-02-01",
+      "end": "2026-02-28",
+      "raw_expression": "2026年2月"
+    },
+    "dimensions": [
+      "date"
+    ],
+    "filters": [],
+    "needs_clarification": false,
+    "clarification_reason": null,
+    "confidence": 0.95,
+    "raw_question": "2026年2月每天有多少停车违章？"
+  },
+  "parse_success": true,
+  "validation_success": true,
+  "error_message": null,
+  "timestamp": "2026-06-12T14:37:25.358438+00:00"
+}

@@ -1,0 +1,13 @@
+{
+  "question_id": "intent_fuzzy_time_trip",
+  "question": "最近每天有多少行程？",
+  "stage": "intent",
+  "prompt_name": "intent_classifier",
+  "model_name": "mock",
+  "raw_output": "",
+  "parsed_output": {},
+  "parse_success": false,
+  "validation_success": false,
+  "error_message": "'未注册 Mock LLM 响应: intent_classifier/intent_fuzzy_time_trip'",
+  "timestamp": "2026-06-12T14:20:20.433258+00:00"
+}

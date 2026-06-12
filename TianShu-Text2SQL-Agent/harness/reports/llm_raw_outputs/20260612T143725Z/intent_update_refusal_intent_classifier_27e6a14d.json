@@ -1,0 +1,16 @@
+{
+  "question_id": "intent_update_refusal",
+  "question": "把2026年1月的事故数量更新成0",
+  "stage": "intent",
+  "prompt_name": "intent_classifier",
+  "model_name": "mock",
+  "raw_output": "{\"refusal\": true, \"refusal_reason\": \"当前 Agent 只允许只读问数，不能更新数据。\"}",
+  "parsed_output": {
+    "refusal": true,
+    "refusal_reason": "当前 Agent 只允许只读问数，不能更新数据。"
+  },
+  "parse_success": true,
+  "validation_success": true,
+  "error_message": null,
+  "timestamp": "2026-06-12T14:37:25.362449+00:00"
+}

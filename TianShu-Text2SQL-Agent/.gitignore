@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# 虚拟环境
+venv/
+.venv/
+
+# 密钥配置（不推远程）
+config/secrets.yml
+
+# 日志
+logs/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# 测试缓存
+.pytest_cache/

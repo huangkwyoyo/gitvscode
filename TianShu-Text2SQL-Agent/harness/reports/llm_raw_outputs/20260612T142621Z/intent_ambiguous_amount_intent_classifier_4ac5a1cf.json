@@ -1,0 +1,31 @@
+{
+  "question_id": "intent_ambiguous_amount",
+  "question": "2026年1月每天金额是多少？",
+  "stage": "intent",
+  "prompt_name": "intent_classifier",
+  "model_name": "mock",
+  "raw_output": "{\"domain\": null, \"intent_type\": \"trend\", \"metrics\": [], \"time_range\": {\"type\": \"absolute\", \"start\": \"2026-01-01\", \"end\": \"2026-01-31\", \"raw_expression\": \"2026年1月\"}, \"dimensions\": [\"date\"], \"filters\": [], \"needs_clarification\": true, \"clarification_reason\": \"金额存在多种口径，可能指车费收入、标准罚款金额或 TIF 支付金额。\", \"confidence\": 1.0, \"raw_question\": \"2026年1月每天金额是多少？\"}",
+  "parsed_output": {
+    "domain": null,
+    "intent_type": "trend",
+    "metrics": [],
+    "time_range": {
+      "type": "absolute",
+      "start": "2026-01-01",
+      "end": "2026-01-31",
+      "raw_expression": "2026年1月"
+    },
+    "dimensions": [
+      "date"
+    ],
+    "filters": [],
+    "needs_clarification": true,
+    "clarification_reason": "金额存在多种口径，可能指车费收入、标准罚款金额或 TIF 支付金额。",
+    "confidence": 1.0,
+    "raw_question": "2026年1月每天金额是多少？"
+  },
+  "parse_success": true,
+  "validation_success": true,
+  "error_message": null,
+  "timestamp": "2026-06-12T14:26:21.324774+00:00"
+}

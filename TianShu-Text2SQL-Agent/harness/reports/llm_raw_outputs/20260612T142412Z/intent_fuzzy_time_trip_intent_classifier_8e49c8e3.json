@@ -1,0 +1,33 @@
+{
+  "question_id": "intent_fuzzy_time_trip",
+  "question": "最近每天有多少行程？",
+  "stage": "intent",
+  "prompt_name": "intent_classifier",
+  "model_name": "mock",
+  "raw_output": "{\"domain\": \"traffic\", \"intent_type\": \"trend\", \"metrics\": [\"trip_count\"], \"time_range\": {\"type\": \"fuzzy\", \"start\": null, \"end\": null, \"raw_expression\": \"最近\"}, \"dimensions\": [\"date\"], \"filters\": [], \"needs_clarification\": true, \"clarification_reason\": \"时间范围不明确，需要用户说明最近指哪一段日期。\", \"confidence\": 0.9, \"raw_question\": \"最近每天有多少行程？\"}",
+  "parsed_output": {
+    "domain": "traffic",
+    "intent_type": "trend",
+    "metrics": [
+      "trip_count"
+    ],
+    "time_range": {
+      "type": "fuzzy",
+      "start": null,
+      "end": null,
+      "raw_expression": "最近"
+    },
+    "dimensions": [
+      "date"
+    ],
+    "filters": [],
+    "needs_clarification": true,
+    "clarification_reason": "时间范围不明确，需要用户说明最近指哪一段日期。",
+    "confidence": 0.9,
+    "raw_question": "最近每天有多少行程？"
+  },
+  "parse_success": true,
+  "validation_success": true,
+  "error_message": null,
+  "timestamp": "2026-06-12T14:24:12.485990+00:00"
+}

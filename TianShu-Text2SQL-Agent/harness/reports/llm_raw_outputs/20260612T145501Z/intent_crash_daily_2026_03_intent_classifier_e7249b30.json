@@ -1,0 +1,33 @@
+{
+  "question_id": "intent_crash_daily_2026_03",
+  "question": "2026年3月每天发生多少事故？",
+  "stage": "intent",
+  "prompt_name": "intent_classifier",
+  "model_name": "mock",
+  "raw_output": "{\"domain\": \"safety\", \"intent_type\": \"trend\", \"metrics\": [\"crash_count\"], \"time_range\": {\"type\": \"absolute\", \"start\": \"2026-03-01\", \"end\": \"2026-03-31\", \"raw_expression\": \"2026年3月\"}, \"dimensions\": [\"date\"], \"filters\": [], \"needs_clarification\": false, \"clarification_reason\": null, \"confidence\": 0.95, \"raw_question\": \"2026年3月每天发生多少事故？\"}",
+  "parsed_output": {
+    "domain": "safety",
+    "intent_type": "trend",
+    "metrics": [
+      "crash_count"
+    ],
+    "time_range": {
+      "type": "absolute",
+      "start": "2026-03-01",
+      "end": "2026-03-31",
+      "raw_expression": "2026年3月"
+    },
+    "dimensions": [
+      "date"
+    ],
+    "filters": [],
+    "needs_clarification": false,
+    "clarification_reason": null,
+    "confidence": 0.95,
+    "raw_question": "2026年3月每天发生多少事故？"
+  },
+  "parse_success": true,
+  "validation_success": true,
+  "error_message": null,
+  "timestamp": "2026-06-12T14:55:01.851459+00:00"
+}
