@@ -67,9 +67,13 @@ else
     exit 1
 fi
 
-# ── 第三步：Harness 安全检查 ──────────────────────────
-echo -e "${YELLOW}[3/3] Harness 五项安全检查...${NC}"
-if python harness/run_harness.py 2>&1; then
+# ── 第三步：Harness 五项安全检查 ──────────────────────────
+echo -e "${YELLOW}[3/4] Harness 五项安全检查...${NC}"
+if python harness/run_harness.py --step 1 2>&1 && \
+   python harness/run_harness.py --step 2 2>&1 && \
+   python harness/run_harness.py --step 3 2>&1 && \
+   python harness/run_harness.py --step 4 2>&1 && \
+   python harness/run_harness.py --step 5 2>&1; then
     echo -e "  ${GREEN}✅ PASS${NC} — 五项安全检查全部通过"
 else
     echo ""
@@ -80,6 +84,29 @@ else
     echo "    — 反问/拒绝策略完备性（refusal policy）"
     echo "    — 层级合规门禁（G3 > G2 > Silver > Bronze）"
     echo "    — 指标注册合规门禁（metric 必须在 registry 中）"
+    echo ""
+    echo -e "${RED}═══════════════════════════════════════════════════════${NC}"
+    echo -e "${RED}  快速门禁未通过 — commit 已阻断${NC}"
+    echo -e "${RED}═══════════════════════════════════════════════════════${NC}"
+    echo ""
+    echo "  跳过方式（不推荐）：git commit --no-verify"
+    exit 1
+fi
+
+# ── 第四步：Memory Gate 记忆更新检查 ────────────────────
+echo -e "${YELLOW}[4/4] Memory Gate 记忆更新检查...${NC}"
+MEMORY_OUTPUT=$(python harness/checks/check_memory_update.py 2>&1)
+MEMORY_EXIT=$?
+if [ $MEMORY_EXIT -eq 0 ]; then
+    echo -e "  ${GREEN}✅ PASS${NC} — 记忆更新检查通过"
+else
+    echo "$MEMORY_OUTPUT"
+    echo ""
+    echo -e "  ${YELLOW}修复建议：${NC}"
+    echo "    检测到关键路径变更但未同步更新记忆文件。"
+    echo "    请在 docs/memory/经验复盘.md 中补写经验条目。"
+    echo "    模板参考：docs/memory/变更复盘模板.md"
+    echo "    重新检查：python harness/checks/check_memory_update.py"
     echo ""
     echo -e "${RED}═══════════════════════════════════════════════════════${NC}"
     echo -e "${RED}  快速门禁未通过 — commit 已阻断${NC}"

@@ -9,6 +9,7 @@ TianShu Text2SQL Agent 质量门禁入口。
     3. 反问/拒绝策略完备性 —— 验证 question_policy.yml + 相关 eval 文件
     4. 层级合规门禁      —— G3 > G2 > Silver > Bronze
     5. 指标注册合规门禁  —— 指标必须在 metric_contract.yml 中注册
+    6. Memory Gate      —— 关键路径变更后记忆文件是否同步更新
 
 用法：
     python harness/run_harness.py
@@ -33,6 +34,7 @@ STEPS: list[tuple[str, list[str]]] = [
     ("反问/拒绝策略完备性", [sys.executable, "harness/checks/check_refusal_policy.py"]),
     ("层级合规门禁", [sys.executable, "harness/checks/check_layer_compliance.py"]),
     ("指标注册合规门禁", [sys.executable, "harness/checks/check_metric_registered.py"]),
+    ("Memory Gate", [sys.executable, "harness/checks/check_memory_update.py"]),
 ]
 
 

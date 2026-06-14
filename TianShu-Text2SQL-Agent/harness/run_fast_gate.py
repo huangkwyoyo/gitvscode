@@ -8,7 +8,7 @@
 检查顺序（fail-fast，第一项失败立即中断）：
     1. compileall  — 代码编译检查
     2. pytest      — 单元测试套件
-    3. harness     — 五项安全检查
+    3. harness     — 六项安全检查（含 Memory Gate）
     4. mock 回归   — Mock Prompt Regression
     5. mock E2E    — Mock E2E Eval
 
@@ -64,7 +64,7 @@ STEPS: list[dict[str, Any]] = [
     },
     {
         "name": "harness",
-        "display": "Harness 五项安全检查",
+        "display": "Harness 六项安全检查（含 Memory Gate）",
         "command": [sys.executable, "harness/run_harness.py"],
         "estimate": "< 10s",
     },

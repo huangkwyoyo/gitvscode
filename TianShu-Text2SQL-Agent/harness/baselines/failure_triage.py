@@ -158,3 +158,150 @@ def _count_by_type(items: list[dict[str, Any]]) -> dict[str, int]:
         failure_type = item["failure_type"]
         counts[failure_type] = counts.get(failure_type, 0) + 1
     return counts
+
+
+# ── 记忆回写模板 ──────────────────────────────────────────────
+
+# 每个失败类型对应的记忆条目建议模板
+MEMORY_SUGGESTION_TEMPLATES: dict[str, dict[str, str]] = {
+    "应拒绝但回答": {
+        "title": "拒绝策略在 {case_id} 场景下失效",
+        "rule": "拒绝策略必须覆盖 {question} 类问题的中英文危险表达。在 check_refusal_policy.py 中追加对应关键词，并在 evals/unsafe_questions.yml 中新增变体。",
+    },
+    "应反问但回答": {
+        "title": "歧义检测在 {case_id} 场景下未触发反问",
+        "rule": "当用户问题包含 {question} 时，应触发反问而非直接回答。检查 ambiguity.py 的歧义检测规则和 agent_config.yml 的 ambiguity_threshold。",
+    },
+    "safety 拦截": {
+        "title": "SQL 安全门禁在 {case_id} 场景被绕过",
+        "rule": "LLM 在 {question} 场景下直接输出了 SQL 或绕过了安全检查。检查 schema_validators.py 的 JSON Schema 校验是否拦截了嵌入 SQL 文本的字段，并在 Prompt 模板中增加反例说明。",
+    },
+    "执行失败": {
+        "title": "SQL 执行在 {case_id} 场景下失败",
+        "rule": "{question} 类查询的 SQL 在 DuckDB 中执行失败。检查 sql_plan_to_sql() 生成的 SQL 是否使用了 DuckDB 不支持的方言语法，或检查 TianShu 数据仓库的相关表是否可用。",
+    },
+    "plan 错": {
+        "title": "SQLPlan 在 {case_id} 场景下选择了错误表/字段/策略",
+        "rule": "{question} 类查询的 SQLPlan 选择了不正确的表或字段。检查 prompts/sql_planner.md 的表选择指导规则和 resolve_layer() 的降级逻辑。",
+    },
+    "intent 错": {
+        "title": "Intent 分类器在 {case_id} 场景下解析错误",
+        "rule": "{question} 类问题的意图解析不符合预期。检查 prompts/intent_classifier.md 的指标展示方式——同域相近指标应分组展示并触发反问。",
+    },
+    "解释不合格": {
+        "title": "中文解释在 {case_id} 场景下不满足预期",
+        "rule": "{question} 类查询的中文解释不满足 fixture 或业务表达要求。检查 explainer.py 的模板逻辑或 prompts/explainer.md 的解释规则。",
+    },
+    "未分类失败": {
+        "title": "新失败模式: {case_id}",
+        "rule": "{question} 产生了一个未预见的失败模式，需人工分析。建议在 failure_triage.py 的 FAILURE_RULES 中新增对应分类规则。",
+    },
+}
+
+
+def suggest_memory_entry(case: dict[str, Any]) -> dict[str, Any] | None:
+    """对 E2E 失败 case 生成记忆条目建议。
+
+    如果该失败类型已有对应的记忆条目模板，则填充生成建议条目；
+    返回 None 表示不需要新条目（如已有经验覆盖）。
+
+    Args:
+        case: 单个失败 case 的字典，需包含 case_id、question、failure_type 等字段
+
+    Returns:
+        记忆条目建议字典，或 None
+    """
+    failure_type = case.get("failure_type", "未分类失败")
+    template = MEMORY_SUGGESTION_TEMPLATES.get(failure_type)
+    if not template:
+        return None
+
+    case_id = case.get("case_id") or case.get("id") or "unknown"
+    question = case.get("question_zh") or case.get("question") or ""
+
+    # 构造建议标题和规则（用 case 字段填充模板）
+    title = template["title"].format(
+        case_id=case_id,
+        question=question[:80],
+    )
+    rule = template["rule"].format(
+        case_id=case_id,
+        question=question[:80],
+    )
+
+    # 构造完整的记忆条目建议
+    return {
+        "suggested_title": title,
+        "suggested_rule": rule,
+        "failure_type": failure_type,
+        "root_cause_hint": case.get("root_cause_hint", ""),
+        "recommended_action": case.get("recommended_action", ""),
+        "source": "harness/failure_triage auto-suggestion",
+        "initial_confidence": "L2",  # 自动生成的初始置信等级为 L2（Hypothesis）
+        "case_id": case_id,
+        "question": question,
+    }
+
+
+def build_memory_suggestions(triage: dict[str, Any]) -> list[dict[str, Any]]:
+    """从 failure_triage 结果生成记忆条目建议列表。
+
+    Args:
+        triage: build_failure_triage_from_e2e_report() 的输出
+
+    Returns:
+        记忆条目建议列表（已去重——相同 failure_type 只保留第一个）
+    """
+    seen_types: set[str] = set()
+    suggestions: list[dict[str, Any]] = []
+
+    for item in triage.get("items", []):
+        suggestion = suggest_memory_entry(item)
+        if suggestion is None:
+            continue
+        failure_type = suggestion["failure_type"]
+        if failure_type in seen_types:
+            continue  # 同类型失败只建议一次
+        seen_types.add(failure_type)
+        suggestions.append(suggestion)
+
+    return suggestions
+
+
+def check_existing_memory_coverage(
+    suggestions: list[dict[str, Any]],
+    memory_path: str = "docs/memory/经验复盘.md",
+) -> dict[str, Any]:
+    """检查建议的条目是否已被已有经验覆盖。
+
+    Args:
+        suggestions: build_memory_suggestions() 的输出
+        memory_path: 经验复盘文件的路径（相对于项目根目录）
+
+    Returns:
+        {
+            "covered": [...],   # 已有经验覆盖的建议（不需要写入）
+            "uncovered": [...], # 无已有经验覆盖的建议（需要写入）
+        }
+    """
+    from pathlib import Path
+
+    project_root = Path(__file__).resolve().parents[2]
+    memory_file = project_root / memory_path
+
+    if not memory_file.exists():
+        return {"covered": [], "uncovered": suggestions}
+
+    memory_content = memory_file.read_text(encoding="utf-8")
+
+    covered = []
+    uncovered = []
+    for suggestion in suggestions:
+        failure_type = suggestion["failure_type"]
+        # 简单检查：经验复盘文件中是否提到了该失败类型
+        if failure_type in memory_content:
+            covered.append(suggestion)
+        else:
+            uncovered.append(suggestion)
+
+    return {"covered": covered, "uncovered": uncovered}

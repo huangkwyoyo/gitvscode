@@ -109,6 +109,7 @@ Step 5: 解释（结果 → 中文回答）
 | `prompts/` | 各层 LLM 提示词模板 |
 | `evals/` | 四类评测问题集 |
 | `harness/` | 质量门禁（从 Day 1 运行） |
+| `docs/memory/` | 经验复盘 + 风险清单 + 规则来源索引（长期记忆） |
 
 ---
 
@@ -117,3 +118,45 @@ Step 5: 解释（结果 → 中文回答）
 - **TianShu Dev Agent**（`../TianShu/agents/dev/AGENTS.md`）：负责数仓结构变更
 - **TianShu Review Agent**（`../TianShu/agents/review/AGENTS.md`）：负责变更审核
 - **本 Agent**：负责只读中文问数。发现数据资产不足时，生成变更建议供 Dev Agent 使用。
+
+---
+
+## 八、变更传播规则（Change Propagation）
+
+> **核心原则**：修改项目中的任何关键文件后，必须逐项检查关联文件是否需要同步更新。本节的传播矩阵是阻断性规则——pre-commit hook 的 Memory Gate 会检测关键路径变更，未同步更新记忆文件将阻止提交。
+
+### 8.1 传播矩阵
+
+| 变更源 | 需检查的文件 | 判断标准 |
+|--------|------------|---------|
+| 修改 `src/ir.py`（IR 数据结构） | `src/schema_validators.py`、`tests/test_ir.py`、`evals/e2e_cases.yml`、`docs/memory/经验复盘.md` | IR 字段增删改 → schema 校验规则同步 + 测试期望同步 + 经验记录 |
+| 修改 `prompts/*.md`（Prompt 模板） | `evals/regression_cases.yml`、`tests/fixtures/prompts/`、`docs/memory/经验复盘.md` | Prompt 变更 → 回归期望同步 + 新增回归用例 + 变更原因记录 |
+| 修改 `src/sql_gen.py`（SQL 生成器/安全规则） | `harness/checks/check_sql_readonly.py`、`evals/unsafe_questions.yml`、`tests/test_sql_gen.py`、`docs/memory/经验复盘.md` | 安全规则变更 → 检查规则同步 + 越权测试同步 |
+| 修改 `src/ambiguity.py`（歧义检测/反问策略） | `evals/ambiguous_questions.yml`、`config/agent_config.yml`、`docs/memory/经验复盘.md` | 反问策略变更 → 评测期望同步 + 阈值文档同步 |
+| 修改 `harness/checks/*.py`（Harness 检查项） | `harness/run_harness.py`（注册表）、`.githooks/pre-commit`（调用列表）、`docs/memory/规则来源索引.md` | 门禁规则变更 → 入口注册同步 + 索引更新 |
+| 新增/修改 `evals/*.yml`（评测用例） | `harness/baselines/failure_triage.py`（新失败模式 → 分类映射）、`docs/memory/风险清单.md`（新风险 → 风险评估） | 新用例可能引入新的失败模式 → 分类规则更新 |
+| 修改 `config/agent_config.yml`（Agent 运行时配置） | `AGENTS.md`（行为描述同步）、`src/agent.py`（如有配置读取变更）、`docs/memory/经验复盘.md` | 模型/阈值/超时变更 → 行为边界文档同步 |
+| 修改 `src/agent.py`（主循环逻辑） | `src/repl.py`（接口兼容）、`tests/test_e2e.py`（端到端测试）、`docs/memory/经验复盘.md` | 主循环变更 → 交互入口兼容 + 测试用例同步 |
+| 修改 `harness/baselines/*.py`（基线逻辑） | `harness/run_baseline_freeze.py`、`harness/run_fast_gate.py`、`harness/run_slow_gate.py` | 基线逻辑变更 → 入口脚本同步 |
+| 修改 `src/schema_validators.py`（Schema 校验器） | `src/ir.py`（校验规则需与数据结构一致）、`tests/test_ir.py`（测试期望同步） | 校验规则变更 → 数据结构兼容性确认 |
+
+### 8.2 执行规则
+
+1. **每次 `git commit` 前**：pre-commit hook 的 Memory Gate 检测本次变更是否涉及关键路径
+2. **关键路径变更 + 未更新记忆文件** → **阻断提交**，引导开发者补写经验复盘（模板：`docs/memory/变更复盘模板.md`）
+3. **非关键路径变更** → 仅提醒，不阻断
+4. **基线冻结时**（`python harness/run_baseline_freeze.py`）：自动检查所有传播链是否完整，在报告中标注未覆盖的传播链
+
+### 8.3 记忆更新触发条件
+
+以下操作**必须**在 `docs/memory/经验复盘.md` 中写入对应条目：
+
+| 触发场景 | 复盘重点 |
+|---------|---------|
+| Prompt 模板修改 | 为什么改、改了什么、预期效果、需同步的回归用例 |
+| 安全策略调整 | 为什么加/改规则、阻止了哪类攻击或误用 |
+| IR 数据结构变更 | 向下兼容性、对已有评测的影响 |
+| Agent 行为边界变更 | 为什么调整阈值、预期对反问率/准确率的影响 |
+| CI 门禁调整 | 为什么加/撤检查、对阻断标准的影响 |
+| E2E 出现新失败模式 | 新失败模式的特征、推荐修复路径 |
+
