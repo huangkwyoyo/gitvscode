@@ -21,3 +21,9 @@ logs/
 
 # 测试缓存
 .pytest_cache/
+
+# Harness runtime artifacts
+harness/reports/*_latest.*
+harness/reports/llm_raw_outputs/
+harness/reports/test_tmp/
+harness/reports/baselines/

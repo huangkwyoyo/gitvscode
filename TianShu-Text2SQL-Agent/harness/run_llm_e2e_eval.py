@@ -52,17 +52,29 @@ from src.sql_gen import validate_sql_safety
 
 @dataclass
 class E2ECase:
-    """单个 E2E 评测用例（从 YAML 解析）"""
+    """单个 E2E 评测用例（从 YAML 解析）
+
+    expected_behavior 取值：
+        - answer: 正常回答，走完整链路
+        - clarification: 需要反问，不应生成 SQL
+        - refusal: 应拒绝回答，不应生成 SQL
+        - downgrade: 降级路径，应走非 G3 策略并输出降级原因
+        - safety_violation: 安全负例，应检测到指定违规而不执行
+    """
 
     id: str
     question_zh: str
-    expected_behavior: str  # answer | clarification | refusal
+    expected_behavior: str  # answer | clarification | refusal | downgrade | safety_violation
     expected_tables: list[str] = field(default_factory=list)
     expected_metrics: list[str] = field(default_factory=list)
     expected_clarification_contains: str = ""
     expected_refusal_contains: str = ""
     mock_intent_response: str = ""
     mock_plan_response: str = ""
+    # 降级类专用字段
+    expected_strategy: str = ""  # 期望的策略（如 g2_fact），为空则不校验具体策略
+    expected_downgrade_reason_contains: str = ""  # 降级原因应包含的关键词
+    expected_failure_categories: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -121,6 +133,8 @@ class E2EReport:
         answer_cases = [c for c in self.cases if c.expected_behavior == "answer"]
         clarification_cases = [c for c in self.cases if c.expected_behavior == "clarification"]
         refusal_cases = [c for c in self.cases if c.expected_behavior == "refusal"]
+        downgrade_cases = [c for c in self.cases if c.expected_behavior == "downgrade"]
+        safety_violation_cases = [c for c in self.cases if c.expected_behavior == "safety_violation"]
 
         return {
             "total": total,
@@ -133,6 +147,10 @@ class E2EReport:
             "clarification_passed": sum(1 for c in clarification_cases if c.passed),
             "refusal_total": len(refusal_cases),
             "refusal_passed": sum(1 for c in refusal_cases if c.passed),
+            "downgrade_total": len(downgrade_cases),
+            "downgrade_passed": sum(1 for c in downgrade_cases if c.passed),
+            "safety_violation_total": len(safety_violation_cases),
+            "safety_violation_passed": sum(1 for c in safety_violation_cases if c.passed),
             # 失败分类统计
             "failure_category_counts": self._count_failure_categories(),
         }
@@ -226,6 +244,9 @@ class E2ERunner:
                 expected_refusal_contains=item.get("expected_refusal_contains", ""),
                 mock_intent_response=item.get("mock_intent_response", ""),
                 mock_plan_response=item.get("mock_plan_response", ""),
+                expected_strategy=item.get("expected_strategy", ""),
+                expected_downgrade_reason_contains=item.get("expected_downgrade_reason_contains", ""),
+                expected_failure_categories=item.get("expected_failure_categories", []),
             ))
 
         return cases
@@ -257,6 +278,13 @@ class E2ERunner:
             # 执行全部断言
             assertions = self._run_assertions(case, agent_response)
             failure_categories = self._classify_failures(case, agent_response, assertions)
+            if self._is_expected_safety_violation(case, failure_categories):
+                assertions.append(E2EAssertion(
+                    "safety_violation_detected",
+                    True,
+                    f"正确检测到预期安全违规: {', '.join(case.expected_failure_categories)}",
+                ))
+                failure_categories = []
 
         except RefusalDetected as exc:
             # LLM 正确识别了拒绝场景（但 agent 应该已处理，这里是兜底）
@@ -268,12 +296,29 @@ class E2ERunner:
 
         except json.JSONDecodeError:
             # LLM 返回了非 JSON 内容（可能是直接 SQL）
-            assertions = [
-                E2EAssertion("intent_generated", False, "JSON 解析失败：LLM 输出非 JSON 格式"),
-                E2EAssertion("direct_sql_detected", True, "LLM 返回了非 JSON 原始输出（疑似直接 SQL）"),
-            ]
-            failure_categories = ["direct_sql_detected", "intent_failed"]
-            error = "LLM 输出无法解析为 JSON，疑似直接输出 SQL"
+            detected_categories = ["direct_sql_detected", "intent_failed"]
+            if self._is_expected_safety_violation(case, detected_categories):
+                assertions = [
+                    E2EAssertion(
+                        "safety_violation_detected",
+                        True,
+                        f"正确检测到预期安全违规: {', '.join(case.expected_failure_categories)}",
+                    ),
+                    E2EAssertion(
+                        "direct_sql_detected",
+                        True,
+                        "LLM 返回了非 JSON 原始输出（疑似直接 SQL），已按安全负例处理",
+                    ),
+                ]
+                failure_categories = []
+                error = None
+            else:
+                assertions = [
+                    E2EAssertion("intent_generated", False, "JSON 解析失败：LLM 输出非 JSON 格式"),
+                    E2EAssertion("direct_sql_detected", True, "LLM 返回了非 JSON 原始输出（疑似直接 SQL）"),
+                ]
+                failure_categories = detected_categories
+                error = "LLM 输出无法解析为 JSON，疑似直接输出 SQL"
 
         except Exception as exc:
             error = f"{type(exc).__name__}: {exc}"
@@ -330,6 +375,15 @@ class E2ERunner:
 
         return MockLLMClient(responses)
 
+    @staticmethod
+    def _is_expected_safety_violation(case: E2ECase, detected_categories: list[str]) -> bool:
+        """判断安全负例是否检测到了预期违规。"""
+        if case.expected_behavior != "safety_violation":
+            return False
+        expected = set(case.expected_failure_categories)
+        detected = set(detected_categories)
+        return bool(expected) and expected.issubset(detected)
+
     # ── 断言检查 ──────────────────────────────────────────
 
     def _run_assertions(
@@ -346,12 +400,34 @@ class E2ERunner:
 
         if case.expected_behavior == "answer":
             assertions.extend(self._check_answer_case(case, response))
+        elif case.expected_behavior == "downgrade":
+            # 降级类：先走 answer 基础断言，再加降级专用断言
+            assertions.extend(self._check_answer_case(case, response))
+            assertions.extend(self._check_downgrade_case(case, response))
         elif case.expected_behavior == "clarification":
             assertions.extend(self._check_clarification_case(case, response))
         elif case.expected_behavior == "refusal":
             assertions.extend(self._check_refusal_case(case, response))
+        elif case.expected_behavior == "safety_violation":
+            assertions.extend(self._check_safety_violation_case(case, response))
 
         return assertions
+
+    @staticmethod
+    def _check_safety_violation_case(
+        case: E2ECase,
+        response: AgentResponse,
+    ) -> list[E2EAssertion]:
+        """安全负例必须检测到预期违规，且不能继续当作正常 answer 通过。"""
+        _ = response
+        expected = ", ".join(case.expected_failure_categories) or "未声明"
+        return [
+            E2EAssertion(
+                "safety_violation_detected",
+                False,
+                f"安全负例未检测到预期违规: {expected}",
+            )
+        ]
 
     @staticmethod
     def _check_intent_generated(case: E2ECase, response: AgentResponse) -> E2EAssertion:
@@ -438,6 +514,93 @@ class E2ERunner:
 
         # 7. 是否执行成功
         assertions.append(self._check_execution(response))
+
+        return assertions
+
+    def _check_downgrade_case(
+        self,
+        case: E2ECase,
+        response: AgentResponse,
+    ) -> list[E2EAssertion]:
+        """downgrade 类用例的专用断言 —— 验证降级路径是否正确触发。
+
+        降级路径规则：
+            - 当 G3 汇总表无法覆盖问题时，系统必须自动降级到 G2（或更低层）
+            - 必须输出 downgrade_reason（说明为什么降级）
+            - 策略不能是 g3_direct（已降级）
+        """
+        assertions: list[E2EAssertion] = []
+
+        if response.plan is None:
+            assertions.append(E2EAssertion(
+                "downgrade_triggered", False,
+                "降级类用例应生成 SQLPlan，但未生成",
+            ))
+            return assertions
+
+        # 1. 策略检查：不能是 g3_direct（已降级才符合预期）
+        strategy_value = response.plan.strategy.value
+        if strategy_value == "g3_direct":
+            assertions.append(E2EAssertion(
+                "downgrade_strategy_not_g3", False,
+                f"降级类用例不应使用 g3_direct 策略，实际策略: {strategy_value}",
+            ))
+        else:
+            assertions.append(E2EAssertion(
+                "downgrade_strategy_not_g3", True,
+                f"正确触发降级，策略: {strategy_value}",
+            ))
+
+        # 2. 降级原因检查：downgrade_reason 不能为空
+        if response.plan.downgrade_reason:
+            assertions.append(E2EAssertion(
+                "downgrade_reason_present", True,
+                f"降级原因: {response.plan.downgrade_reason}",
+            ))
+        else:
+            assertions.append(E2EAssertion(
+                "downgrade_reason_present", False,
+                "降级策略必须填写 downgrade_reason，但当前为空",
+            ))
+
+        # 3. 期望策略匹配（如果用例指定了 expected_strategy）
+        if case.expected_strategy:
+            if strategy_value == case.expected_strategy:
+                assertions.append(E2EAssertion(
+                    "expected_strategy_match", True,
+                    f"策略匹配: {strategy_value}",
+                ))
+            else:
+                assertions.append(E2EAssertion(
+                    "expected_strategy_match", False,
+                    f"期望策略 {case.expected_strategy}，实际 {strategy_value}",
+                ))
+
+        # 4. 降级原因内容匹配（如果用例指定了关键词）
+        if case.expected_downgrade_reason_contains:
+            downgrade_text = response.plan.downgrade_reason or ""
+            if case.expected_downgrade_reason_contains in downgrade_text:
+                assertions.append(E2EAssertion(
+                    "downgrade_reason_content", True,
+                    f"降级原因包含关键词 '{case.expected_downgrade_reason_contains}'",
+                ))
+            else:
+                assertions.append(E2EAssertion(
+                    "downgrade_reason_content", False,
+                    f"降级原因 '{downgrade_text[:80]}' 不包含关键词 '{case.expected_downgrade_reason_contains}'",
+                ))
+
+        # 5. 降级类仍应生成 SQL 并执行成功（降级≠失败）
+        if response.result is None or not response.result.sql:
+            assertions.append(E2EAssertion(
+                "downgrade_sql_generated", False,
+                "降级类仍应生成 SQL，但未生成",
+            ))
+        else:
+            assertions.append(E2EAssertion(
+                "downgrade_sql_generated", True,
+                "降级路径正确生成了 SQL",
+            ))
 
         return assertions
 
@@ -680,6 +843,13 @@ class E2ERunner:
             "refusal_content_match": "refusal_mismatch",
             "no_sql_for_refusal": "refusal_mismatch",
             "direct_sql_detected": "direct_sql_detected",
+            "safety_violation_detected": "safety_violation_not_detected",
+            # 降级路径专用分类
+            "downgrade_strategy_not_g3": "downgrade_not_triggered",
+            "downgrade_reason_present": "downgrade_reason_missing",
+            "expected_strategy_match": "downgrade_wrong_strategy",
+            "downgrade_reason_content": "downgrade_reason_mismatch",
+            "downgrade_sql_generated": "downgrade_sql_missing",
         }
 
         for a in assertions:
@@ -688,8 +858,8 @@ class E2ERunner:
                 if cat not in failures:
                     failures.append(cat)
 
-        # 额外检查：answer 类用例被误拒绝
-        if case.expected_behavior == "answer" and response.refusal:
+        # 额外检查：answer / downgrade 类用例被误拒绝
+        if case.expected_behavior in ("answer", "downgrade") and response.refusal:
             if "intent_failed" not in failures:
                 failures.append("intent_failed")
 
@@ -772,6 +942,8 @@ class E2ERunner:
             f"| answer | {s['answer_total']} | {s['answer_passed']} |",
             f"| clarification | {s['clarification_total']} | {s['clarification_passed']} |",
             f"| refusal | {s['refusal_total']} | {s['refusal_passed']} |",
+            f"| downgrade | {s['downgrade_total']} | {s['downgrade_passed']} |",
+            f"| safety_violation | {s['safety_violation_total']} | {s['safety_violation_passed']} |",
             "",
         ]
 

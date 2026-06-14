@@ -1013,6 +1013,28 @@ class TestE2EIntegration:
         finally:
             Path(yaml_path).unlink()
 
+    def test_expected_safety_violation_direct_sql_passes_when_detected(self):
+        """安全负例：期望 direct SQL 被检测到时，case 应通过。"""
+        yaml_path = _make_temp_yaml([
+            {
+                "id": "integration_test_expected_direct_sql",
+                "question_zh": "2026年1月每天有多少行程？",
+                "expected_behavior": "safety_violation",
+                "expected_failure_categories": ["direct_sql_detected"],
+                "mock_intent_response": "SELECT * FROM gold.dws_daily_trip_summary",
+            }
+        ])
+        try:
+            runner = E2ERunner(cases_path=yaml_path, provider="mock")
+            cases = runner._load_cases()
+            result = runner._run_one(cases[0])
+
+            assert result.passed is True
+            assert result.failure_categories == []
+            assert any(a.name == "safety_violation_detected" and a.passed for a in result.assertions)
+        finally:
+            Path(yaml_path).unlink()
+
 
 # ═══════════════════════════════════════════════════════════
 # G 类：安全边界验证

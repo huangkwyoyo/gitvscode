@@ -19,10 +19,14 @@ Text2SQL Agent 主循环。
 from __future__ import annotations
 
 import calendar
+import hashlib
+import json
 import re
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
+from uuid import uuid4
 
 from .ir import (
     AgentResponse,
@@ -90,6 +94,8 @@ class Text2SQLAgent:
         self._mode = mode
         self._llm_client = llm_client
         self._prompt_loader = prompt_loader or PromptLoader()
+        self._last_intent_raw: str | None = None   # 最近一次 intent LLM 原始输出（供 ask() 校验失败时保存证据）
+        self._last_plan_raw: str | None = None     # 最近一次 plan LLM 原始输出
 
         if self._mode not in {"rule", "llm"}:
             raise ValueError("mode 只能是 'rule' 或 'llm'")
@@ -98,6 +104,11 @@ class Text2SQLAgent:
 
         # 加载配置
         self._load_agent_config(agent_config_path)
+
+        # raw output 失败保存配置（在 _load_agent_config 之后读取，允许配置文件覆写）
+        raw_cfg = self._agent_config.get("raw_output", {}) if self._agent_config else {}
+        self._raw_output_enabled = raw_cfg.get("enabled", True)
+        self._raw_output_dir = Path(raw_cfg.get("dir", "harness/reports"))
 
         # 初始化 TianShu 连接
         self._init_resolver(tianshu_config_path)
@@ -173,6 +184,18 @@ class Text2SQLAgent:
             response.clarification_needed = True
             response.clarification_message = f"意图校验失败: {'; '.join(intent_errors)}"
             response.trace.append(f"         [FAIL] Layer1 校验失败: {response.clarification_message}")
+            # 保存证据用于诊断（raw output 在 _classify_intent_llm 中暂存）
+            if self._last_intent_raw is not None:
+                self._save_raw_output_on_failure(
+                    question=question,
+                    stage="intent_validation",
+                    prompt_name="intent_classifier",
+                    raw_output=self._last_intent_raw,
+                    parsed_output=intent.to_dict(),
+                    parse_success=True,
+                    validation_success=False,
+                    error_message=response.clarification_message,
+                )
             return response
 
         # ── Step 2: 歧义检测 ──
@@ -215,6 +238,18 @@ class Text2SQLAgent:
             response.refusal = True
             response.refusal_reason = f"SQL 规划校验失败: {'; '.join(plan_errors)}"
             response.trace.append(f"         [FAIL] Layer2 校验失败: {response.refusal_reason}")
+            # 保存证据用于诊断（raw output 在 _plan_query_llm 中暂存）
+            if self._last_plan_raw is not None:
+                self._save_raw_output_on_failure(
+                    question=question,
+                    stage="plan_validation",
+                    prompt_name="sql_planner",
+                    raw_output=self._last_plan_raw,
+                    parsed_output=plan.to_dict(),
+                    parse_success=True,
+                    validation_success=False,
+                    error_message=response.refusal_reason,
+                )
             return response
 
         # ── Step 4: 安全检查 + SQL 生成 ──
@@ -231,6 +266,17 @@ class Text2SQLAgent:
             response.refusal = True
             response.refusal_reason = f"SQL 安全检查失败: {'; '.join(violations)}"
             response.trace.append(f"         [FAIL] {response.refusal_reason}")
+            # 保存证据：SQL 本身即 raw_output，plan raw 提供上下文
+            self._save_raw_output_on_failure(
+                question=question,
+                stage="sql_safety",
+                prompt_name="sql_planner",
+                raw_output=sql,
+                parsed_output=plan.to_dict() if plan else {},
+                parse_success=True,
+                validation_success=False,
+                error_message=response.refusal_reason,
+            )
             return response
 
         # ── Step 5: 执行 SQL ──
@@ -278,6 +324,8 @@ class Text2SQLAgent:
             RefusalDetected: LLM 检测到拒绝回答的场景。
         """
         assert self._llm_client is not None
+        raw_output = ""
+        parsed_output: dict[str, Any] = {}
         response = self._llm_client.complete(
             LLMRequest(
                 task="intent_classifier",
@@ -288,16 +336,48 @@ class Text2SQLAgent:
                 metadata={"question": question},
             )
         )
-        data = extract_json_object(response.content)
+        raw_output = response.content
+        self._last_intent_raw = raw_output  # 暂存，供 ask() 校验失败时保存证据
 
-        # 检测 refusal 输出 —— 拒绝类问题不返回 QuestionIntent
-        if data.get("refusal") is True and isinstance(data.get("refusal_reason"), str):
+        # ── JSON 提取 ──
+        try:
+            parsed_output = extract_json_object(raw_output)
+            parse_success = True
+        except Exception as exc:
+            self._save_raw_output_on_failure(
+                question=question,
+                stage="intent",
+                prompt_name="intent_classifier",
+                raw_output=raw_output,
+                parsed_output={},
+                parse_success=False,
+                validation_success=False,
+                error_message=f"JSON 解析失败: {exc}",
+            )
+            raise
+
+        # ── refusal 检测（预期行为，不算失败，不保存 raw output）──
+        if parsed_output.get("refusal") is True and isinstance(parsed_output.get("refusal_reason"), str):
             raise RefusalDetected(
-                refusal_reason=data["refusal_reason"],
+                refusal_reason=parsed_output["refusal_reason"],
                 question=question,
             )
 
-        return question_intent_from_dict(data)
+        # ── dict → dataclass 转换 ──
+        try:
+            return question_intent_from_dict(parsed_output)
+        except Exception as exc:
+            self._save_raw_output_on_failure(
+                question=question,
+                stage="intent",
+                prompt_name="intent_classifier",
+                raw_output=raw_output,
+                parsed_output=parsed_output,
+                parse_success=True,
+                validation_success=False,
+                error_message=f"QuestionIntent 构造失败: {exc}",
+            )
+            raise
 
     def _classify_intent_rule(self, question: str) -> QuestionIntent:
         """
@@ -357,6 +437,9 @@ class Text2SQLAgent:
     def _plan_query_llm(self, intent: QuestionIntent) -> SQLPlan:
         """使用 LLM 生成 SQLPlan"""
         assert self._llm_client is not None
+        raw_output = ""
+        parsed_output: dict[str, Any] = {}
+        question = intent.raw_question or str(intent.metrics)
         response = self._llm_client.complete(
             LLMRequest(
                 task="sql_planner",
@@ -367,7 +450,41 @@ class Text2SQLAgent:
                 metadata={"metrics": intent.metrics},
             )
         )
-        return sql_plan_from_dict(extract_json_object(response.content))
+        raw_output = response.content
+        self._last_plan_raw = raw_output  # 暂存，供 ask() 校验失败时保存证据
+
+        # ── JSON 提取 ──
+        try:
+            parsed_output = extract_json_object(raw_output)
+            parse_success = True
+        except Exception as exc:
+            self._save_raw_output_on_failure(
+                question=question,
+                stage="plan",
+                prompt_name="sql_planner",
+                raw_output=raw_output,
+                parsed_output={},
+                parse_success=False,
+                validation_success=False,
+                error_message=f"JSON 解析失败: {exc}",
+            )
+            raise
+
+        # ── dict → dataclass 转换 ──
+        try:
+            return sql_plan_from_dict(parsed_output)
+        except Exception as exc:
+            self._save_raw_output_on_failure(
+                question=question,
+                stage="plan",
+                prompt_name="sql_planner",
+                raw_output=raw_output,
+                parsed_output=parsed_output,
+                parse_success=True,
+                validation_success=False,
+                error_message=f"SQLPlan 构造失败: {exc}",
+            )
+            raise
 
     def _plan_query_rule(self, intent: QuestionIntent) -> SQLPlan:
         """
@@ -452,6 +569,92 @@ class Text2SQLAgent:
             ],
             "forbidden_sql_keywords": self._context.forbidden_sql_keywords,
         }
+
+    def _save_raw_output_on_failure(
+        self,
+        question: str,
+        stage: str,
+        prompt_name: str,
+        raw_output: str,
+        parsed_output: dict[str, Any],
+        parse_success: bool,
+        validation_success: bool,
+        error_message: str | None,
+    ) -> str | None:
+        """
+        LLM 输出失败时保存原始输出，用于诊断根因。
+
+        Returns:
+            保存的文件路径，如果未启用则返回 None。
+        """
+        if not self._raw_output_enabled:
+            return None
+
+        run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        raw_dir = self._raw_output_dir / "llm_raw_outputs" / run_id
+        raw_dir.mkdir(parents=True, exist_ok=True)
+
+        # 文件名只使用净化后的短标识，避免问题文本中的路径字符影响落盘。
+        case_id = self._safe_question_id(question)
+        path = raw_dir / f"{case_id}_{stage}_{uuid4().hex[:8]}.json"
+        model_name = self._model_name_for_prompt(prompt_name)
+
+        payload = {
+            "question_id": case_id,
+            "question": question,
+            "stage": stage,
+            "prompt_name": prompt_name,
+            "model_name": model_name,
+            "raw_output": self._redact_sensitive_text(raw_output),
+            "parsed_output": self._redact_sensitive_data(parsed_output),
+            "parse_success": parse_success,
+            "validation_success": validation_success,
+            "error_message": self._redact_sensitive_text(error_message or ""),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+        path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        return str(path)
+
+    def _model_name_for_prompt(self, prompt_name: str) -> str:
+        """按 prompt 阶段读取模型名，缺失时返回 unknown。"""
+        model_cfg = self._agent_config.get("model", {}) if self._agent_config else {}
+        prompt_cfg = model_cfg.get(prompt_name, {}) if isinstance(model_cfg, dict) else {}
+        return str(prompt_cfg.get("model") or "unknown")
+
+    @staticmethod
+    def _safe_question_id(question: str) -> str:
+        """把问题文本转换为可跨平台使用的短文件名前缀。"""
+        compact = re.sub(r"\s+", "_", question.strip())[:30]
+        safe = re.sub(r"[^0-9A-Za-z\u4e00-\u9fff_-]+", "_", compact).strip("_")
+        digest = hashlib.sha1(question.encode("utf-8")).hexdigest()[:8]
+        return f"{safe or 'question'}_{digest}"
+
+    @classmethod
+    def _redact_sensitive_data(cls, value: Any) -> Any:
+        """递归脱敏结构化数据中的密钥文本。"""
+        if isinstance(value, dict):
+            return {key: cls._redact_sensitive_data(item) for key, item in value.items()}
+        if isinstance(value, list):
+            return [cls._redact_sensitive_data(item) for item in value]
+        if isinstance(value, str):
+            return cls._redact_sensitive_text(value)
+        return value
+
+    @staticmethod
+    def _redact_sensitive_text(text: str) -> str:
+        """脱敏常见 API Key、token 与 Authorization 片段。"""
+        if not text:
+            return ""
+        patterns = [
+            r"(?i)(OPENAI_API_KEY|DEEPSEEK_API_KEY|API_KEY|TOKEN|AUTHORIZATION)\s*=\s*[^\s]+",
+            r"(?i)(Authorization:\s*Bearer\s+)[^\s]+",
+            r"(?i)(token\s*=\s*)[^\s]+",
+            r"sk-[A-Za-z0-9_\-]{8,}",
+        ]
+        redacted = text
+        for pattern in patterns:
+            redacted = re.sub(pattern, lambda match: f"{match.group(1)}[REDACTED]" if match.lastindex else "[REDACTED]", redacted)
+        return redacted
 
     def _is_write_request(self, question: str) -> bool:
         """识别明显写操作请求"""

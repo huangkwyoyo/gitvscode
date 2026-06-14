@@ -74,6 +74,35 @@ def test_llm_agent_uses_mock_llm_for_intent_and_plan():
     assert [call.task for call in client.calls] == ["intent_classifier", "sql_planner"]
 
 
+def test_agent_raw_output_failure_file_is_sanitized_and_redacted(tmp_path):
+    """Agent 保存失败证据时，文件名必须安全且内容不能泄露密钥。"""
+    agent = Text2SQLAgent()
+    agent._raw_output_enabled = True
+    agent._raw_output_dir = tmp_path
+
+    saved_path = agent._save_raw_output_on_failure(
+        question="2026/01 金额是多少？",
+        stage="intent",
+        prompt_name="intent_classifier",
+        raw_output="OPENAI_API_KEY=sk-secret-value Authorization: Bearer abc123",
+        parsed_output={"token": "token=xyz"},
+        parse_success=False,
+        validation_success=False,
+        error_message="DEEPSEEK_API_KEY=deepseek-secret",
+    )
+
+    path = Path(saved_path)
+    payload_text = path.read_text(encoding="utf-8")
+
+    assert path.exists()
+    assert "/" not in path.name
+    assert "sk-secret-value" not in payload_text
+    assert "abc123" not in payload_text
+    assert "xyz" not in payload_text
+    assert "deepseek-secret" not in payload_text
+    assert "[REDACTED]" in payload_text
+
+
 def test_rule_agent_still_uses_rule_path_without_llm_calls():
     """规则版 Agent 应继续使用原有规则路径"""
     client = MockLLMClient({})
