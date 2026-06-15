@@ -43,7 +43,8 @@ from .ir import (
     TimeRange,
     TimeRangeType,
 )
-from .resolver import TianShuResolver, AgentContext
+from .resolver import TianShuResolver, AgentContext, MetricInfo
+from .metric_resolver import MetricResolver
 from .ambiguity import detect_ambiguity, load_clarification_rules
 from .request_guard import is_write_request, is_forbidden_layer_request
 from .sql_gen import sql_plan_to_sql, validate_sql_safety
@@ -424,11 +425,13 @@ class Text2SQLAgent:
             )
 
         metric_info = self._detect_metric(question)
-        if metric_info is None:
+        if metric_info is None or not metric_info.get("metric"):
             return QuestionIntent(
                 needs_clarification=True,
-                clarification_reason="暂未识别到已注册指标，请说明要查询行程量、停车罚单数量还是事故数量。",
-                confidence=0.0,
+                clarification_reason=metric_info.get("clarification_reason") if metric_info else (
+                    "暂未识别到已注册指标，请明确要查询的指标。"
+                ),
+                confidence=metric_info.get("confidence", 0.0) if metric_info else 0.0,
                 raw_question=question,
             )
 
@@ -538,7 +541,7 @@ class Text2SQLAgent:
 
         table = config["table"]
         date_col = config["date_col"]
-        value_expr = config["value_expr"]
+        aggregation_expr = config["aggregation_expr"]
         return SQLPlan(
             strategy=Strategy.G3_DIRECT,
             primary_table=table,
@@ -556,7 +559,7 @@ class Text2SQLAgent:
             ],
             group_by=["gold.dim_date.date"],
             order_by=["gold.dim_date.date"],
-            aggregations=[Aggregation(expr=f"SUM({value_expr})", alias=metric)],
+            aggregations=[Aggregation(expr=aggregation_expr, alias=metric)],
             confidence=0.95,
         )
 
@@ -573,11 +576,12 @@ class Text2SQLAgent:
         表名优先从 context 获取，列表达式优先从 config 获取（config 更精确）。
 
         Returns:
-            {"table": "...", "date_col": "...", "value_expr": "..."} 或 None
+            {"table": "...", "date_col": "...", "aggregation_expr": "..."} 或 None
         """
         table = None
         date_col = None
         value_expr = None
+        aggregation_expr = None
 
         # ── Step 1: 从 context 或 config 获取表名 ──
         if self._context and self._context.available_metrics:
@@ -586,6 +590,7 @@ class Text2SQLAgent:
                     table = m.base_table
                     date_col = self._infer_date_column(table)
                     value_expr = self._extract_value_expr(m.aggregation, metric_name)
+                    aggregation_expr = self._normalize_aggregation_expr(m.aggregation, metric_name)
                     break
 
         # ── Step 2: config 中的精确值覆盖推导值 ──
@@ -599,6 +604,8 @@ class Text2SQLAgent:
                 date_col = config_entry.get("date_col", "date")
             # config 的 value_expr 最精确，优先使用
             value_expr = config_entry.get("value_expr", value_expr or metric_name)
+            if aggregation_expr is None:
+                aggregation_expr = f"SUM({value_expr})"
 
         if table is None:
             return None
@@ -607,7 +614,20 @@ class Text2SQLAgent:
             "table": table,
             "date_col": date_col or "date",
             "value_expr": value_expr or metric_name,
+            "aggregation_expr": aggregation_expr or f"SUM({value_expr or metric_name})",
         }
+
+    @staticmethod
+    def _normalize_aggregation_expr(aggregation: str, fallback: str) -> str:
+        """标准化注册表中的聚合表达式，保留 AVG/SUM 等函数语义。"""
+        if not aggregation:
+            return f"SUM({fallback})"
+        return re.sub(
+            r"^\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\(",
+            lambda match: f"{match.group(1).upper()}(",
+            aggregation.strip(),
+            count=1,
+        )
 
     @staticmethod
     def _extract_value_expr(aggregation: str, fallback: str) -> str:
@@ -762,23 +782,60 @@ class Text2SQLAgent:
         )
 
     def _detect_metric(self, question: str) -> Optional[dict[str, Any]]:
-        """
-        用关键词识别已注册指标（数据驱动）。
+        """通过注册指标目录识别 G3 指标。"""
+        result = MetricResolver(
+            self._available_metric_infos(),
+            aliases=self._metric_aliases(),
+        ).resolve(question)
+        if result.matched and result.metric:
+            return {
+                "metric": result.metric.name,
+                "domain": Domain(result.metric.domain) if result.metric.domain else None,
+                "confidence": result.confidence,
+            }
+        if result.failure_reason == "metric_not_found":
+            return None
+        return {
+            "metric": None,
+            "domain": None,
+            "confidence": result.confidence,
+            "clarification_reason": result.clarification_message,
+        }
 
-        B-8 修复：关键词→指标映射从 agent_config.yml 的 rule_mode 段加载，
-        不再硬编码。新增指标只需修改配置文件。
-        """
+    def _available_metric_infos(self) -> list[MetricInfo]:
+        """读取当前上下文中的指标目录；离线时回退到规则配置。"""
+        if self._context and self._context.available_metrics:
+            return self._context.available_metrics
+
+        metrics: list[MetricInfo] = []
         rule_cfg = self._agent_config.get("rule_mode", {})
         keyword_map = rule_cfg.get("keyword_to_metric", {})
-
+        metric_table = rule_cfg.get("metric_to_table", {})
         for mapping in keyword_map.values():
-            keywords = mapping.get("keywords", [])
-            if any(word in question for word in keywords):
-                return {
-                    "metric": mapping["metric"],
-                    "domain": Domain(mapping["domain"]),
-                }
-        return None
+            metric_name = mapping.get("metric")
+            table_cfg = metric_table.get(metric_name, {})
+            value_expr = table_cfg.get("value_expr", metric_name)
+            metrics.append(MetricInfo(
+                name=metric_name,
+                zh_name="",
+                domain=mapping.get("domain", ""),
+                aggregation=f"sum({value_expr})",
+                base_table=table_cfg.get("table", ""),
+                unit="",
+                g3_available=bool(table_cfg.get("table")),
+            ))
+        return metrics
+
+    def _metric_aliases(self) -> dict[str, list[str]]:
+        """从规则配置读取指标别名，兼容离线 fallback 关键词。"""
+        aliases: dict[str, list[str]] = {}
+        rule_cfg = self._agent_config.get("rule_mode", {})
+        for mapping in rule_cfg.get("keyword_to_metric", {}).values():
+            metric_name = mapping.get("metric")
+            if not metric_name:
+                continue
+            aliases.setdefault(metric_name, []).extend(mapping.get("keywords", []))
+        return aliases
 
     def _parse_month_range(self, question: str) -> TimeRange:
         """解析“2026年1月”这类绝对月份"""

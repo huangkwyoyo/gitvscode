@@ -387,6 +387,94 @@ cases:
         "confidence": 0.93
       }
 
+  # ── 1.9 G3 日度车费总额查询 ──
+  - id: e2e_trip_total_fare_daily
+    question_zh: "2026年1月每天车费总额是多少？"
+    expected_behavior: answer
+    expected_tables:
+      - gold.dws_daily_trip_summary
+      - gold.dim_date
+    expected_metrics:
+      - total_fare_amount
+    mock_intent_response: |
+      {
+        "domain": "traffic",
+        "intent_type": "trend",
+        "metrics": ["total_fare_amount"],
+        "time_range": {
+          "type": "absolute",
+          "start": "2026-01-01",
+          "end": "2026-01-31",
+          "raw_expression": "2026年1月"
+        },
+        "dimensions": ["date"],
+        "filters": [],
+        "needs_clarification": false,
+        "clarification_reason": null,
+        "confidence": 0.93,
+        "raw_question": "2026年1月每天车费总额是多少？",
+        "human_review": { "requires_review": false, "flagged_fields": [], "reason": null }
+      }
+    mock_plan_response: |
+      {
+        "strategy": "g3_direct",
+        "primary_table": "gold.dws_daily_trip_summary",
+        "joins": [
+          { "table": "gold.dim_date", "on": "gold.dim_date.date = gold.dws_daily_trip_summary.trip_date", "type": "INNER" }
+        ],
+        "where_clauses": ["gold.dim_date.date BETWEEN DATE '2026-01-01' AND DATE '2026-01-31'"],
+        "group_by": ["gold.dim_date.date"],
+        "order_by": ["gold.dim_date.date"],
+        "aggregations": [{"expr": "SUM(total_fare_amount)", "alias": "total_fare_amount"}],
+        "limit": null,
+        "downgrade_reason": null,
+        "confidence": 0.93
+      }
+
+  # ── 1.10 G3 日度死亡人数查询 ──
+  - id: e2e_crash_killed_daily
+    question_zh: "2026年3月每天死亡人数是多少？"
+    expected_behavior: answer
+    expected_tables:
+      - gold.dws_daily_crash_summary
+      - gold.dim_date
+    expected_metrics:
+      - persons_killed
+    mock_intent_response: |
+      {
+        "domain": "safety",
+        "intent_type": "trend",
+        "metrics": ["persons_killed"],
+        "time_range": {
+          "type": "absolute",
+          "start": "2026-03-01",
+          "end": "2026-03-31",
+          "raw_expression": "2026年3月"
+        },
+        "dimensions": ["date"],
+        "filters": [],
+        "needs_clarification": false,
+        "clarification_reason": null,
+        "confidence": 0.92,
+        "raw_question": "2026年3月每天死亡人数是多少？",
+        "human_review": { "requires_review": false, "flagged_fields": [], "reason": null }
+      }
+    mock_plan_response: |
+      {
+        "strategy": "g3_direct",
+        "primary_table": "gold.dws_daily_crash_summary",
+        "joins": [
+          { "table": "gold.dim_date", "on": "gold.dim_date.date = gold.dws_daily_crash_summary.crash_date", "type": "INNER" }
+        ],
+        "where_clauses": ["gold.dim_date.date BETWEEN DATE '2026-03-01' AND DATE '2026-03-31'"],
+        "group_by": ["gold.dim_date.date"],
+        "order_by": ["gold.dim_date.date"],
+        "aggregations": [{"expr": "SUM(persons_killed)", "alias": "persons_killed"}],
+        "limit": null,
+        "downgrade_reason": null,
+        "confidence": 0.92
+      }
+
 
   # ═══════════════════════════════════════════════════════════════
   # 第二类：反问 (Clarification) — 5 个用例

@@ -41,6 +41,27 @@ class TestRuleBasedMVP:
         assert crash.plan.primary_table == "gold.dws_daily_crash_summary"
         assert "SUM(crash_count)" in crash.result.sql
 
+    def test_registered_g3_metrics_are_resolved_without_hardcoded_if_chain(self):
+        """规则版应通过注册指标目录支持更多 G3 日度指标。"""
+        agent = Text2SQLAgent()
+
+        cases = [
+            ("2026年3月每天受伤人数是多少？", "persons_injured", "gold.dws_daily_crash_summary", "SUM(persons_injured)"),
+            ("2026年3月每天死亡人数是多少？", "persons_killed", "gold.dws_daily_crash_summary", "SUM(persons_killed)"),
+            ("2026年2月每天罚款总额是多少？", "standard_fine_total", "gold.dws_daily_parking_summary", "SUM(standard_fine_total)"),
+            ("2026年1月每天平均距离是多少？", "avg_distance_miles", "gold.dws_daily_trip_summary", "AVG(avg_distance_miles)"),
+            ("2026年1月每天车费总额是多少？", "total_fare_amount", "gold.dws_daily_trip_summary", "SUM(total_fare_amount)"),
+        ]
+
+        for question, metric, table, aggregation in cases:
+            response = agent.ask(question)
+
+            assert response.clarification_needed is False
+            assert response.refusal is False
+            assert response.intent.metrics == [metric]
+            assert response.plan.primary_table == table
+            assert aggregation in response.result.sql
+
     def test_fuzzy_time_and_amount_need_clarification(self):
         """模糊时间和金额歧义必须反问"""
         agent = Text2SQLAgent()
