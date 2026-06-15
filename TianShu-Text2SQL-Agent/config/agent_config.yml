@@ -64,6 +64,41 @@ safety:
     - "PRAGMA"
     - "CHECKPOINT"
 
+# ── 规则模式配置 ──
+# B-8：规则模式定位为 PoC / 离线 fallback，不作为生产主路径。
+# 关键词→指标映射在此维护，新增指标无需改代码。
+# 表映射优先从 resolver context（meta.metric_definitions / contracts）动态加载。
+rule_mode:
+  # 关键词 → 指标名映射（用于 _detect_metric）
+  keyword_to_metric:
+    trip:
+      keywords: ["行程", "出行", "订单", "trip"]
+      metric: "trip_count"
+      domain: "traffic"
+    parking:
+      keywords: ["停车罚单", "罚单", "违章", "parking", "violation"]
+      metric: "parking_violation_count"
+      domain: "violation"
+    crash:
+      keywords: ["事故", "碰撞", "crash", "accident"]
+      metric: "crash_count"
+      domain: "safety"
+
+  # 指标 → G3 汇总表映射（离线 fallback，在线时从 resolver context 动态解析）
+  metric_to_table:
+    trip_count:
+      table: "gold.dws_daily_trip_summary"
+      date_col: "trip_date"
+      value_expr: "trip_count"
+    parking_violation_count:
+      table: "gold.dws_daily_parking_summary"
+      date_col: "issue_date"
+      value_expr: "violation_count"
+    crash_count:
+      table: "gold.dws_daily_crash_summary"
+      date_col: "crash_date"
+      value_expr: "crash_count"
+
 # ── 日志配置 ──
 logging:
   level: "INFO"

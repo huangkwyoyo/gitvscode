@@ -1,0 +1,177 @@
+# CRCS（Code Review Classification System）核心定义
+# ================================================
+# 这是 CRCS 分类系统的唯一权威定义文件。
+# 所有项目（Text2SQL Agent / Data Dev Agent / Review Agent）的 AGENTS.md
+# 均应引用此文件，不再各自复制完整定义。
+#
+# 每个项目的 AGENTS.md 中保留：
+#   - 本项目的边界映射表（哪些模块对应 A/B/C）
+#   - 本项目的硬边界清单
+#   - Skill 辅助规则（如适用）
+#
+# 维护规则：
+#   1. 修改此文件前必须通知所有引用方
+#   2. 分类定义变更属于 C 类变更（影响所有项目）
+#   3. 新增项目边界映射不改变此文件，在各自 AGENTS.md 中追加
+
+version: "1.0"
+spec_file: "crcs_policy.yml"
+maintainer: "Project Owner"
+last_updated: "2026-06-15"
+
+# ═══════════════════════════════════════════════════════
+# 一、总原则
+# ═══════════════════════════════════════════════════════
+
+general_principles:
+  - id: GP-1
+    rule: "每一个发现的问题都必须单独归类为 A / B / C 之一"
+  - id: GP-2
+    rule: "单个问题不允许混合分类"
+  - id: GP-3
+    rule: "分类争议按更高风险类别处理，优先级: C > B > A"
+  - id: GP-4
+    rule: "分类必须出现在每个问题分析的开头"
+  - id: GP-5
+    rule: "禁止输出未分类的审查结论"
+  - id: GP-6
+    rule: "禁止绕过分类直接修改代码"
+
+# ═══════════════════════════════════════════════════════
+# 二、A 类（AUTO-FIX）—— 可局部安全修复
+# ═══════════════════════════════════════════════════════
+
+class_a:
+  id: "A"
+  name: "AUTO-FIX"
+  description: "可局部安全修复的问题"
+
+  applicable_scenarios:
+    - "明确代码错误"
+    - "工具函数 Bug"
+    - "测试缺失"
+    - "局部逻辑错误"
+    - "不影响架构边界的小型修复"
+
+  handling:
+    - "允许直接修改代码"
+    - "必须附带单元测试"
+    - "不需要架构确认"
+
+  boundary_restrictions:
+    description: "触碰以下任一边界必须升级为 B 类或 C 类"
+    boundaries:
+      - "Agent 行为边界"
+      - "SQLPlan 流程"
+      - "SQL 安全门禁"
+      - "Prompt 语义"
+      - "Schema 结构"
+      - "Memory 写入机制"
+
+# ═══════════════════════════════════════════════════════
+# 三、B 类（DESIGN-REVIEW）—— 需要设计确认
+# ═══════════════════════════════════════════════════════
+
+class_b:
+  id: "B"
+  name: "DESIGN-REVIEW"
+  description: "需要设计确认的问题"
+
+  applicable_scenarios:
+    - "代码与当前设计文档不一致"
+    - "模块职责模糊"
+    - "Pipeline 流程需要确认"
+    - "Prompt / Pipeline 行为不一致"
+    - "IR / Schema 使用方式存在歧义"
+    - "修复方式存在多种选择"
+
+  handling:
+    rule: "禁止直接修改代码，必须先输出设计分析"
+    required_output:
+      - "当前实现说明（引用具体文件和行号）"
+      - "问题分析（为什么当前实现有问题）"
+      - "至少 3 种修复方案（每种方案的利弊和影响范围）"
+      - "推荐方案及理由"
+
+# ═══════════════════════════════════════════════════════
+# 四、C 类（ARCHITECTURE-RISK）—— 系统核心边界风险
+# ═══════════════════════════════════════════════════════
+
+class_c:
+  id: "C"
+  name: "ARCHITECTURE-RISK"
+  description: "涉及系统核心边界或高风险行为的问题"
+
+  applicable_scenarios:
+    - "可能影响 Agent 行为边界"
+    - "可能破坏 SQL 安全链路"
+    - "可能绕过 SQLPlan 流程"
+    - "可能影响 Schema / Memory / Prompt 体系"
+    - "可能引入 LLM 自由执行能力"
+    - "可能允许 LLM 直接生成 SQL"
+    - "可能放宽 DuckDB read-only 或 SQL safety 限制"
+
+  handling:
+    rule: "绝对禁止自动修复，必须先输出风险评估报告"
+    required_report_sections:
+      - title: "深度风险分析"
+        description: "问题根因和潜在危害"
+      - title: "系统影响范围"
+        description: "哪些模块、哪些管道层受影响"
+      - title: "边界检查清单"
+        description: "逐项确认以下 7 个边界是否被触及"
+        check_items:
+          - "SQL 安全门禁"
+          - "SQLPlan 流程"
+          - "Schema 约束"
+          - "Memory 写入机制"
+          - "LLM 是否可能直接生成 SQL"
+          - "DuckDB read-only 限制"
+          - "管道路由逻辑"
+      - title: "安全替代方案"
+        description: "至少 2 种方案，每种说明安全边界是否保持完整"
+
+# ═══════════════════════════════════════════════════════
+# 五、输出格式（所有项目统一）
+# ═══════════════════════════════════════════════════════
+
+output_format:
+  description: "每个审查发现必须使用的标准格式"
+  template: |
+    【分类】：A类 / B类 / C类
+    【理由】：简述归类原因
+    【问题】：说明发现的问题
+    【处理建议】：说明下一步动作
+  note: "一次审查发现多个问题必须逐条分类，不允许只给整体分类"
+
+# ═══════════════════════════════════════════════════════
+# 六、Skill 辅助规则（通用部分）
+# ═══════════════════════════════════════════════════════
+
+skill_assistance:
+  description: >
+    对 B/C 类复杂审查，推荐使用 superpowers / review skill 辅助拆解，
+    但最终分类和结论必须落到 A/B/C 体系。Skill 输出不替代人工判定。
+  default_skill_map:
+    - scenario: "C 类 — 架构边界风险"
+      skill: "superpowers:brainstorming"
+      purpose: "拆解风险链路、穷举影响面"
+    - scenario: "C 类 — 安全链路审查"
+      skill: "security-review"
+      purpose: "逐项检查安全门禁"
+    - scenario: "B 类 — 设计一致性审查"
+      skill: "review"
+      purpose: "多维对比当前实现 vs 设计文档"
+    - scenario: "B 类 — 修复方案选择"
+      skill: "superpowers:brainstorming"
+      purpose: "生成 ≥3 种可行方案并对比"
+    - scenario: "B/C 类 — 代码审查报告"
+      skill: "code-review"
+      purpose: "生成结构化审查发现"
+    - scenario: "A/B/C 类 — 验证修复效果"
+      skill: "verify"
+      purpose: "确认行为无回归"
+  constraints:
+    - "Skill 输出仅作为分析素材，最终分类判定由审查者根据分类定义执行"
+    - "Skill 发现的问题必须逐条拆解并独立分类，禁止整体套用 skill 结论"
+    - "C 类问题，skill 输出不可替代风险评估报告（边界检查清单 + 至少 2 种替代方案）"

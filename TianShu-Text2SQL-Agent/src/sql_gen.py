@@ -280,7 +280,10 @@ def validate_sql_safety(
             "日期过滤必须通过 gold.dim_date 进行（AGENTS.md 安全规则第3条）"
         )
 
-    # ── 5. JOIN 白名单校验 ──
+    # ── 5. JOIN 白名单校验（兜底防线）──
+    # B-7：SQL 级 JOIN 检查是兜底防线，防止 sql_plan_to_sql() 生成阶段
+    # 引入了 SQLPlan 中未出现的 JOIN（防御深度）。
+    # 主防线在 SQLPlan.validate()（IR 级）。
     # C-1 修复：用 is not None 区分"未提供白名单"与"白名单为空（离线模式）"
     if join_whitelist is not None:
         join_violations = _check_join_whitelist(sql, join_whitelist)

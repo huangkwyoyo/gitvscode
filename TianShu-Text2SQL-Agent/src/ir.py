@@ -222,7 +222,10 @@ class SQLPlan:
                 f"请检查表名或 contracts/semantic_contract.yml"
             )
 
-        # JOIN 必须在白名单中
+        # ── JOIN 白名单校验（主防线）──
+        # B-7：IR 级 JOIN 检查是主防线，在规划阶段即拦截不合规 JOIN。
+        # SQL 级 validate_sql_safety() 保留兜底检查，防止 sql_plan_to_sql()
+        # 生成阶段引入计划外的 JOIN（防御深度）。
         # C-1 修复：用 is not None 代替 falsy 检查
         if self.joins and join_whitelist is not None and self.primary_table:
             for join in self.joins:
@@ -230,7 +233,7 @@ class SQLPlan:
                 reverse_pair = (join.table, self.primary_table)
                 if join_pair not in join_whitelist and reverse_pair not in join_whitelist:
                     errors.append(
-                        f"JOIN {self.primary_table} ↔ {join.table} "
+                        f"[IR 主防线] JOIN {self.primary_table} ↔ {join.table} "
                         f"不在核准白名单中"
                     )
 

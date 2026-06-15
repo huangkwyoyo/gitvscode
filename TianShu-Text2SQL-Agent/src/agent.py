@@ -45,6 +45,7 @@ from .ir import (
 )
 from .resolver import TianShuResolver, AgentContext
 from .ambiguity import detect_ambiguity, load_clarification_rules
+from .request_guard import is_write_request, is_forbidden_layer_request
 from .sql_gen import sql_plan_to_sql, validate_sql_safety
 from .explainer import explain_result
 from .llm import LLMClient, LLMRequest, PromptLoader
@@ -143,13 +144,14 @@ class Text2SQLAgent:
         response = AgentResponse(question=question)
         response.trace.append(f"[INFO] 收到问题: {question}")
 
-        if self._is_write_request(question):
+        # ── Step 0.5: 请求安全预检查（rule/llm 共享同一路径）──
+        if is_write_request(question):
             response.refusal = True
             response.refusal_reason = "我是只读分析 Agent，不能修改、删除或创建数据。"
             response.trace.append(f"         [REFUSE] {response.refusal_reason}")
             return response
 
-        if self._is_forbidden_layer_request(question):
+        if is_forbidden_layer_request(question):
             response.refusal = True
             response.refusal_reason = "Bronze/Silver 层不能直接用于业务问数，请改用 Gold 层指标提问。"
             response.trace.append(f"         [REFUSE] {response.refusal_reason}")
@@ -267,7 +269,11 @@ class Text2SQLAgent:
                 )
             return response
 
-        # ── Step 4: 安全检查 + SQL 生成 ──
+        # ── Step 4: SQL 生成 + 安全检查（二层防线）──
+        # B-7 职责分离：
+        #   - 主防线: SQLPlan.validate() 已在 Step 3.5 完成 JOIN 白名单校验
+        #   - 兜底防线: validate_sql_safety() 在此检查 SQL 中是否引入了计划外 JOIN
+        #   - 两层都检查：SELECT only、表白名单、禁止关键字、日期过滤
         response.trace.append("[STEP 4] SQL 生成 + 安全检查...")
         sql = sql_plan_to_sql(plan)
 
@@ -510,33 +516,24 @@ class Text2SQLAgent:
 
     def _plan_query_rule(self, intent: QuestionIntent) -> SQLPlan:
         """
-        规则版查询规划。
+        规则版查询规划（PoC / 离线 fallback）。
 
-        MVP 只选择 G3 日汇总表，并显式 JOIN gold.dim_date 做日期过滤。
+        B-8 修复：指标→表映射优先级：
+            1. resolver context 中的 available_metrics（从 meta.metric_definitions 动态发现）
+            2. agent_config.yml 的 rule_mode.metric_to_table（离线 fallback）
+
+        规则模式定位为 PoC / fallback，不作为生产主路径。
         """
         metric = intent.metrics[0] if intent.metrics else ""
-        config = {
-            "trip_count": {
-                "table": "gold.dws_daily_trip_summary",
-                "date_col": "trip_date",
-                "value_expr": "trip_count",
-            },
-            "parking_violation_count": {
-                "table": "gold.dws_daily_parking_summary",
-                "date_col": "issue_date",
-                "value_expr": "violation_count",
-            },
-            "crash_count": {
-                "table": "gold.dws_daily_crash_summary",
-                "date_col": "crash_date",
-                "value_expr": "crash_count",
-            },
-        }.get(metric)
+        config = self._resolve_metric_table_mapping(metric)
 
         if config is None:
             return SQLPlan(
                 strategy=Strategy.NEED_CLARIFICATION,
-                downgrade_reason="该指标暂未纳入规则版 MVP，请明确或等待接入 LLM 规划器。",
+                downgrade_reason=(
+                    f"指标 '{metric}' 暂未纳入规则模式，"
+                    f"请明确或等待接入 LLM 规划器"
+                ),
             )
 
         table = config["table"]
@@ -562,6 +559,85 @@ class Text2SQLAgent:
             aggregations=[Aggregation(expr=f"SUM({value_expr})", alias=metric)],
             confidence=0.95,
         )
+
+    def _resolve_metric_table_mapping(
+        self, metric_name: str,
+    ) -> Optional[dict[str, str]]:
+        """
+        解析指标名 → G3 表的映射（数据驱动，双层 fallback）。
+
+        优先级：
+          1. resolver context 中的 available_metrics（在线模式，动态发现）
+          2. agent_config.yml 的 rule_mode.metric_to_table（离线 fallback）
+
+        表名优先从 context 获取，列表达式优先从 config 获取（config 更精确）。
+
+        Returns:
+            {"table": "...", "date_col": "...", "value_expr": "..."} 或 None
+        """
+        table = None
+        date_col = None
+        value_expr = None
+
+        # ── Step 1: 从 context 或 config 获取表名 ──
+        if self._context and self._context.available_metrics:
+            for m in self._context.available_metrics:
+                if m.name == metric_name and m.base_table:
+                    table = m.base_table
+                    date_col = self._infer_date_column(table)
+                    value_expr = self._extract_value_expr(m.aggregation, metric_name)
+                    break
+
+        # ── Step 2: config 中的精确值覆盖推导值 ──
+        rule_cfg = self._agent_config.get("rule_mode", {})
+        metric_table = rule_cfg.get("metric_to_table", {})
+        config_entry = metric_table.get(metric_name)
+        if config_entry:
+            if table is None:
+                table = config_entry["table"]
+            if date_col is None:
+                date_col = config_entry.get("date_col", "date")
+            # config 的 value_expr 最精确，优先使用
+            value_expr = config_entry.get("value_expr", value_expr or metric_name)
+
+        if table is None:
+            return None
+
+        return {
+            "table": table,
+            "date_col": date_col or "date",
+            "value_expr": value_expr or metric_name,
+        }
+
+    @staticmethod
+    def _extract_value_expr(aggregation: str, fallback: str) -> str:
+        """
+        从聚合表达式（如 'SUM(violation_count)'）中提取值列名。
+
+        如果提取失败，使用 fallback。
+        """
+        import re
+        # 匹配 SUM(expr)、COUNT(expr) 等
+        match = re.search(r'[A-Z]+\s*\(\s*(\w+)\s*\)', aggregation, re.IGNORECASE)
+        if match:
+            return match.group(1)
+        # 如果 aggregation 已经是纯列名
+        if aggregation and re.match(r'^\w+$', aggregation):
+            return aggregation
+        return fallback
+
+    @staticmethod
+    def _infer_date_column(table_name: str) -> str:
+        """从 G3 汇总表名推导日期列名"""
+        date_map = {
+            "trip": "trip_date",
+            "parking": "issue_date",
+            "crash": "crash_date",
+        }
+        for key, date_col in date_map.items():
+            if key in table_name.lower():
+                return date_col
+        return "date"
 
     def _render_llm_prompt(self, task: str, payload: dict[str, Any]) -> str:
         """渲染 LLM 调用 Prompt"""
@@ -677,15 +753,6 @@ class Text2SQLAgent:
             redacted = re.sub(pattern, lambda match: f"{match.group(1)}[REDACTED]" if match.lastindex else "[REDACTED]", redacted)
         return redacted
 
-    def _is_write_request(self, question: str) -> bool:
-        """识别明显写操作请求"""
-        return any(word in question for word in ["删除", "更新", "修改", "插入", "写入", "创建", "建表"])
-
-    def _is_forbidden_layer_request(self, question: str) -> bool:
-        """识别直接查询 Bronze/Silver 的请求"""
-        lowered = question.lower()
-        return "bronze" in lowered or "silver" in lowered or "原始表" in question or "原始数据" in question
-
     def _has_ambiguous_amount(self, question: str) -> bool:
         """金额词未落到具体指标时必须反问"""
         amount_words = ["金额", "多少钱", "费用", "收了多少", "收入"]
@@ -695,13 +762,22 @@ class Text2SQLAgent:
         )
 
     def _detect_metric(self, question: str) -> Optional[dict[str, Any]]:
-        """用关键词识别 MVP 支持的三个注册指标"""
-        if any(word in question for word in ["行程", "出行", "订单"]):
-            return {"metric": "trip_count", "domain": Domain.TRAFFIC}
-        if any(word in question for word in ["停车罚单", "罚单", "违章"]):
-            return {"metric": "parking_violation_count", "domain": Domain.VIOLATION}
-        if any(word in question for word in ["事故", "碰撞"]):
-            return {"metric": "crash_count", "domain": Domain.SAFETY}
+        """
+        用关键词识别已注册指标（数据驱动）。
+
+        B-8 修复：关键词→指标映射从 agent_config.yml 的 rule_mode 段加载，
+        不再硬编码。新增指标只需修改配置文件。
+        """
+        rule_cfg = self._agent_config.get("rule_mode", {})
+        keyword_map = rule_cfg.get("keyword_to_metric", {})
+
+        for mapping in keyword_map.values():
+            keywords = mapping.get("keywords", [])
+            if any(word in question for word in keywords):
+                return {
+                    "metric": mapping["metric"],
+                    "domain": Domain(mapping["domain"]),
+                }
         return None
 
     def _parse_month_range(self, question: str) -> TimeRange:
@@ -732,8 +808,9 @@ class Text2SQLAgent:
 def main():
     """CLI 入口 — 输出当前版本和已验证功能清单"""
     setup_console_encoding()
-    print("TianShu Text2SQL Agent v0.2.0")
-    print("规则模式 (rule) 支持 MVP 高频问数；LLM 模式需传入 llm_client 启用。")
+    print("TianShu Text2SQL Agent v0.3.0")
+    print("规则模式 (rule) 定位为 PoC / 离线 fallback；LLM 模式需传入 llm_client 启用。")
+    print("指标映射从 agent_config.yml 加载（rule_mode 段），新增指标无需改代码。")
     print()
     print("已验证：")
     print("  [OK] 项目结构建立")
