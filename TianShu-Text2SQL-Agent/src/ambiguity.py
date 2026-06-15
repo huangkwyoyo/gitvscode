@@ -99,6 +99,11 @@ def generate_clarification(
 
     原则：提供 2-3 个具体选项让用户选择，而非问开放式问题。
 
+    注意：
+        当前反问流程中 detect_ambiguity() 直接返回规则模板中的消息，
+        Agent.ask() Step 1.5 使用 intent.clarification_reason。
+        此函数保留供未来增强反问交互时使用（如 REPL 中的选项式反问）。
+
     Args:
         trigger: 触发反问的原因
         options: 可选的具体选项（2-3 个）

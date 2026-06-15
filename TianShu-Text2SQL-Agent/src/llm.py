@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import json
 import os
+import socket
+import time
+import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -85,7 +88,8 @@ class MockLLMClient:
 
 
 # ── 密钥文件路径（项目级配置，不推远程） ──
-_SECRETS_PATH = Path("config/secrets.yml")
+# 使用 __file__ 解析绝对路径，避免 CWD 不在项目根时解析失败
+_SECRETS_PATH = Path(__file__).resolve().parent.parent / "config" / "secrets.yml"
 
 
 def _load_api_key_from_secrets(provider: str = "deepseek") -> str | None:
@@ -142,7 +146,12 @@ class OpenAIChatLLMClient:
         self._timeout_seconds = timeout_seconds
 
     def complete(self, request: LLMRequest) -> LLMResponse:
-        """调用 Chat Completions API 并返回文本输出"""
+        """调用 Chat Completions API 并返回文本输出。
+
+        内置重试机制：网络层错误（URLError、socket.timeout）和可重试的 HTTP 错误
+        （429 限流、5xx 服务端错误）最多重试 2 次，使用指数退避。
+        400 类请求格式错误不重试，直接抛出。
+        """
         if not self._api_key:
             raise ValueError(
                 "缺少 API 密钥，请通过参数 api_key、环境变量 OPENAI_API_KEY "
@@ -155,22 +164,67 @@ class OpenAIChatLLMClient:
                 {"role": "user", "content": request.prompt},
             ],
         }
-        http_request = urllib.request.Request(
-            url=f"{self._base_url}/chat/completions",
-            data=json.dumps(payload).encode("utf-8"),
-            headers={
-                "Authorization": f"Bearer {self._api_key}",
-                "Content-Type": "application/json",
-            },
-            method="POST",
-        )
-        with urllib.request.urlopen(http_request, timeout=self._timeout_seconds) as response:
-            raw = json.loads(response.read().decode("utf-8"))
 
-        return LLMResponse(
-            task=request.task,
-            content=self._extract_output_text(raw),
-            raw=raw,
+        max_retries = 2
+        last_error: str | None = None
+
+        for attempt in range(max_retries + 1):
+            try:
+                http_request = urllib.request.Request(
+                    url=f"{self._base_url}/chat/completions",
+                    data=json.dumps(payload).encode("utf-8"),
+                    headers={
+                        "Authorization": f"Bearer {self._api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    method="POST",
+                )
+                with urllib.request.urlopen(
+                    http_request, timeout=self._timeout_seconds,
+                ) as response:
+                    raw = json.loads(response.read().decode("utf-8"))
+
+                return LLMResponse(
+                    task=request.task,
+                    content=self._extract_output_text(raw),
+                    raw=raw,
+                )
+
+            except urllib.error.HTTPError as exc:
+                # 读取错误响应体（如有）
+                try:
+                    error_body = exc.read().decode("utf-8") if exc.fp else ""
+                except Exception:
+                    error_body = ""
+                last_error = (
+                    f"HTTP {exc.code} {exc.reason}"
+                    f"{': ' + error_body[:200] if error_body else ''}"
+                )
+                # 400 系列：请求格式问题，重试无意义
+                if 400 <= exc.code < 500 and exc.code != 429:
+                    raise RuntimeError(
+                        f"LLM API 请求错误: {last_error}"
+                    ) from exc
+                # 429（限流）和 5xx（服务端错误）：可重试
+
+            except urllib.error.URLError as exc:
+                last_error = f"网络错误: {exc.reason}"
+                # URLError 通常是网络层问题（DNS、连接拒绝、socket 关闭），可重试
+
+            except socket.timeout:
+                last_error = f"请求超时（{self._timeout_seconds}s）"
+
+            except OSError as exc:
+                last_error = f"系统网络错误: {exc}"
+                # socket 意外关闭等底层错误，可重试
+
+            # ── 重试前等待（指数退避）──
+            if attempt < max_retries:
+                backoff = 2 ** attempt  # 1s, 2s
+                time.sleep(backoff)
+
+        raise RuntimeError(
+            f"LLM API 调用失败（{max_retries + 1} 次尝试后仍失败）: {last_error}"
         )
 
     def _extract_output_text(self, raw: dict) -> str:

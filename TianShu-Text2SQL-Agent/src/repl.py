@@ -9,23 +9,11 @@ TianShu Text2SQL Agent 交互式 REPL。
 
 from __future__ import annotations
 
-import sys
 from datetime import datetime
 
 from .agent import Text2SQLAgent
 from .ir import AgentResponse
-
-
-def _setup_console_encoding() -> None:
-    """
-    设置控制台编码为 UTF-8，解决 Windows GBK 控制台下 emoji 字符输出崩溃问题。
-    """
-    if sys.platform == 'win32':
-        try:
-            sys.stdout.reconfigure(encoding='utf-8', errors='replace')  # type: ignore[attr-defined]
-            sys.stderr.reconfigure(encoding='utf-8', errors='replace')  # type: ignore[attr-defined]
-        except Exception:
-            pass
+from .utils import setup_console_encoding
 
 
 def _print_banner(agent: Text2SQLAgent):
@@ -86,7 +74,7 @@ def run_repl(
         - 正常                       → 打印中文解释 + 元信息
     """
     # 初始化 Agent
-    _setup_console_encoding()
+    setup_console_encoding()
     agent = Text2SQLAgent(
         agent_config_path=agent_config_path,
         tianshu_config_path=tianshu_config_path,

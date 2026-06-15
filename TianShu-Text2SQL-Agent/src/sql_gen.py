@@ -261,7 +261,8 @@ def validate_sql_safety(
         )
 
     # ── 3. 表名白名单校验 ──
-    if available_tables:
+    # C-1 修复：用 is not None 区分"未提供白名单"与"白名单为空（离线模式）"
+    if available_tables is not None:
         # 大小写不敏感比较
         available_lower = {t.lower() for t in available_tables}
         unknown = [t for t in table_refs if t.lower() not in available_lower]
@@ -280,7 +281,8 @@ def validate_sql_safety(
         )
 
     # ── 5. JOIN 白名单校验 ──
-    if join_whitelist:
+    # C-1 修复：用 is not None 区分"未提供白名单"与"白名单为空（离线模式）"
+    if join_whitelist is not None:
         join_violations = _check_join_whitelist(sql, join_whitelist)
         violations.extend(join_violations)
 

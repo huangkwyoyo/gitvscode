@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Optional
@@ -104,34 +105,19 @@ class QuestionIntent:
 
     def validate(self) -> list[str]:
         """
-        校验 QuestionIntent 的语义正确性。
+        校验 QuestionIntent 的结构完整性（仅结构性校验）。
+
+        B-5 职责拆分：本方法只检查 IR 结构是否完整可解析。
+        歧义检测（置信度、模糊时间、反问标记）统一由
+        src/ambiguity.py 的 detect_ambiguity() 处理。
 
         Returns:
-            错误列表。空列表表示校验通过。
-            有错误时，调用方应反问用户而非继续生成 SQLPlan。
+            错误列表。空列表表示结构完整。
+            有错误时表明 LLM 输出无法构成有效的 QuestionIntent。
         """
         errors: list[str] = []
 
-        # 需要反问的场景
-        if self.needs_clarification:
-            errors.append(
-                f"需要反问用户: {self.clarification_reason or '歧义未解决'}"
-            )
-            return errors
-
-        # 置信度过低 → 反问
-        if self.confidence < 0.5:
-            errors.append(
-                f"意图识别置信度过低 ({self.confidence:.2f})，建议反问确认"
-            )
-
-        # 模糊时间范围 → 反问
-        if self.time_range.type == TimeRangeType.FUZZY and self.metrics:
-            errors.append(
-                f"时间范围模糊 ('{self.time_range.raw_expression}')，需要明确时间范围"
-            )
-
-        # 领域未知且无指标 → 可能完全没理解
+        # 结构性校验：领域未知且无指标 → LLM 完全未能解析意图
         if self.domain is None and not self.metrics:
             errors.append("无法识别查询领域和指标，请重新表述问题")
 
@@ -229,14 +215,16 @@ class SQLPlan:
         # 主表必须指定
         if not self.primary_table:
             errors.append("primary_table 不能为空")
-        elif available_tables and self.primary_table not in available_tables:
+        # C-1 修复：用 is not None 代替 falsy 检查，区分"未提供白名单"与"白名单为空"
+        elif available_tables is not None and self.primary_table not in available_tables:
             errors.append(
                 f"表 {self.primary_table} 不在可用表列表中，"
                 f"请检查表名或 contracts/semantic_contract.yml"
             )
 
         # JOIN 必须在白名单中
-        if self.joins and join_whitelist and self.primary_table:
+        # C-1 修复：用 is not None 代替 falsy 检查
+        if self.joins and join_whitelist is not None and self.primary_table:
             for join in self.joins:
                 join_pair = (self.primary_table, join.table)
                 reverse_pair = (join.table, self.primary_table)
@@ -300,7 +288,6 @@ class SQLResult:
         签名 = MD5(行数 + 列名列表 + 列类型列表)
         用于结果稳定性检测——签名变化意味着数据结构发生了变更。
         """
-        import hashlib
         content = f"{self.row_count}|{','.join(self.columns)}|{','.join(self.column_types)}"
         return hashlib.md5(content.encode()).hexdigest()
 

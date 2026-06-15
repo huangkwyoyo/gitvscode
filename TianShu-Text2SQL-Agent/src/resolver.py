@@ -20,6 +20,10 @@ from typing import Any, Optional
 
 import yaml
 
+from .executor import execute_sql as _do_execute
+from .ir import SQLResult
+from .safety_policy_loader import load_forbidden_keywords
+
 try:
     import duckdb
 except ImportError:
@@ -55,6 +59,9 @@ class AgentContext:
 
     聚合了 TianShu 契约 + DuckDB 动态发现的全部信息，
     作为 Prompt 模板渲染的输入。
+
+    offline 标志为 True 时表示：Resolver 初始化失败，上下文中的
+    安全白名单均为空，Agent 必须禁止执行 SQL（防御深度）。
     """
     available_tables: list[TableInfo] = field(default_factory=list)
     available_metrics: list[MetricInfo] = field(default_factory=list)
@@ -62,6 +69,7 @@ class AgentContext:
     forbidden_patterns: list[str] = field(default_factory=list)
     forbidden_sql_keywords: list[str] = field(default_factory=list)
     dim_date_range: tuple[str, str] = ("1997-01-01", "2027-12-31")
+    offline: bool = False  # 是否为离线模式（Resolver 初始化失败后为 True）
 
 
 class TianShuResolver:
@@ -257,11 +265,12 @@ class TianShuResolver:
         for fb in semantic.get("forbidden", []):
             forbidden_patterns.append(fb.get("pattern", ""))
 
-        # 从安全策略中提取禁止的 SQL 关键字
-        forbidden_keywords: list[str] = []
-        forbidden_ops = sql_safety.get("forbidden_operations", [])
-        for op in forbidden_ops:
-            forbidden_keywords.extend(op.get("keywords", []))
+        # C-2 修复：从统一加载器获取禁止的 SQL 关键字（合并 agent_config extras）
+        contracts_abs = self._tianshu_root / self._config.get("tianshu", {}).get("contracts_path", "contracts")
+        forbidden_keywords: list[str] = load_forbidden_keywords(
+            contracts_path=contracts_abs.resolve(),
+            strict=False,  # 已在 load_contracts 中验证契约存在，此处无需重复抛异常
+        )
 
         return AgentContext(
             available_tables=available_tables,
@@ -286,6 +295,39 @@ class TianShuResolver:
             schema, name = full_name.split(".", 1)
             tables.append(TableInfo(schema=schema, name=name))
         return tables
+
+    def execute_sql(
+        self,
+        sql: str,
+        timeout_seconds: int = 30,
+        source_table: str = "",
+    ) -> SQLResult:
+        """
+        在 DuckDB 只读连接上执行 SQL，返回结构化结果。
+
+        封装了 _conn 的访问细节，防止外部代码直接操作 DuckDB 连接。
+        内部调用 executor.execute_sql() 执行实际查询。
+
+        Args:
+            sql: 要执行的 SELECT 语句
+            timeout_seconds: 超时时间（秒），默认 30 秒
+            source_table: 主数据来源表（用于结果标注）
+
+        Returns:
+            SQLResult 包含列名、数据类型、数据行、执行时间和签名。
+            连接不可用时返回带有错误信息的 SQLResult。
+        """
+        if self._conn is None:
+            return SQLResult(
+                sql=sql,
+                error="数据库未连接（离线模式）",
+            )
+        return _do_execute(
+            self._conn,
+            sql,
+            timeout_seconds=timeout_seconds,
+            source_table=source_table,
+        )
 
     def close(self):
         """关闭 DuckDB 连接"""

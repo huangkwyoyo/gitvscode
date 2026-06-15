@@ -114,9 +114,14 @@ def test_intent_classifier_fixtures_map_to_valid_intent_or_refusal():
         if behavior == "answer":
             assert errors == [], case["id"]
         elif behavior == "clarification":
-            assert errors, case["id"]
-            assert intent.needs_clarification is True
-            assert intent.clarification_reason
+            # B-5: validate() 只做结构性校验，歧义检测由 detect_ambiguity() 处理
+            # clarification 意图的 needs_clarification 标志直接由 intent 携带
+            assert intent.needs_clarification is True, (
+                f"{case['id']}: clarification 意图必须设置 needs_clarification=True"
+            )
+            assert intent.clarification_reason, (
+                f"{case['id']}: clarification 意图必须有 clarification_reason"
+            )
         else:
             raise AssertionError(f"未知期望行为: {behavior}")
 

@@ -44,7 +44,11 @@ class TestQuestionIntent:
         assert errors == []
 
     def test_validate_needs_clarification(self):
-        """测试需要反问的场景"""
+        """B-5: needs_clarification 由 detect_ambiguity() 处理，validate() 仅检查结构。
+
+        当 intent 有 needs_clarification=True 但 domain=None 且 metrics=[] 时，
+        validate() 会检测到"无法识别领域和指标"这一结构问题。
+        """
         from src.ir import QuestionIntent
 
         intent = QuestionIntent(
@@ -53,11 +57,15 @@ class TestQuestionIntent:
             confidence=0.3,
         )
         errors = intent.validate()
+        # domain=None + metrics=[] → 结构性错误
         assert len(errors) > 0
-        assert any("反问" in e for e in errors)
+        assert any("无法识别查询领域和指标" in e for e in errors)
 
     def test_validate_fuzzy_time(self):
-        """测试模糊时间的校验"""
+        """B-5: 模糊时间范围不再由 validate() 检查，统一由 detect_ambiguity() 处理。
+
+        有指标 + FUZZY 时间 → 结构完整，validate() 应通过（歧义检测在 Step 2 处理）。
+        """
         from src.ir import QuestionIntent, TimeRange, TimeRangeType
 
         intent = QuestionIntent(
@@ -66,10 +74,15 @@ class TestQuestionIntent:
             confidence=0.6,
         )
         errors = intent.validate()
-        assert len(errors) > 0
+        # 有指标 → 结构完整，validate() 通过
+        # 歧义（模糊时间）由 detect_ambiguity() 在 Step 2 处理
+        assert errors == []
 
     def test_validate_low_confidence(self):
-        """测试低置信度的校验"""
+        """B-5: 低置信度不再由 validate() 检查，统一由 detect_ambiguity() 处理。
+
+        有 domain + 指标 → 结构完整，validate() 应通过（置信度在 Step 2 检查）。
+        """
         from src.ir import QuestionIntent, Domain, IntentType, TimeRange, TimeRangeType
 
         intent = QuestionIntent(
@@ -80,7 +93,9 @@ class TestQuestionIntent:
             confidence=0.3,
         )
         errors = intent.validate()
-        assert len(errors) > 0
+        # 结构完整，validate() 通过
+        # 低置信度由 detect_ambiguity() 在 Step 2 使用统一阈值检查
+        assert errors == []
 
     def test_to_dict(self):
         """测试序列化"""

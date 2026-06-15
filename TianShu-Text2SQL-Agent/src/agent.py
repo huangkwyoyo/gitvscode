@@ -18,15 +18,17 @@ Text2SQL Agent 主循环。
 
 from __future__ import annotations
 
+import atexit
 import calendar
 import hashlib
 import json
 import re
-import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 from uuid import uuid4
+
+import yaml
 
 from .ir import (
     AgentResponse,
@@ -44,27 +46,11 @@ from .ir import (
 from .resolver import TianShuResolver, AgentContext
 from .ambiguity import detect_ambiguity, load_clarification_rules
 from .sql_gen import sql_plan_to_sql, validate_sql_safety
-from .executor import execute_sql
 from .explainer import explain_result
 from .llm import LLMClient, LLMRequest, PromptLoader
 from .llm_adapter import RefusalDetected
 from .llm_pipeline import extract_json_object, question_intent_from_dict, sql_plan_from_dict
-
-
-def _setup_console_encoding() -> None:
-    """
-    设置控制台编码为 UTF-8，解决 Windows GBK 控制台下 emoji 字符输出崩溃问题。
-
-    仅在 Windows 平台执行。Python 3.7+ 支持 sys.stdout.reconfigure()。
-    如 reconfigure 失败（极老的 Python），静默跳过。
-    """
-    if sys.platform == 'win32':
-        try:
-            sys.stdout.reconfigure(encoding='utf-8', errors='replace')  # type: ignore[attr-defined]
-            sys.stderr.reconfigure(encoding='utf-8', errors='replace')  # type: ignore[attr-defined]
-        except Exception:
-            # reconfigure 不可用（Python < 3.7 或非标准 stdout），使用替代方案
-            pass
+from .utils import setup_console_encoding
 
 
 class Text2SQLAgent:
@@ -112,10 +98,11 @@ class Text2SQLAgent:
 
         # 初始化 TianShu 连接
         self._init_resolver(tianshu_config_path)
+        # 进程退出时自动关闭 DuckDB 连接，防止测试中未调用 close() 导致的连接泄露
+        atexit.register(self.close)
 
     def _load_agent_config(self, config_path: str) -> None:
         """加载 Agent 运行时配置"""
-        import yaml
         config_file = Path(config_path)
         if config_file.exists():
             with open(config_file, "r", encoding="utf-8") as f:
@@ -133,8 +120,10 @@ class Text2SQLAgent:
                 self._clarification_rules = load_clarification_rules(question_policy)
         except Exception as exc:
             print(f"[WARN] TianShu 连接初始化失败: {exc}")
-            print(f"       Agent 将在离线模式下运行（无数据库连接）")
-            self._context = AgentContext()
+            print(f"       Agent 将在离线模式下运行（无数据库连接，禁止执行 SQL）")
+            # C-1 修复：显式标记离线模式 + 清空 resolver 防止部分初始化绕过
+            self._context = AgentContext(offline=True)
+            self._resolver = None  # 确保无残留连接引用
 
     @property
     def is_ready(self) -> bool:
@@ -178,12 +167,35 @@ class Text2SQLAgent:
         response.intent = intent
         response.trace.append(f"         领域={intent.domain}, 指标={intent.metrics}, 置信度={intent.confidence:.2f}")
 
-        # ── Step 1.5: IR 校验 —— Layer 1 语义校验 ──
+        # ── Step 1.5: 意图歧义前置检查 + IR 结构校验 ──
+        # B-5：intent 自身标记的 needs_clarification 优先于结构性校验，
+        # 使用 intent 自带的友好反问消息，而非 validate() 的结构错误提示
+        if intent.needs_clarification:
+            response.clarification_needed = True
+            response.clarification_message = (
+                intent.clarification_reason or "需要进一步确认您的需求"
+            )
+            response.trace.append(f"         [CLARIFY] 意图标记需要反问: {response.clarification_message}")
+            # 保存证据
+            if self._last_intent_raw is not None:
+                self._save_raw_output_on_failure(
+                    question=question,
+                    stage="intent_clarification",
+                    prompt_name="intent_classifier",
+                    raw_output=self._last_intent_raw,
+                    parsed_output=intent.to_dict(),
+                    parse_success=True,
+                    validation_success=False,
+                    error_message=response.clarification_message,
+                )
+            return response
+
+        # B-5：validate() 仅做结构性检查（domain + metrics 是否可解析）
         intent_errors = intent.validate()
         if intent_errors:
             response.clarification_needed = True
-            response.clarification_message = f"意图校验失败: {'; '.join(intent_errors)}"
-            response.trace.append(f"         [FAIL] Layer1 校验失败: {response.clarification_message}")
+            response.clarification_message = f"抱歉，没能理解您的问题: {'; '.join(intent_errors)}"
+            response.trace.append(f"         [CLARIFY] Layer1 结构校验: {response.clarification_message}")
             # 保存证据用于诊断（raw output 在 _classify_intent_llm 中暂存）
             if self._last_intent_raw is not None:
                 self._save_raw_output_on_failure(
@@ -235,9 +247,12 @@ class Text2SQLAgent:
             join_whitelist=join_whitelist_set,
         )
         if plan_errors:
-            response.refusal = True
-            response.refusal_reason = f"SQL 规划校验失败: {'; '.join(plan_errors)}"
-            response.trace.append(f"         [FAIL] Layer2 校验失败: {response.refusal_reason}")
+            # B-3 修复：plan 校验失败应温和反问，而非硬拒绝
+            response.clarification_needed = True
+            response.clarification_message = (
+                f"查询规划需要确认: {'; '.join(plan_errors)}"
+            )
+            response.trace.append(f"         [CLARIFY] Layer2 校验: {response.clarification_message}")
             # 保存证据用于诊断（raw output 在 _plan_query_llm 中暂存）
             if self._last_plan_raw is not None:
                 self._save_raw_output_on_failure(
@@ -248,7 +263,7 @@ class Text2SQLAgent:
                     parsed_output=plan.to_dict(),
                     parse_success=True,
                     validation_success=False,
-                    error_message=response.refusal_reason,
+                    error_message=response.clarification_message,
                 )
             return response
 
@@ -281,10 +296,17 @@ class Text2SQLAgent:
 
         # ── Step 5: 执行 SQL ──
         response.trace.append("[STEP 5] 执行 SQL...")
-        if self._resolver and self._resolver._conn:
+        # C-1 修复：离线模式必须阻断 SQL 执行（防御深度）
+        # 即使前面的安全校验因为某种原因未拦截，这一层也必须阻断
+        if self._context and self._context.offline:
+            result = SQLResult(
+                sql=sql,
+                error="Agent 处于离线模式，禁止执行 SQL（安全约束）",
+            )
+            response.trace.append("         [BLOCKED] 离线模式禁止执行 SQL")
+        elif self._resolver:
             timeout_seconds = self._agent_config.get("safety", {}).get("query_timeout", 30)
-            result = execute_sql(
-                self._resolver._conn,
+            result = self._resolver.execute_sql(
                 sql,
                 timeout_seconds=timeout_seconds,
                 source_table=plan.primary_table or "",
@@ -544,7 +566,6 @@ class Text2SQLAgent:
     def _render_llm_prompt(self, task: str, payload: dict[str, Any]) -> str:
         """渲染 LLM 调用 Prompt"""
         template = self._prompt_loader.load(task)
-        import json
         return (
             f"{template}\n\n"
             "## 本次输入\n"
@@ -709,22 +730,26 @@ class Text2SQLAgent:
 
 
 def main():
-    """CLI 入口（桩）"""
-    _setup_console_encoding()
-    print("TianShu Text2SQL Agent v0.1.0")
-    print("当前为骨架版本，核心 LLM 链路尚未接入。")
+    """CLI 入口 — 输出当前版本和已验证功能清单"""
+    setup_console_encoding()
+    print("TianShu Text2SQL Agent v0.2.0")
+    print("规则模式 (rule) 支持 MVP 高频问数；LLM 模式需传入 llm_client 启用。")
     print()
     print("已验证：")
     print("  [OK] 项目结构建立")
-    print("  [OK] 三层 IR 数据结构定义")
-    print("  [OK] TianShu 契约文件加载")
-    print("  [OK] Harness 门禁骨架")
+    print("  [OK] 三层 IR 数据结构定义 (QuestionIntent / SQLPlan / SQLResult)")
+    print("  [OK] TianShu 契约文件加载 (contracts/*.yml)")
+    print("  [OK] SQL 安全门禁 (6 项检查 + 统一关键字加载器)")
+    print("  [OK] 歧义检测与反问生成")
+    print("  [OK] 规则模式 MVP (行程/违章/事故 G3 日汇总)")
+    print("  [OK] LLM Pipeline 接入 (DeepSeek / OpenAI 兼容)")
+    print("  [OK] Harness 门禁 (fast gate + slow gate + 双基线)")
     print()
-    print("下一步：")
-    print("  1. 编写 prompts/ 目录下的 LLM 提示词模板")
-    print("  2. 实现 agent.py 中的 _classify_intent() 和 _plan_query()")
-    print("  3. 接入 LLM API 调用")
-    print("  4. 运行 python harness/run_harness.py 验证")
+    print("入口：")
+    print("  python -m src.repl           # 交互式 REPL (规则模式)")
+    print("  python -m src.agent          # 本入口 (版本信息)")
+    print("  python harness/run_fast_gate.py  # 快速门禁")
+    print("  python harness/run_slow_gate.py  # 慢速门禁 (需 LLM API)")
 
 
 if __name__ == "__main__":

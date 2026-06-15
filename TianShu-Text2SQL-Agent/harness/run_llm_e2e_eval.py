@@ -42,6 +42,7 @@ from src.agent import Text2SQLAgent
 from src.ir import AgentResponse, QuestionIntent, SQLPlan
 from src.llm import LLMClient, MockLLMClient, OpenAIChatLLMClient, PromptLoader
 from src.llm_adapter import RefusalDetected
+from src.safety_policy_loader import load_forbidden_keywords
 from src.sql_gen import validate_sql_safety
 
 
@@ -185,11 +186,23 @@ class E2ERunner:
         5. 生成 Markdown + JSON 报告
     """
 
-    # 安全校验用的默认禁止关键字
-    DEFAULT_FORBIDDEN_KEYWORDS = [
-        "INSERT", "UPDATE", "DELETE", "DROP", "ALTER", "CREATE",
-        "TRUNCATE", "PRAGMA", "ATTACH", "DETACH",
-    ]
+    # C-2 修复：移除硬编码的 DEFAULT_FORBIDDEN_KEYWORDS（只含 11 个关键字，缺失 10 个），
+    # 改为从契约文件动态加载完整 19 关键字列表（fail-closed）
+    _forbidden_keywords_cache: list[str] | None = None
+
+    @classmethod
+    def _get_forbidden_keywords(cls) -> list[str]:
+        """获取禁止的 SQL 关键字（从契约加载，带缓存）"""
+        if cls._forbidden_keywords_cache is not None:
+            return cls._forbidden_keywords_cache
+        # strict=False：E2E 评测在测试环境可能无契约，使用完整回退列表
+        cls._forbidden_keywords_cache = load_forbidden_keywords(strict=False)
+        return cls._forbidden_keywords_cache
+
+    @classmethod
+    def _clear_forbidden_keywords_cache(cls) -> None:
+        """清理禁止关键字缓存（供测试使用）"""
+        cls._forbidden_keywords_cache = None
 
     def __init__(
         self,
@@ -792,7 +805,7 @@ class E2ERunner:
         # 再跑一次安全校验以确认
         violations = validate_sql_safety(
             sql,
-            forbidden_keywords=self.DEFAULT_FORBIDDEN_KEYWORDS,
+            forbidden_keywords=self._get_forbidden_keywords(),
         )
         if violations:
             return E2EAssertion(
