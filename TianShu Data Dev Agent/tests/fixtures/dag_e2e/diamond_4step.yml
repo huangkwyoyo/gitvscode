@@ -1,0 +1,72 @@
+# 菱形4步管道 —— 端到端编译测试 fixture
+#
+# DAG 拓扑：
+#                       ┌→ compute_city_agg ──┐
+#   extract_base ──────┤                      ├──→ merge_report
+#                       └→ compute_date_agg ──┘
+#
+# 覆盖要点：
+#   - 扇出 + 扇入结构
+#   - 两个分支并行依赖同一上游
+#   - CROSS JOIN 汇聚
+
+pipeline_id: "e2e_diamond_4step"
+pipeline_name: "菱形4步管道-端到端测试"
+target_dialect: "duckdb"
+
+steps:
+  # ── 根节点：提取基础宽表（CTAS）──
+  - step_id: "extract_base"
+    step_name: "提取基础宽表"
+    operation: "CREATE_TABLE_AS_SELECT"
+    target_table: "generated.tmp_base"
+    depends_on: []
+    sql_plan:
+      primary_table: "gold.dws_daily_trip_summary"
+      column_bindings:
+        - { column_name: "city_id", alias: "city_id" }
+        - { column_name: "trip_count", alias: "trip_count" }
+        - { column_name: "dt", alias: "dt" }
+
+  # ── 左分支：按城市聚合（CTAS + GROUP BY）──
+  - step_id: "compute_city_agg"
+    step_name: "按城市聚合行程量"
+    operation: "CREATE_TABLE_AS_SELECT"
+    target_table: "generated.agg_by_city"
+    depends_on: ["extract_base"]
+    sql_plan:
+      primary_table: "generated.tmp_base"
+      column_bindings:
+        - { column_name: "city_id", alias: "city_id" }
+        - { column_name: "trip_count", alias: "city_total", aggregation: "SUM" }
+      group_by: ["city_id"]
+
+  # ── 右分支：按日期聚合（CTAS + GROUP BY）──
+  - step_id: "compute_date_agg"
+    step_name: "按日期聚合行程量"
+    operation: "CREATE_TABLE_AS_SELECT"
+    target_table: "generated.agg_by_date"
+    depends_on: ["extract_base"]
+    sql_plan:
+      primary_table: "generated.tmp_base"
+      column_bindings:
+        - { column_name: "dt", alias: "dt" }
+        - { column_name: "trip_count", alias: "date_total", aggregation: "SUM" }
+      group_by: ["dt"]
+
+  # ── 汇聚节点：CROSS JOIN 两分支结果（SELECT_ONLY + JOIN）──
+  - step_id: "merge_report"
+    step_name: "合并城市+日期聚合报告"
+    operation: "SELECT_ONLY"
+    target_table: ""
+    depends_on: ["compute_city_agg", "compute_date_agg"]
+    sql_plan:
+      primary_table: "generated.agg_by_city"
+      join_tables:
+        - { table: "generated.agg_by_date", alias: "d", type: "CROSS JOIN",
+            condition: { left: "", right: "" } }
+      column_bindings:
+        - { column_name: "city_id", alias: "城市ID", source_table: "generated.agg_by_city" }
+        - { column_name: "city_total", alias: "城市总行程", source_table: "generated.agg_by_city" }
+        - { column_name: "dt", alias: "日期", source_table: "generated.agg_by_date" }
+        - { column_name: "date_total", alias: "当日总行程", source_table: "generated.agg_by_date" }

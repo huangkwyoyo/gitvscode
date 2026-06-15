@@ -1,0 +1,28 @@
+# 单步管道 —— 端到端编译测试 fixture（边界测试）
+#
+# DAG 拓扑：
+#   lone_view（独立视图，零依赖）
+#
+# 覆盖要点：
+#   - 最小 DAG：1 个步骤，0 条边
+#   - CREATE VIEW 操作
+#   - 边界：depends_on 为空
+
+pipeline_id: "e2e_single_step"
+pipeline_name: "单步管道-边界测试"
+target_dialect: "duckdb"
+
+steps:
+  - step_id: "lone_view"
+    step_name: "独立视图"
+    operation: "CREATE_VIEW"
+    target_table: "generated.v_lone"
+    depends_on: []
+    sql_plan:
+      primary_table: "gold.dws_daily_trip_summary"
+      column_bindings:
+        - { column_name: "city_id", alias: "城市ID" }
+        - { column_name: "trip_count", alias: "行程量" }
+        - { column_name: "dt", alias: "日期" }
+      filter_bindings:
+        - { column_name: "dt", operator: "=", value: "2026-01-01" }

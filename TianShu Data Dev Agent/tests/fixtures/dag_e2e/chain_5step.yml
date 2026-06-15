@@ -1,0 +1,89 @@
+# 链式5步管道 —— 端到端编译测试 fixture
+#
+# DAG 拓扑：
+#   extract_trip → aggregate_daily → enrich_city → tag_anomaly → final_report
+#
+# 覆盖要点：
+#   - 5 种操作类型：CTAS × 4 + SELECT_ONLY × 1
+#   - 步骤间表引用链：tmp_trip_raw → agg_trip_daily → enriched_trip → tagged_trip
+#   - SQL 特性：GROUP BY 聚合、LEFT JOIN、WHERE 过滤
+
+pipeline_id: "e2e_chain_5step"
+pipeline_name: "链式5步管道-端到端测试"
+target_dialect: "duckdb"
+
+steps:
+  # ── Step 1：从 G3 汇总表提取原始数据（CTAS）──
+  - step_id: "extract_trip"
+    step_name: "提取行程原始数据"
+    operation: "CREATE_TABLE_AS_SELECT"
+    target_table: "generated.tmp_trip_raw"
+    depends_on: []
+    sql_plan:
+      primary_table: "gold.dws_daily_trip_summary"
+      column_bindings:
+        - { column_name: "city_id", alias: "city_id" }
+        - { column_name: "trip_count", alias: "trip_count" }
+        - { column_name: "dt", alias: "dt" }
+      filter_bindings:
+        - { column_name: "dt", operator: "=", value: "2026-01-01" }
+
+  # ── Step 2：按城市+日期聚合（CTAS + GROUP BY）──
+  - step_id: "aggregate_daily"
+    step_name: "按城市+日期聚合行程量"
+    operation: "CREATE_TABLE_AS_SELECT"
+    target_table: "generated.agg_trip_daily"
+    depends_on: ["extract_trip"]
+    sql_plan:
+      primary_table: "generated.tmp_trip_raw"
+      column_bindings:
+        - { column_name: "city_id", alias: "city_id" }
+        - { column_name: "dt", alias: "dt" }
+        - { column_name: "trip_count", alias: "daily_total", aggregation: "SUM" }
+      group_by: ["city_id", "dt"]
+
+  # ── Step 3：JOIN 城市维表富化数据（CTAS + JOIN）──
+  - step_id: "enrich_city"
+    step_name: "关联城市维表补充城市名"
+    operation: "CREATE_TABLE_AS_SELECT"
+    target_table: "generated.enriched_trip"
+    depends_on: ["aggregate_daily"]
+    sql_plan:
+      primary_table: "generated.agg_trip_daily"
+      join_tables:
+        - { table: "gold.dim_city", alias: "city", type: "LEFT JOIN",
+            condition: { left: "t1.city_id", right: "city.city_id" } }
+      column_bindings:
+        - { column_name: "city_id", alias: "city_id", source_table: "generated.agg_trip_daily" }
+        - { column_name: "city_name", alias: "city_name", source_table: "gold.dim_city" }
+        - { column_name: "dt", alias: "dt", source_table: "generated.agg_trip_daily" }
+        - { column_name: "daily_total", alias: "daily_total", source_table: "generated.agg_trip_daily" }
+
+  # ── Step 4：标记异常高行程量（CTAS + WHERE）──
+  - step_id: "tag_anomaly"
+    step_name: "标记异常高行程量"
+    operation: "CREATE_TABLE_AS_SELECT"
+    target_table: "generated.tagged_trip"
+    depends_on: ["enrich_city"]
+    sql_plan:
+      primary_table: "generated.enriched_trip"
+      column_bindings:
+        - { column_name: "city_id", alias: "city_id" }
+        - { column_name: "city_name", alias: "city_name" }
+        - { column_name: "dt", alias: "dt" }
+        - { column_name: "daily_total", alias: "daily_total" }
+
+  # ── Step 5：查询异常城市（SELECT_ONLY + WHERE）──
+  - step_id: "final_report"
+    step_name: "查询异常城市报告"
+    operation: "SELECT_ONLY"
+    target_table: ""
+    depends_on: ["tag_anomaly"]
+    sql_plan:
+      primary_table: "generated.tagged_trip"
+      column_bindings:
+        - { column_name: "city_name", alias: "城市" }
+        - { column_name: "dt", alias: "日期" }
+        - { column_name: "daily_total", alias: "行程量" }
+      filter_bindings:
+        - { column_name: "daily_total", operator: "=", value: "10000" }

@@ -1,0 +1,101 @@
+# 复杂6步管道 —— 端到端编译测试 fixture
+#
+# DAG 拓扑：
+#   extract_raw → clean_and_filter → dim_city_stats ──→ incremental_merge
+#                                   → dim_city_stats ──→ final_view
+#                                   → dim_date_stats ──→ final_view
+#
+# 覆盖要点：
+#   - 3 层依赖深度（L1→L2→L3→L4）
+#   - INSERT_OVERWRITE_PARTITION 操作
+#   - CREATE VIEW 操作
+#   - 多分支 + 跨层引用
+
+pipeline_id: "e2e_complex_6step"
+pipeline_name: "复杂6步管道-端到端测试"
+target_dialect: "duckdb"
+
+steps:
+  # ── L1：提取原始数据（CTAS）──
+  - step_id: "extract_raw"
+    step_name: "提取原始数据"
+    operation: "CREATE_TABLE_AS_SELECT"
+    target_table: "generated.raw_data"
+    depends_on: []
+    sql_plan:
+      primary_table: "gold.dws_daily_trip_summary"
+      column_bindings:
+        - { column_name: "city_id", alias: "city_id" }
+        - { column_name: "trip_count", alias: "trip_count" }
+        - { column_name: "dt", alias: "dt" }
+
+  # ── L2：清洗过滤（CTAS + WHERE）──
+  - step_id: "clean_and_filter"
+    step_name: "清洗过滤无效数据"
+    operation: "CREATE_TABLE_AS_SELECT"
+    target_table: "generated.cleaned_data"
+    depends_on: ["extract_raw"]
+    sql_plan:
+      primary_table: "generated.raw_data"
+      column_bindings:
+        - { column_name: "city_id", alias: "city_id" }
+        - { column_name: "trip_count", alias: "trip_count" }
+        - { column_name: "dt", alias: "dt" }
+      filter_bindings:
+        - { column_name: "trip_count", operator: "=", value: "0" }
+
+  # ── L3 分支A：城市维度统计（CTAS + GROUP BY + 多聚合）──
+  - step_id: "dim_city_stats"
+    step_name: "城市维度统计"
+    operation: "CREATE_TABLE_AS_SELECT"
+    target_table: "generated.city_stats"
+    depends_on: ["clean_and_filter"]
+    sql_plan:
+      primary_table: "generated.cleaned_data"
+      column_bindings:
+        - { column_name: "city_id", alias: "city_id" }
+        - { column_name: "trip_count", alias: "avg_trip", aggregation: "AVG" }
+        - { column_name: "trip_count", alias: "max_trip", aggregation: "MAX" }
+      group_by: ["city_id"]
+
+  # ── L3 分支B：日期维度统计（CTAS + GROUP BY）──
+  - step_id: "dim_date_stats"
+    step_name: "日期维度统计"
+    operation: "CREATE_TABLE_AS_SELECT"
+    target_table: "generated.date_stats"
+    depends_on: ["clean_and_filter"]
+    sql_plan:
+      primary_table: "generated.cleaned_data"
+      column_bindings:
+        - { column_name: "dt", alias: "dt" }
+        - { column_name: "trip_count", alias: "daily_sum", aggregation: "SUM" }
+      group_by: ["dt"]
+
+  # ── L4：增量覆盖写入分区表（INSERT OVERWRITE）──
+  - step_id: "incremental_merge"
+    step_name: "增量合并到分区表"
+    operation: "INSERT_OVERWRITE_PARTITION"
+    target_table: "generated.report_partitioned"
+    depends_on: ["dim_city_stats"]
+    sql_plan:
+      primary_table: "generated.city_stats"
+      column_bindings:
+        - { column_name: "city_id", alias: "city_id" }
+        - { column_name: "avg_trip", alias: "avg_trip" }
+        - { column_name: "max_trip", alias: "max_trip" }
+
+  # ── L4：创建最终报告视图（CREATE VIEW + JOIN）──
+  - step_id: "final_view"
+    step_name: "创建最终报告视图"
+    operation: "CREATE_VIEW"
+    target_table: "generated.v_report"
+    depends_on: ["dim_city_stats", "dim_date_stats"]
+    sql_plan:
+      primary_table: "generated.city_stats"
+      join_tables:
+        - { table: "generated.cleaned_data", alias: "raw", type: "LEFT JOIN",
+            condition: { left: "t1.city_id", right: "raw.city_id" } }
+      column_bindings:
+        - { column_name: "city_id", alias: "城市ID", source_table: "generated.city_stats" }
+        - { column_name: "avg_trip", alias: "平均行程", source_table: "generated.city_stats" }
+        - { column_name: "max_trip", alias: "峰值行程", source_table: "generated.city_stats" }
