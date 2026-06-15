@@ -107,15 +107,15 @@ Intent 对象
 
 ### 3.1 LLM 不能做什么
 
-| 禁止 | 原因 | 替代机制 |
-|------|------|---------|
-| 生成 SQL 文本 | SQL 必须可审计、可追溯 | ColumnBindingTable + 模板编译器 |
-| 推荐表名 | 表选择是确定性决策 | `resolve_layer()` 函数 |
-| 决定 JOIN 条件 | JOIN 必须来自白名单 | JoinGraph 数据结构 |
-| 映射 metric → column | 映射必须唯一确定 | ColumnBindingTable |
-| 编造字段名 | 违背零幻觉原则 | 所有字段来自 meta.metric_definitions |
-| 判断 G3 vs G2 | 层级选择是规则决策 | `resolve_layer()` 函数 |
-| 绕过安全策略 | 安全是不可协商的 | Layer 5 纯规则引擎 |
+| 禁止 | 原因 | 替代机制 | 代码证据 |
+|------|------|---------|---------|
+| 生成 SQL 文本 | SQL 必须可审计、可追溯 | ColumnBindingTable + 模板编译器 | `layer4_generate.py`——compile_sql() 纯模板编译，无 LLM 调用 |
+| 推荐表名 | 表选择是确定性决策 | `resolve_layer()` 函数 | `layer3_plan.py:441`——_resolve_layer() 查 ColumnBindingTable |
+| 决定 JOIN 条件 | JOIN 必须来自白名单 | JoinGraph 数据结构 | `column_binding.py:JOIN_WHITELIST`——硬编码白名单列表 |
+| 映射 metric → column | 映射必须唯一确定 | ColumnBindingTable | `column_binding.py:get_binding_by_metric_name()`——纯函数查表 |
+| 编造字段名 | 违背零幻觉原则 | 所有字段来自 meta.metric_definitions | `column_binding.py:METRIC_BINDINGS`——BindingEntry 列表 |
+| 判断 G3 vs G2 | 层级选择是规则决策 | `resolve_layer()` 函数 | `layer3_plan.py:441`——纯 if/else 逻辑 |
+| 绕过安全策略 | 安全是不可协商的 | Layer 5 纯规则引擎 | `layer5_validate.py:validate_sql()`——6 项硬检查 |
 
 ### 3.2 SQL 不能怎么生成
 
