@@ -61,6 +61,5 @@ TianShu/harness/reports/local/
 Thumbs.db
 .ipynb_checkpoints/
 
-# TianShu Data Dev Agent（独立项目，不纳入此仓库追踪）
-TianShu Data Dev Agent/
+
 
