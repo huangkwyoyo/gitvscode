@@ -1,0 +1,27 @@
+# ═══════════════════════════════════════════════════════════
+# TianShu Data Dev Agent — Git 忽略规则
+# ═══════════════════════════════════════════════════════════
+
+# 生成结果——运行时产物，不应进入版本管理
+generated/results/
+generated/reports/
+generated/tasks/
+
+# 保留 generated 目录结构（README/样例/基线快照可提交）
+!generated/**/README.md
+!generated/**/.gitkeep
+!generated/**/baseline_*
+
+# Python 缓存
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# IDE
+.vscode/settings.json
+.idea/
+
+# LLM 临时输出
+*.tmp
+*.log

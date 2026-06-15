@@ -1,0 +1,43 @@
+# 回归测试基线
+#
+# 记录当前通过的端到端测试用例的状态基线。
+# 每次管道代码变更后，运行 e2e 测试并与此基线对比。
+#
+# 生成时间：首次运行 e2e 测试后自动更新
+# 维护方式：手动更新（或通过 CI 自动更新）
+
+version: "1.0"
+generated_at: "2026-06-14"
+commit: "initial"
+
+# 基线快照（运行 e2e 测试后填充）
+baseline:
+  e2e_001_trip_daily:
+    status: "pending"
+    last_run: null
+    last_status: null
+    last_rows: null
+
+  e2e_002_parking_daily:
+    status: "pending"
+    last_run: null
+    last_status: null
+    last_rows: null
+
+  e2e_003_crash_daily:
+    status: "pending"
+    last_run: null
+    last_status: null
+    last_rows: null
+
+  e2e_004_invalid_metric:
+    status: "pending"
+    last_run: null
+    last_status: null
+    last_rows: null
+
+  e2e_005_dry_run:
+    status: "pending"
+    last_run: null
+    last_status: null
+    last_rows: null

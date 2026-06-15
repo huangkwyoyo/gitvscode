@@ -1,0 +1,232 @@
+# PipelineExecutionConfig Schema
+#
+# 执行层（Layer 6）的运行时配置契约。
+# 与 PipelinePlan IR 完全分离——IR 描述"做什么"，
+# 此配置描述"在什么条件下执行"。
+#
+# 版本：v1.0 | 日期：2026-06-14
+#
+# 设计原则：
+#   1. 独立于 IR：同样的 PipelinePlan IR 可以配不同的执行配置运行
+#   2. 安全第一：safety_tier 控制所有操作类型的允许/禁止矩阵
+#   3. 环境可移植：CI/本地/集群只需要换配置，IR 不变
+#   4. 可审计：所有安全相关配置在此文件中集中管理
+
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "https://tianShu.dev/pipeline-execution-config/v1"
+title: "PipelineExecutionConfig"
+description: "管道执行运行时配置——独立于 IR，由 Layer 5/6 消费"
+
+# ═══════════════════════════════════════════════════════════
+# 顶层结构
+# ═══════════════════════════════════════════════════════════
+type: object
+required: [safety_tier]
+properties:
+
+  # ── 安全层级（必填——决定所有操作的允许/禁止矩阵）──
+  safety_tier:
+    type: string
+    description: >
+      安全层级——控制管道可以执行的操作类型。
+      'query' 是 Phase 1 的只读模式（SELECT ONLY）。
+      'pipeline' 是 Phase 2 扩展模式（可写 generated.*）。
+      不是"模式切换"——pipeline 包含 query 的所有约束，再叠加写入限制。
+    enum: [query, pipeline]
+    default: "query"
+
+  # ── 并行度控制 ──
+  max_parallelism:
+    type: integer
+    description: "最大并行步骤数——无依赖的步骤可同时执行。1 = 完全串行。"
+    minimum: 1
+    maximum: 16
+    default: 1
+
+  # ── 重试策略 ──
+  retry_policy:
+    type: object
+    description: "步骤级失败重试策略"
+    properties:
+      max_retries:
+        type: integer
+        description: "单个步骤的最大重试次数"
+        minimum: 0
+        maximum: 5
+        default: 1
+      retryable_errors:
+        type: array
+        description: "可重试的错误类型"
+        items:
+          type: string
+          enum: [timeout, lock, connection_error, out_of_memory]
+      backoff_seconds:
+        type: integer
+        description: "重试间隔（秒）——指数退避"
+        minimum: 1
+        default: 5
+    additionalProperties: false
+
+  # ── 超时控制 ──
+  timeout_minutes:
+    type: integer
+    description: "管道总超时（分钟）。超时后所有未完成步骤被终止。"
+    minimum: 1
+    maximum: 1440
+    default: 60
+
+  # ── 产出物配置 ──
+  output_config:
+    type: object
+    description: "产出物输出配置"
+    properties:
+      formats:
+        type: array
+        description: "产出物格式列表"
+        items:
+          type: string
+          enum: [parquet, csv, markdown_report, task_yaml]
+        default: [parquet, markdown_report]
+      result_dir:
+        type: string
+        description: "结果文件输出目录"
+        default: "generated/results"
+      report_dir:
+        type: string
+        description: "报告输出目录"
+        default: "generated/reports"
+    additionalProperties: false
+
+  # ── 连接配置 ──
+  connection:
+    type: object
+    description: "数据库连接配置"
+    properties:
+      duckdb_path:
+        type: string
+        description: "DuckDB 数据库文件路径"
+      read_only:
+        type: boolean
+        description: "是否强制 read_only 模式。safety_tier=query 时必须为 true。"
+        default: true
+    additionalProperties: false
+
+  # ── 日志配置 ──
+  logging:
+    type: object
+    description: "日志和审计配置"
+    properties:
+      level:
+        type: string
+        enum: [DEBUG, INFO, WARN, ERROR]
+        default: "INFO"
+      audit_file:
+        type: string
+        description: "审计日志输出路径（JSONL 格式）"
+        default: "generated/audit/execution_audit.jsonl"
+      sql_log_dir:
+        type: string
+        description: "生成 SQL 的保存目录（用于回归对比）"
+        default: "generated/sql_logs"
+    additionalProperties: false
+
+additionalProperties: false
+
+# ═══════════════════════════════════════════════════════════
+# $defs：安全层级操作矩阵（供 Layer 5 校验使用）
+# ═══════════════════════════════════════════════════════════
+$defs:
+
+  # ── 每个安全层级的允许操作矩阵 ──
+  SafetyTierOperationMatrix:
+    description: "定义每个 safety_tier 下允许的操作——Layer 5 校验的核心参考"
+    type: object
+    properties:
+
+      query:
+        type: object
+        description: "查询层——Phase 1 只读模式"
+        properties:
+          allowed_operations:
+            type: array
+            items:
+              enum: [SELECT_ONLY]
+          read_only:
+            type: boolean
+            const: true
+          allowed_read_schemas:
+            type: array
+            items:
+              enum: [gold]
+          forbidden_read_schemas:
+            type: array
+            items:
+              enum: [bronze, silver]
+          allowed_write_schemas:
+            type: array
+            maxItems: 0
+            description: "query 层不允许任何写入"
+          max_execution_time_seconds:
+            type: integer
+            default: 30
+        additionalProperties: false
+
+      pipeline:
+        type: object
+        description: "管道层——Phase 2 扩展，可写 generated.*"
+        properties:
+          allowed_operations:
+            type: array
+            items:
+              enum:
+                - SELECT_ONLY
+                - CREATE_TABLE_AS_SELECT
+                - INSERT_OVERWRITE_PARTITION
+                - INSERT_INTO_PARTITION
+                - CREATE_VIEW
+          read_only:
+            type: boolean
+            default: false
+          allowed_read_schemas:
+            type: array
+            items:
+              enum: [gold, generated]
+          forbidden_read_schemas:
+            type: array
+            items:
+              enum: [bronze, silver]
+          allowed_write_schemas:
+            type: array
+            items:
+              enum: [generated]
+            description: "只能写入 generated schema"
+          forbidden_write_schemas:
+            type: array
+            items:
+              enum: [gold, bronze, silver]
+            description: "永远禁止写入 Gold/Bronze/Silver 层"
+          max_execution_time_seconds:
+            type: integer
+            default: 1800
+        additionalProperties: false
+
+  # ── 全局禁止操作（所有层级）──
+  GloballyForbiddenOperations:
+    description: "这些操作在任何 safety_tier 下都永久禁止"
+    type: array
+    items:
+      enum:
+        - DROP_TABLE           # 禁止删表——任何 schema
+        - DROP_VIEW
+        - TRUNCATE_TABLE
+        - ALTER_TABLE
+        - DELETE_FROM          # 禁止 DELETE——用 INSERT OVERWRITE 等价实现
+        - GRANT
+        - REVOKE
+        - ATTACH
+        - DETACH
+        - EXPORT
+        - IMPORT
+        - COPY
+        - INSTALL
+        - LOAD

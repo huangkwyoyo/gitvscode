@@ -1,0 +1,70 @@
+# Data Dev Agent 运行目标配置
+#
+# 本文件登记 Agent 运行的连接目标、路径映射和执行参数。
+# Agent 启动时读取此文件以建立与 TianShu 的连接。
+
+project:
+  root: "D:\\Program Files\\gitvscode\\TianShu Data Dev Agent"
+  name: "TianShu Data Dev Agent"
+  version: "1.0.0"
+  phase: "1"  # Phase 1：最小可运行管道
+
+# TianShu 数据仓库连接（只读）
+tianShu:
+  root: "D:\\Program Files\\gitvscode\\TianShu"
+  duckdb_path: "D:\\ProgramData\\Datawarehouse\\纽约市城市交通\\nyc_transport.duckdb"
+  read_only: true
+  connect_timeout: 30
+
+# TianShu 事实源引用（只读，不复制）
+facts:
+  metric_definitions: "tianShu.duckdb → meta.metric_definitions"
+  semantic_dimensions: "tianShu.duckdb → meta.semantic_dimensions"
+  metric_contract: "tianShu.root → contracts/metric_contract.yml"
+  semantic_contract: "tianShu.root → contracts/semantic_contract.yml"
+  sql_safety_policy: "tianShu.root → contracts/sql_safety_policy.yml"
+  warehouse_connection: "tianShu.root → contracts/warehouse_connection.yml"
+  gold_design: "tianShu.root → docs/warehouse/database_design/gold_database_design.md"
+
+# 管道配置
+pipeline:
+  # LLM 配置（仅 Layer 1-2 使用）
+  llm:
+    enabled: true  # Phase 1 默认启用；可关闭以纯规则模式运行
+    model: "claude-sonnet-4-6"  # 或其他兼容 Anthropic API 的模型
+    # 温度设为 0 以减少 LLM 随机性（意图匹配应尽可能确定）
+    temperature: 0
+    # LLM 最大输出 tokens
+    max_tokens: 2048
+
+  # 执行约束
+  execution:
+    query_timeout_seconds: 30
+    max_result_rows: 100000
+    retry_on_timeout: 1
+    retry_delay_seconds: 5
+
+  # 输出配置
+  output:
+    result_format: "parquet"  # 默认输出格式
+    result_dir: "generated/results"
+    report_dir: "generated/reports"
+    task_dir: "generated/tasks"
+    # 是否在文件名中包含时间戳
+    include_timestamp: true
+
+# 质量门禁
+quality_gates:
+  # 是否在管道执行后自动运行质量检查
+  auto_check: true
+  # Layer 5 校验失败时是否阻断管道
+  hard_fail_on_validation: true
+  # Layer 7 评估 DIRTY 时是否阻断管道
+  hard_fail_on_dirty: false
+
+# Harness 集成（接入 TianShu 的 run_all_checks.py 体系）
+harness_integration:
+  # 是否在管道执行前运行 TianShu 基线检查
+  run_baseline_check: true
+  # 基线检查脚本路径（相对于 tianShu.root）
+  baseline_script: "scripts/quality/run_all_checks.py"

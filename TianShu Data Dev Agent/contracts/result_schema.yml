@@ -1,0 +1,41 @@
+# 产出结果 Schema
+#
+# 定义 Layer 8（产品层）产出的数据结构标准。
+# 每个管道执行产生的输出必须满足此 schema，
+# 以确保下游消费方（用户、调度平台、报告系统）可可靠读取。
+
+# ── 结果文件元信息 ──
+result:
+  # 标识
+  plan_id: ""          # string：关联的 SQLPlan ID
+  plan_name: ""        # string：需求名称
+  generated_at: ""     # string：ISO 8601 时间戳，如 "2026-06-14T16:30:00+08:00"
+
+  # 统计
+  row_count: 0         # int：结果行数
+  column_count: 0      # int：结果列数
+  columns:             # array[object]：列清单
+    - name: ""         # string：列名
+      type: ""         # string：数据类型（DuckDB 原生类型名）
+      nullable: true   # boolean：是否可空
+
+  # 文件
+  file_path: ""        # string：结果文件绝对路径
+  file_format: ""      # string："parquet" | "csv"
+  file_size_bytes: 0   # int：文件大小
+
+  # 执行信息
+  execution_time_ms: 0       # int：SQL 执行耗时（毫秒）
+  pipeline_time_ms: 0        # int：全管道耗时（毫秒）
+  source_layer: ""           # string：数据来源层，"g3" | "g2"
+  source_tables: []          # array[string]：查询涉及的表
+
+  # 数据质量快照
+  quality:
+    null_rate_overall: 0.0   # float：整体空值率
+    null_rate_by_column: {}  # object：每列空值率 {column_name: rate}
+    row_count_within_bounds: true  # boolean：行数是否在预期范围内
+
+  # 状态
+  status: ""           # string："clean" | "dirty" — clean 表示所有校验通过
+  warnings: []         # array[string]：DIRTY 警告列表

@@ -1,0 +1,59 @@
+# 需求说明书 YAML Schema
+#
+# 定义 Data Dev Agent 接受的用户需求格式。
+# 这是整个管道的入口契约，Layer 1 据此解析和校验用户输入。
+#
+# 版本：v1.0 | Phase 1 单任务多指标 | 预留给 Phase 2 DAG 的扩展点见 #future 注释
+
+# ── 顶层结构 ──
+# 必填：name, metrics, filters.date_range
+# 可选：description, dimensions, group_by, order_by, output, notes
+name: ""               # string, 必填：需求名称，用于标识和报告
+description: ""         # string, 可选：需求描述，辅助 LLM 理解意图
+version: "1.0"          # string, 固定：schema 版本号
+
+# ── 指标声明 ──
+# 每个指标的 name 必须是 meta.metric_definitions 中已注册的指标名
+# 如果用户写的名称不在注册表中，Layer 2 会尝试模糊匹配，匹配失败则 BLOCKED
+metrics:
+  - name: ""           # string, 必填：已注册指标名，如 "trip_count"
+    # aggregation: ""  # string, 可选：聚合粒度（daily/monthly/none），默认按 group_by 决定
+    # alias: ""        # string, 可选：输出列别名，默认使用 zh_name
+    # filter: {}       # object, #future：指标级过滤（Phase 2）
+
+# ── 维度声明 ──
+# 可选。如果不需要分组（纯汇总），则为空数组。
+# 每个维度的 name 应是语义层中注册的维度名
+dimensions:
+  - name: ""           # string, 必填：维度名，如 "date", "borough", "violation_type"
+    # alias: ""        # string, 可选：输出列别名
+
+# ── 过滤条件 ──
+filters:
+  date_range:          # array[date, date], 必填：[开始日期, 结束日期]，格式 YYYY-MM-DD
+    - "2026-01-01"
+    - "2026-03-31"
+  # dimension_filters: # object, 可选：维度值过滤
+  #   borough: ["Manhattan", "Brooklyn"]
+  #   violation_code: ["21", "36", "38"]
+
+# ── 分组 ──
+# 可选。若不为空，则 group_by 的每个元素必须来自 dimensions 或 filters 中声明的维度
+group_by: []           # array[string], 可选：分组列名
+
+# ── 排序 ──
+order_by:              # array[object], 可选
+  - column: ""         # string：排序列名
+    direction: "asc"   # string："asc" | "desc"
+
+# ── 输出配置 ──
+output:
+  format: "parquet"    # string, 可选："parquet" | "csv"，默认 parquet
+  # path: ""           # string, 可选：自定义输出路径，默认 generated/results/{name}_{timestamp}.{format}
+  # include_report: true # boolean, 可选：是否生成验证报告，默认 true
+  # include_task_config: false # boolean, #future：是否生成调度任务配置
+
+# ── 备注 ──
+# notes: ""            # string, 可选：用户备注
+# #future:
+#   steps: []          # array, Phase 2 DAG 多步依赖

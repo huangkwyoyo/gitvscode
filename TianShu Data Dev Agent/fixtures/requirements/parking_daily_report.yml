@@ -1,0 +1,29 @@
+# 示例需求：2026年Q1每日停车罚单汇总
+#
+# G3 汇总表查询，停车罚单域。单表查询。
+
+name: "2026年Q1每日停车罚单汇总"
+description: "按天统计2026年第一季度的停车罚单数量和标准罚款总额"
+version: "1.0"
+
+metrics:
+  - name: "parking_violation_count"
+  - name: "standard_fine_total"
+
+dimensions:
+  - name: "date"
+
+filters:
+  date_range:
+    - "2026-01-01"
+    - "2026-03-31"
+
+group_by:
+  - "date"
+
+order_by:
+  - column: "date"
+    direction: "asc"
+
+output:
+  format: "parquet"

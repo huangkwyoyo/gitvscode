@@ -1,0 +1,58 @@
+# 校验报告 Schema
+#
+# 定义 Layer 5（SQL 校验）和 Layer 7（结果评估）输出的校验报告结构。
+# 校验报告是管道可审计性的核心——每次执行都生成一份完整的校验记录。
+
+# ── Layer 5：SQL 安全与语义校验报告 ──
+sql_validation:
+  passed: true                # boolean：整体是否通过
+
+  # 安全检查（对应 sql_safety_policy.yml 的黑名单）
+  safety_checks:
+    - check: ""               # string：检查项名称
+      passed: true            # boolean
+      detail: ""              # string：通过/失败详情
+
+  # 表引用检查（对应 semantic_contract.yml）
+  table_reference_checks:
+    - check: ""               # string：检查项
+      passed: true
+      detail: ""
+
+  # JOIN 合法性检查（对应 sql_safety_policy.yml#join_whitelist）
+  join_checks:
+    - check: ""               # string：检查项
+      passed: true
+      detail: ""
+
+  # 日期合规检查
+  date_compliance:
+    - check: ""
+      passed: true
+      detail: ""
+
+  issues: []                  # array[string]：阻塞性问题列表
+  warnings: []                # array[string]：非阻塞警告列表
+
+# ── Layer 7：结果质量评估报告 ──
+result_evaluation:
+  passed: true                # boolean：整体是否通过
+
+  checks:
+    - name: ""                # string：检查项名称（如 "行数范围"、"空值率"、"列完整性"）
+      passed: true            # boolean
+      detail: ""              # string：详情
+      threshold: ""           # string：阈值描述（如 "行数 ≥ 1"、"空值率 < 30%"）
+      actual: ""              # string：实际值
+
+  summary:
+    total_checks: 0           # int：总检查项数
+    passed_checks: 0          # int：通过的检查项数
+    failed_checks: 0          # int：失败的检查项数
+    status: ""                # string："clean" | "dirty"
+
+# ── 综合评估 ──
+overall:
+  pipeline_status: ""         # string："pass" | "dirty" | "blocked" | "fail"
+  summary: ""                 # string：一句话总结
+  recommendations: []         # array[string]：改进建议（如有 DIRTY 或 BLOCKED）

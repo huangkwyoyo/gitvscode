@@ -1,0 +1,32 @@
+# 示例需求：2026年Q1每日行程量趋势报告
+#
+# 这是最基础的 G3 汇总表查询。
+# 注意：G3 汇总表不含 total_tip_amount 列，需要小费指标时需降级到 G2。
+# 单表查询，无需 JOIN。
+
+name: "2026年Q1每日行程量趋势"
+description: "按天统计2026年第一季度的行程量、总车费和总行驶距离，生成每日趋势数据"
+version: "1.0"
+
+metrics:
+  - name: "trip_count"
+  - name: "total_fare_amount"
+  - name: "total_distance_miles"
+
+dimensions:
+  - name: "date"
+
+filters:
+  date_range:
+    - "2026-01-01"
+    - "2026-03-31"
+
+group_by:
+  - "date"
+
+order_by:
+  - column: "date"
+    direction: "asc"
+
+output:
+  format: "parquet"

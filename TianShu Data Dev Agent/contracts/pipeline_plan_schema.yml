@@ -1,0 +1,646 @@
+# PipelinePlan IR Schema（修正版）
+#
+# Phase 2 核心契约：定义多步数据管道计划的结构。
+# PipelinePlan 是 SQLPlan 的上层容器——SQLPlan 描述一条 SQL，
+# PipelinePlan 描述一个包含多条 SQL 的 DAG。
+#
+# 版本：v2.1 | 日期：2026-06-14
+#
+# v2.1 变更（IR 分层修正）：
+#   - 窗口函数、表达式、CTE 从 PipelineStep 移入 StepSQLPlan
+#     （纠正 IR 分层：这些是语句级/列级概念，不属于管道级）
+#   - CTEDefinition 从 sql_plan_ref 改为嵌套 StepSQLPlan
+#     （CTE 体是完整的 SELECT，生命期仅限于单条 SQL 语句）
+#   - Pipeline IR 现在只保留跨步骤概念：DAG 依赖、操作类型、输出目标、增量意图
+#
+# v2.0 变更（编译器架构一致性修正）：
+#   - ExpressionBinding：expression 原始字符串 → 结构化 operands[]
+#   - CTEDefinition：移除 sql 原始 SQL 字段，仅保留 sql_plan_ref
+#   - IncrementalConfig → IncrementalIntent：移除执行策略细节
+#   - PipelineExecutionConfig：从 IR 移除，归入执行层独立契约
+#   - 列引用统一为 table_ref.column_name（不含 SQL 别名）
+#   - JoinGraph 增加 ref 标识符，condition 从字符串改为结构化引用
+#   - 移除所有方言特定的原始 SQL 片段
+#
+# 设计原则：
+#   1. 完备性：包含编译整个管道所需的全部信息
+#   2. 可验证性：可在不连接数据库的情况下校验结构正确性
+#   3. 方言无关：不包含任何特定数据库（DuckDB/Hive/Spark SQL）的语法
+#   4. 确定性：同样的 PipelinePlan 永远编译出同样的 SQL 序列
+#   5. 无原始 SQL：IR 中绝不出现手写 SQL 文本或方言特定语法
+
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "https://tianShu.dev/pipeline-plan/v1"
+title: "PipelinePlan"
+description: "多步数据管道计划——Phase 2 的核心中间表示"
+
+# ═══════════════════════════════════════════════════════════
+# 顶层结构
+# ═══════════════════════════════════════════════════════════
+type: object
+required: [pipeline_id, pipeline_name, steps]
+properties:
+
+  pipeline_id:
+    type: string
+    description: "管道唯一标识，格式 pipeline_{YYYYMMDD}_{HHMMSS}_{seq}"
+    pattern: "^pipeline_\\d{8}_\\d{6}_\\d{4}$"
+
+  pipeline_name:
+    type: string
+    description: "管道人类可读名称"
+    minLength: 1
+    maxLength: 200
+
+  version:
+    type: string
+    description: "语义化版本号"
+    default: "1.0.0"
+    pattern: "^\\d+\\.\\d+\\.\\d+$"
+
+  target_dialect:
+    type: string
+    description: "目标数据库方言"
+    enum: [duckdb, hive, spark_sql, postgresql]
+    default: "duckdb"
+
+  description:
+    type: string
+    description: "管道用途的自然语言描述"
+
+  # ── 步骤定义（DAG 的节点）──
+  steps:
+    type: array
+    description: "管道步骤列表，按拓扑序排列（依赖的步骤必须先出现）"
+    minItems: 1
+    maxItems: 50
+    items:
+      $ref: "#/$defs/PipelineStep"
+
+  # ── 管道级执行约束已移除：execution_config 属于执行层（Layer 6），
+  #   不是 IR。见同级目录下的 pipeline_run_config_schema.yml。
+
+  # ── 管道级参数 ──
+  parameters:
+    type: object
+    description: "管道运行时参数，可在 SQL 中通过 $param.xxx 引用"
+    additionalProperties:
+      oneOf:
+        - type: string
+        - type: number
+        - type: boolean
+
+# ═══════════════════════════════════════════════════════════
+# 定义：PipelineStep（单个步骤）
+# ═══════════════════════════════════════════════════════════
+$defs:
+
+  PipelineStep:
+    type: object
+    required: [step_id, step_name, operation, target_table, depends_on]
+    properties:
+
+      step_id:
+        type: string
+        description: "步骤唯一标识，用于依赖引用（$step.xxx）"
+        pattern: "^[a-z][a-z0-9_]*$"
+
+      step_name:
+        type: string
+        description: "步骤人类可读名称"
+
+      operation:
+        $ref: "#/$defs/StepOperation"
+
+      target_table:
+        type: string
+        description: "步骤输出的目标表名（全限定格式，如 generated.zone_daily_stats）"
+        pattern: "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$"
+
+      depends_on:
+        type: array
+        description: "此步骤依赖的步骤 ID 列表（$step.xxx 引用）"
+        items:
+          type: string
+
+      sql_plan:
+        $ref: "#/$defs/StepSQLPlan"
+
+      # ── 增量意图（仅描述 WHAT，策略由编译器/执行器决定）──
+      incremental_intent:
+        $ref: "#/$defs/IncrementalIntent"
+
+    additionalProperties: false
+    __hierarchy_note__: >
+      Pipeline IR 只保留跨步骤的概念（DAG 依赖、操作类型、输出目标、增量意图）。
+      所有语句级概念（窗口函数、表达式、CTE）属于 StepSQLPlan，不在此层。
+
+  # ═══════════════════════════════════════════════════════
+  # 步骤操作类型枚举
+  # ═══════════════════════════════════════════════════════
+  StepOperation:
+    type: string
+    description: "步骤的 SQL 操作类型"
+    enum:
+      - SELECT_ONLY                    # 只读查询（Phase 1 模式）
+      - CREATE_TABLE_AS_SELECT         # 创建表并填充数据
+      - INSERT_OVERWRITE_PARTITION     # 分区覆盖写入
+      - INSERT_INTO_PARTITION          # 分区追加写入
+      - CREATE_VIEW                    # 创建视图
+      # 注意：DELETE_BY_ANTI_JOIN 已永久移除——DELETE 在任何安全层级都是禁止操作。
+      # 增量清理通过 INSERT_OVERWRITE_PARTITION 等价实现。
+
+  # ═══════════════════════════════════════════════════════
+  # 步骤级 SQLPlan（复用 Phase 1 结构，Phase 2 扩展）
+  # ═══════════════════════════════════════════════════════
+  StepSQLPlan:
+    type: object
+    required: [join_graph]
+    properties:
+
+      source_layer:
+        type: string
+        description: "数据源层级"
+        enum: [g3, g2, g1]
+        default: "g3"
+
+      join_graph:
+        $ref: "#/$defs/StepJoinGraph"
+
+      column_bindings:
+        type: array
+        description: "输出列绑定"
+        items:
+          $ref: "#/$defs/ColumnBinding"
+
+      dimension_bindings:
+        type: array
+        description: "维度列绑定"
+        items:
+          $ref: "#/$defs/DimensionBinding"
+
+      filter_bindings:
+        type: array
+        description: "过滤条件绑定"
+        items:
+          $ref: "#/$defs/FilterBinding"
+
+      group_by:
+        type: array
+        description: "分组列（全限定格式，如 t1.zone_name）"
+        items:
+          type: string
+
+      order_by:
+        type: array
+        description: "排序列"
+        items:
+          type: object
+          required: [column]
+          properties:
+            column:
+              type: string
+            direction:
+              type: string
+              enum: [ASC, DESC]
+              default: "ASC"
+
+      limit:
+        type: integer
+        description: "返回行数限制"
+        minimum: 1
+
+      use_cte:
+        type: boolean
+        description: "是否使用 CTE 而非子查询"
+        default: false
+
+      # ── Phase 2 扩展：窗口函数（SELECT 子句级——属于此 SQLPlan，不属于 PipelineStep）──
+      window_functions:
+        type: array
+        description: "此 SQL 语句使用的窗口函数列表。属于语句级 IR。"
+        items:
+          $ref: "#/$defs/WindowFunction"
+
+      # ── Phase 2 扩展：表达式（列级——编译后出现在 SELECT 列表）──
+      expression_refs:
+        type: array
+        description: "此 SQL 语句使用的表达式列表。属于列级 IR。"
+        items:
+          $ref: "#/$defs/ExpressionBinding"
+
+      # ── Phase 2 扩展：CTE 定义（WITH 子句——属于此 SQL 语句）──
+      cte_definitions:
+        type: array
+        description: "此 SQL 语句的 CTE（公共表表达式）定义。属于语句级 IR，生命期仅限于此 SQL。"
+        items:
+          $ref: "#/$defs/CTEDefinition"
+
+    additionalProperties: false
+
+  # ═══════════════════════════════════════════════════════
+  # 步骤级 JoinGraph（支持管道内部表引用）
+  # ═══════════════════════════════════════════════════════
+  StepJoinGraph:
+    type: object
+    required: [primary]
+    properties:
+
+      primary:
+        type: object
+        required: [ref, table]
+        properties:
+          ref:
+            type: string
+            description: "IR 级引用标识符——在 column_bindings 和 filter_bindings 的 table_ref 中使用。通常固定为 'primary'。"
+            default: "primary"
+          table:
+            type: string
+            description: "主表全限定名（如 gold.dws_daily_trip_summary）或管道引用（$step.xxx.target_table / $cte.xxx）"
+        additionalProperties: false
+
+      joins:
+        type: array
+        description: "JOIN 节点列表（Phase 2 支持 N 个）"
+        maxItems: 10
+        items:
+          type: object
+          required: [ref, table, type, condition]
+          properties:
+            ref:
+              type: string
+              description: "IR 级引用标识符——编译器内部使用，不暴露到 SQL。用于 condition 中的 table_ref 引用和 JOIN 方向判定。"
+              pattern: "^[a-z][a-z0-9_]*$"
+            table:
+              type: string
+              description: "从表全限定名（如 gold.dim_taxi_zone）或管道内部引用（如 $step.extract_data.target_table）"
+            type:
+              type: string
+              description: "JOIN 类型"
+              enum: [INNER JOIN, LEFT JOIN, RIGHT JOIN]
+            condition:
+              type: object
+              required: [left, right]
+              properties:
+                left:
+                  type: object
+                  required: [table_ref, column]
+                  description: "JOIN 条件的左操作数——结构化引用，不含 SQL 别名"
+                  properties:
+                    table_ref:
+                      type: string
+                      description: "引用的表：'primary' 或 joins[] 中某个元素的 ref 值"
+                    column:
+                      type: string
+                      description: "列名（不含表名前缀）"
+                  additionalProperties: false
+                right:
+                  type: object
+                  required: [table_ref, column]
+                  description: "JOIN 条件的右操作数"
+                  properties:
+                    table_ref:
+                      type: string
+                      description: "引用的表：'primary' 或 joins[] 中某个元素的 ref 值"
+                    column:
+                      type: string
+                  additionalProperties: false
+              additionalProperties: false
+            constraint_ref:
+              type: string
+              description: "约束来源（sql_safety_policy.yml 或 $internal.pipeline_dev_join）"
+          additionalProperties: false
+
+    additionalProperties: false
+
+  # ═══════════════════════════════════════════════════════
+  # 列绑定
+  # ═══════════════════════════════════════════════════════
+  ColumnBinding:
+    type: object
+    required: [column_ref, alias]
+    properties:
+      metric_name:
+        type: string
+        description: "关联的已注册指标名（如有）"
+      column_ref:
+        type: string
+        description: "列引用——格式为 table_ref.column_name。table_ref 对应 JoinGraph 中 primary 的 ref 或 joins[].ref。编译器在 Pass 2 将 table_ref 映射为 SQL 别名。"
+      alias:
+        type: string
+        description: "输出列别名——此名称会出现在最终 SQL 的 SELECT 列表中"
+      domain:
+        type: string
+        description: "所属业务域"
+    additionalProperties: false
+
+  DimensionBinding:
+    type: object
+    required: [column_ref, alias]
+    properties:
+      dim_name:
+        type: string
+      column_ref:
+        type: string
+        description: "维度列引用——格式为 table_ref.column_name，如 'primary.trip_date'"
+      alias:
+        type: string
+    additionalProperties: false
+
+  # ═══════════════════════════════════════════════════════
+  # 过滤条件绑定（Phase 2 扩展了 filter_type 枚举）
+  # ═══════════════════════════════════════════════════════
+  FilterBinding:
+    type: object
+    required: [filter_type, column_ref, operator]
+    properties:
+      filter_type:
+        type: string
+        enum:
+          - date_range           # BETWEEN ? AND ?
+          - in_list              # IN (?, ?, ...)
+          - equals               # = ?
+          - comparison           # >= / <= / > / < ?（Phase 2 新增）
+          - not_equals           # != ?（Phase 2 新增）
+          - column_comparison    # col1 >= col2（Phase 2 新增——左右均为 column_ref）
+      column_ref:
+        type: string
+        description: "过滤目标列引用——格式为 table_ref.column_name。编译器在 Pass 2 将 table_ref 映射为 SQL 别名。"
+      operator:
+        type: string
+        enum: [BETWEEN, IN, "=", ">=", "<=", ">", "<", "!="]
+      value:
+        description: "过滤值——可以是字面量、参数引用（$param.xxx）或表达式"
+    additionalProperties: false
+
+  # ═══════════════════════════════════════════════════════
+  # 窗口函数定义（Phase 2 新增）
+  # ═══════════════════════════════════════════════════════
+  WindowFunction:
+    type: object
+    required: [func_name, partition_by, order_by, alias]
+    properties:
+      func_name:
+        type: string
+        description: "窗口函数名"
+        enum:
+          - lead
+          - lag
+          - row_number
+          - rank
+          - dense_rank
+          - count
+          - sum
+          - avg
+          - min
+          - max
+          - first_value
+          - last_value
+      args:
+        type: array
+        description: "函数参数（列引用或字面量）"
+        items:
+          type: string
+      partition_by:
+        type: array
+        description: "PARTITION BY 子句的列列表"
+        items:
+          type: string
+      order_by:
+        type: array
+        description: "ORDER BY 子句——使用结构化 ColumnRef，保证多表 JOIN 时编译器能解析列归属"
+        items:
+          type: object
+          required: [column_ref, direction]
+          properties:
+            column_ref:
+              type: object
+              required: [table_ref, column_name]
+              properties:
+                table_ref:
+                  type: string
+                  description: "JoinGraph 中的引用标识符（'primary' 或 joins[].ref）"
+                column_name:
+                  type: string
+                  description: "裸列名——不含表名前缀"
+              additionalProperties: false
+            direction:
+              type: string
+              enum: [ASC, DESC]
+              default: "ASC"
+          additionalProperties: false
+      alias:
+        type: string
+        description: "输出列别名"
+      frame:
+        type: object
+        description: "窗口帧定义（可选，默认 RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW）"
+        properties:
+          type:
+            type: string
+            enum: [ROWS, RANGE, GROUPS]
+          start:
+            type: string
+            description: "帧起始，如 UNBOUNDED PRECEDING 或 1 PRECEDING"
+          end:
+            type: string
+            description: "帧结束，如 CURRENT ROW 或 UNBOUNDED FOLLOWING"
+        additionalProperties: false
+    additionalProperties: false
+
+  # ═══════════════════════════════════════════════════════
+  # 表达式绑定（Phase 2 新增——修正版：结构化 IR，方言无关）
+  # ═══════════════════════════════════════════════════════
+  #
+  # 🚨 设计约束：expression 字段绝不包含原始 SQL 字符串！
+  #    所有表达式必须通过结构化 operands[] 表达，由编译器根据
+  #    target_dialect 翻译为方言特定的函数调用。
+  #
+  #    示例：计算两个日期的天数差
+  #      ❌ 错误（方言污染）："DATEDIFF('day', col1, col2)"
+  #      ✅ 正确（结构化 IR）：
+  #        expr_type: "date_diff"
+  #        operands:
+  #          - {type: "column_ref", ref: "crash_date"}
+  #          - {type: "column_ref", ref: "next_crash_date"}
+  #        config: {unit: "day"}
+  #        → DuckDB:    DATEDIFF('day', crash_date, next_crash_date)
+  #        → Hive:      DATEDIFF(next_crash_date, crash_date)
+  #        → PostgreSQL: (next_crash_date - crash_date)
+  #
+  ExpressionBinding:
+    type: object
+    required: [expr_type, alias]
+    properties:
+      expr_type:
+        type: string
+        description: "表达式类型——决定使用哪个编译模板"
+        enum:
+          - date_diff            # 日期差：DuckDB DATEDIFF / Hive DATEDIFF（参数顺序不同）
+          - date_trunc           # 日期截断：DuckDB DATE_TRUNC / Hive TRUNC
+          - date_format          # 日期格式化：DuckDB STRFTIME / Hive DATE_FORMAT
+          - arithmetic           # 算术运算：+, -, *, /
+          - conditional          # 条件表达式：CASE WHEN ... THEN ... END
+          - coalesce             # 空值合并：COALESCE, IFNULL
+          - cast                 # 类型转换：CAST, ::
+          - concat               # 字符串拼接：CONCAT, ||
+          - literal              # 字面量（字符串/数值/布尔）
+          - column_ref           # 简单列引用（透传）
+      operands:
+        type: array
+        description: "表达式操作数列表——结构化引用，绝不包含原始 SQL"
+        items:
+          type: object
+          required: [type]
+          properties:
+            type:
+              type: string
+              enum:
+                - column_ref       # 列引用：通过 $col.xxx 符号引用
+                - literal          # 字面量：整数/浮点/字符串/布尔
+                - expr_ref         # 嵌套表达式引用：通过 $expr.xxx 引用另一个表达式
+              description: "操作数类型——column_ref 引用列，literal 是字面值，expr_ref 嵌套"
+            ref:
+              type: string
+              description: "当 type=column_ref 时：列标识符（不含表名前缀，由编译器根据别名映射补全）"
+            value:
+              description: "当 type=literal 时：字面值（字符串/数值/布尔）"
+            expr_alias:
+              type: string
+              description: "当 type=expr_ref 时：引用的嵌套表达式别名"
+          additionalProperties: false
+      config:
+        type: object
+        description: "表达式类型特定的编译配置——方言无关的参数"
+        properties:
+          unit:
+            type: string
+            description: "date_diff / date_trunc 的时间单位"
+            enum: [year, quarter, month, week, day, hour, minute, second]
+          op:
+            type: string
+            description: "arithmetic 的运算符"
+            enum: ["+", "-", "*", "/"]
+          target_type:
+            type: string
+            description: "cast 的目标类型"
+            enum: [string, integer, double, decimal, date, timestamp, boolean]
+          when_clauses:
+            type: array
+            description: "conditional 的 WHEN 子句列表"
+            items:
+              type: object
+              required: [condition, then]
+              properties:
+                condition:
+                  type: object
+                  description: "条件——嵌套的 ExpressionBinding（不含 alias）"
+                then:
+                  description: "THEN 值——可以是 literal 或 column_ref"
+              additionalProperties: false
+          else_value:
+            description: "conditional 的 ELSE 值"
+          format:
+            type: string
+            description: "date_format 的格式字符串（方言无关的中间格式）"
+        additionalProperties: false
+      alias:
+        type: string
+        description: "表达式输出列别名——必须提供，用于编译器引用和 GROUP BY/ORDER BY"
+      output_type:
+        type: string
+        description: "表达式输出类型——用于校验和下游类型安全"
+        enum: [STRING, INTEGER, DOUBLE, DECIMAL, DATE, TIMESTAMP, BOOLEAN]
+    additionalProperties: false
+
+  # ═══════════════════════════════════════════════════════
+  # CTE 定义（Phase 2——修正版 v2.1：嵌套 SQLPlan）
+  # ═══════════════════════════════════════════════════════
+  #
+  # 🚨 IR 分层修正：CTE 的生命周期仅限于一条 SQL 语句。
+  #   它属于 SQLPlan（语句级），不属于 PipelineStep（管道级）。
+  #   CTE 体是嵌套的 SQLPlan——本身是一条完整的 SELECT。
+  #
+  #   CTE 之间可以通过 cte_name 相互引用（同一语句内）。
+  #   编译器生成：WITH cte1 AS (...), cte2 AS (SELECT * FROM cte1 ...)
+  #              SELECT ... FROM cte2 ...
+  #
+  #   Phase 2 限制：CTE 体内不支持嵌套 CTE（避免无限递归）。
+  #   嵌套 CTE 如 WITH a AS (WITH b AS (...) SELECT ...) 推迟到 Phase 3。
+  #
+  CTEDefinition:
+    type: object
+    required: [cte_name, sql_plan]
+    properties:
+      cte_name:
+        type: string
+        description: "CTE 名称——同一 SQL 语句中其他 CTE 或主查询通过 $cte.xxx 引用"
+        pattern: "^[a-z][a-z0-9_]*$"
+      sql_plan:
+        $ref: "#/$defs/StepSQLPlan"
+        description: "CTE 体的 SQLPlan——一条完整的 SELECT。Phase 2 硬限制：此 SQLPlan 的 cte_definitions 必须为空（禁止嵌套 CTE）。嵌套 CTE 推迟到 Phase 3+。"
+      # 注意：materialized 字段已移除——这是 PostgreSQL 方言特定概念，
+      # 与 IR 的方言无关原则冲突。方言特定的物化策略由编译器根据 target_dialect 决定。
+    additionalProperties: false
+
+  # ═══════════════════════════════════════════════════════
+  # 增量意图（Phase 2 新增——修正版：IR 只描述"要不要增量"
+  #  和"以什么键去重"，不描述"如何增量"）
+  # ═══════════════════════════════════════════════════════
+  #
+  # 🚨 设计约束：IncrementalConfig 的原始版本将执行策略细节
+  #   （merge/append/overwrite、retire_step、insert_step、
+  #   retention、idempotency）全部混入了 IR。
+  #   这些是编译器/执行器的决策，不是 IR 的职责。
+  #
+  #   IR 只需要回答三个问题：
+  #     1. 这个步骤是增量的吗？（incremental）
+  #     2. 用什么键去重/合并？（key_columns）
+  #     3. 用水位线列吗？（watermark_column）
+  #   编译器/执行器根据这些信息 + 目标表结构决定具体策略。
+  #
+  IncrementalIntent:
+    type: object
+    required: [incremental]
+    properties:
+      incremental:
+        type: boolean
+        description: "本步骤是否为增量更新。若 false，则忽略其余字段（全量覆盖）。"
+      key_columns:
+        type: array
+        description: "业务主键列——用于去重/合并。编译器据此选择 DEDUP 或 MERGE 策略。"
+        items:
+          type: string
+      watermark_column:
+        type: string
+        description: "水位线列名（用于标识增量批次，如 batch_date）"
+      partition_column:
+        type: string
+        description: "分区列名（如有分区表，如 batch_date）"
+      dedup_scope:
+        type: string
+        description: "去重范围提示——编译器据此选择具体策略"
+        enum:
+          - partition          # 分区内去重（→ INSERT_OVERWRITE_PARTITION）
+          - full_table         # 全表去重（→ 先 DELETE 再 INSERT）
+          - key_merge          # 按键合并（→ MERGE ON CONFLICT 或等价实现）
+        default: "partition"
+    additionalProperties: false
+
+  # ═══════════════════════════════════════════════════════════
+  # 🚨 PipelineExecutionConfig 已从此 IR 契约中移除
+  # ═══════════════════════════════════════════════════════════
+  #
+  # 原因：mode（safety_tier）、max_parallelism、retry_policy、
+  #   timeout_minutes、output_config 都是**执行层（Layer 6）**
+  #   的运行时参数，不是 IR 的结构组成部分。
+  #
+  # 同样的 PipelinePlan IR 可以在不同执行环境中配不同参数运行：
+  #   - 本地单线程开发：max_parallelism=1, timeout_minutes=60
+  #   - 集群生产执行：max_parallelism=8, timeout_minutes=30
+  #   - CI 回归测试：safety_tier=query, max_parallelism=1
+  #
+  # 这些参数定义在独立的执行配置契约中。
+  # 见：contracts/pipeline_execution_config_schema.yml（待创建）
+  #
+  # ═══════════════════════════════════════════════════════════

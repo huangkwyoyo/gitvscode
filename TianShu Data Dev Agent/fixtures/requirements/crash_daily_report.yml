@@ -1,0 +1,30 @@
+# 示例需求：2026年Q1每日事故统计
+#
+# G3 汇总表查询，事故域。单表查询。
+
+name: "2026年Q1每日事故统计"
+description: "按天统计2026年第一季度的交通事故数量、死亡人数和受伤人数"
+version: "1.0"
+
+metrics:
+  - name: "crash_count"
+  - name: "persons_killed"
+  - name: "persons_injured"
+
+dimensions:
+  - name: "date"
+
+filters:
+  date_range:
+    - "2026-01-01"
+    - "2026-03-31"
+
+group_by:
+  - "date"
+
+order_by:
+  - column: "date"
+    direction: "asc"
+
+output:
+  format: "parquet"

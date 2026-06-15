@@ -1,0 +1,120 @@
+# 端到端评测用例
+#
+# 定义 Data Dev Agent 的评测场景。
+# 每个用例指定输入需求、预期行为和通过标准。
+#
+# 版本：v1.0
+
+cases:
+  # ── 基础 G3 单表查询 ──
+  - id: "e2e_001_trip_daily"
+    name: "行程日报 — G3 单表查询"
+    description: "最基础场景：4个行程指标，按日汇总，单表查询"
+    requirement_file: "fixtures/requirements/trip_daily_report.yml"
+    expected:
+      # 管道应走到 Layer 8
+      min_layer: 8
+      # 状态应为 clean
+      status: "clean"
+      # 至少返回一些行（2026 Q1 应有数据）
+      min_rows: 1
+      # 应包含所有声明的列
+      expected_aliases:
+        - "日期"
+        - "行程量"
+        - "总车费收入"
+        - "总行驶距离"
+    checks:
+      - name: "管道走完 8 层"
+        type: "pipeline_layer"
+        expected: 8
+      - name: "状态为 clean"
+        type: "result_status"
+        expected: "clean"
+      - name: "返回行数 > 0"
+        type: "row_count_min"
+        expected: 1
+      - name: "指标列完整"
+        type: "columns_present"
+        expected: ["行程量", "总车费收入", "总行驶距离"]
+
+  # ── 违章域 G3 单表 ──
+  - id: "e2e_002_parking_daily"
+    name: "停车罚单日报 — G3 单表查询"
+    description: "违章域基础场景：2个罚单指标，按日汇总"
+    requirement_file: "fixtures/requirements/parking_daily_report.yml"
+    expected:
+      min_layer: 8
+      status: "clean"
+      min_rows: 1
+      expected_aliases:
+        - "日期"
+        - "停车罚单数量"
+        - "标准罚款总额"
+    checks:
+      - name: "管道走完 8 层"
+        type: "pipeline_layer"
+        expected: 8
+      - name: "状态为 clean"
+        type: "result_status"
+        expected: "clean"
+      - name: "返回行数 > 0"
+        type: "row_count_min"
+        expected: 1
+      - name: "指标列完整"
+        type: "columns_present"
+        expected: ["停车罚单数量", "标准罚款总额"]
+
+  # ── 事故域 G3 单表 ──
+  - id: "e2e_003_crash_daily"
+    name: "事故日报 — G3 单表查询"
+    description: "安全域基础场景：3个事故指标，按日汇总"
+    requirement_file: "fixtures/requirements/crash_daily_report.yml"
+    expected:
+      min_layer: 8
+      status: "clean"
+      min_rows: 1
+      expected_aliases:
+        - "日期"
+        - "事故数量"
+        - "死亡人数"
+        - "受伤人数"
+    checks:
+      - name: "管道走完 8 层"
+        type: "pipeline_layer"
+        expected: 8
+      - name: "状态为 clean"
+        type: "result_status"
+        expected: "clean"
+      - name: "返回行数 > 0"
+        type: "row_count_min"
+        expected: 1
+      - name: "指标列完整"
+        type: "columns_present"
+        expected: ["事故数量", "死亡人数", "受伤人数"]
+
+  # ── 负面用例：无效指标名 ──
+  - id: "e2e_004_invalid_metric"
+    name: "无效指标 — 应被 Layer 2 阻断"
+    description: "使用不存在的指标名，验证管道在 Layer 2 正确阻断"
+    requirement_file: null  # 用动态需求
+    requirement_data:
+      name: "测试无效指标"
+      metrics:
+        - name: "不存在的指标名"
+      filters:
+        date_range: ["2026-01-01", "2026-03-31"]
+    expected:
+      max_layer: 2  # 应在 Layer 2 被阻断
+      status: "blocked"
+
+  # ── 负面用例：dry-run 模式 ──
+  - id: "e2e_005_dry_run"
+    name: "Dry-run 模式 — 校验但不执行"
+    description: "验证 --dry-run 在 Layer 5 之后停止"
+    requirement_file: "fixtures/requirements/trip_daily_report.yml"
+    dry_run: true
+    expected:
+      min_layer: 5
+      max_layer: 5
+      status: "pass"

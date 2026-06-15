@@ -1,0 +1,71 @@
+# SQLPlan Schema
+#
+# 定义 Layer 3（规划层）输出给 Layer 4（生成层）的 SQLPlan 对象结构。
+# SQLPlan 是整个管道最关键的数据结构——它是 LLM 边界以下的第一站，
+# 也是 SQL Compiler 的唯一输入。
+#
+# 所有字段值必须来自 ColumnBindingTable 或 Contracts 的确定性查询结果。
+# LLM 不允许参与此对象的任何构造。
+#
+# 版本：v1.0 | Phase 1 单表+单次跨主题 JOIN | Phase 2 扩展 joins[] 支持多步 DAG
+
+sqlplan:
+  # ── 元信息 ──
+  plan_id: ""          # string, 必填：唯一计划 ID，格式 plan_{YYYYMMDD}_{序号}
+  plan_name: ""        # string, 必填：来自需求 name
+  source_layer: ""     # string, 必填："g3" | "g2" — 系统根据指标可用性决策
+  domain: ""           # string, 必填："traffic" | "violation" | "safety" | "supply" | "cross_domain"
+
+  # ── Join Graph（表结构表达）──
+  join_graph:
+    primary:           # object, 必填：主表（当所有指标在同一表时，无需 joins）
+      table: ""        # string：完全限定表名，如 "gold.dws_daily_trip_summary"
+      alias: ""        # string：SQL 别名，如 "trip"
+    joins:             # array, 可选：JOIN 列表（Phase 1 最多 1 个，Phase 2 无上限）
+      - table: ""      # string：完全限定表名
+        alias: ""      # string：SQL 别名
+        type: ""       # string："LEFT JOIN" | "INNER JOIN"
+        condition:
+          left: ""     # string：左表.列名（使用别名）
+          right: ""    # string：右表.列名（使用别名）
+        constraint_ref: ""   # string：约束来源引用，如 "sql_safety_policy.yml#join_whitelist"
+
+  # ── Column Bindings（字段绑定表——SQL Compiler 的编译输入）──
+  column_bindings:
+    metrics:           # array, 必填：每个指标的字段绑定
+      - metric_name: ""      # string：已注册指标名
+        fully_qualified: ""  # string：全限定列名，如 "gold.dws_daily_trip_summary.trip_count"
+        alias: ""            # string：输出别名
+        unit: ""             # string：单位，如 "次"、"美元"、"英里"
+        domain: ""           # string：所属业务域
+    dimensions:        # array, 可选：维度字段绑定
+      - dim_name: ""         # string：维度名
+        fully_qualified: ""  # string：全限定列名
+        alias: ""            # string：输出别名
+    filters:           # array, 必填：过滤条件绑定
+      - filter_type: ""      # string："date_range" | "in_list" | "equals"
+        fully_qualified: ""  # string：全限定列名
+        operator: ""         # string："BETWEEN" | "IN" | "="
+        value: null          # any：过滤值（date_range 时为 [min, max]，in_list 时为 array）
+    # #future:
+    #   enrichments: []      # array, Phase 2：维度丰富（JOIN dim 表获取中文名等）
+
+  # ── 聚合规格 ──
+  group_by: []         # array[string], 可选：GROUP BY 列的全限定名列表
+  order_by:            # array[object], 可选
+    - column: ""       # string：全限定列名
+      direction: ""    # string："ASC" | "DESC"
+  limit: null          # int | null, 可选：LIMIT 子句，null = 不限制
+
+  # ── 执行约束（从 TianShu contracts 自动注入）──
+  execution_constraints:
+    read_only: true              # boolean：只读连接
+    query_timeout_seconds: 30    # int：查询超时
+    max_result_rows: 100000      # int：最大返回行数
+    allowed_tables: []           # array[string]：本查询涉及的表白名单（用于 Layer 5 校验）
+    requires_date_dim: false     # boolean：是否需要通过 dim_date 过滤日期
+
+  # ── 输出规格 ──
+  output:
+    format: ""         # string："parquet" | "csv"
+    path_template: ""  # string：输出路径模板，如 "generated/results/{plan_id}.parquet"
