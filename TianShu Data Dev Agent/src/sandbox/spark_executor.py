@@ -1,12 +1,13 @@
 """
-PySpark DSL 执行器——数据执行边界的第二通道。
+PySpark DSL sample run 执行器。
 
-Phase 3 实现完整逻辑。Phase 1 仅定义接口和数据类型。
+M3 不假设 Spark 环境可用。没有 SparkSession 时返回 SKIPPED；
+即使传入 SparkSession，本阶段也只保留只读 sample run 的接口边界，不写表、不落盘。
 """
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
 from src.ir.types import SQLResult
 
@@ -17,31 +18,17 @@ def execute_spark_dsl(
     timeout_seconds: int = 60,
     source_table: str = "",
 ) -> SQLResult:
-    """
-    执行 PySpark DSL 代码并返回结构化结果。
-
-    Phase 3 实现。当前为占位桩——Spark 环境不可用时返回 SKIPPED 状态。
-
-    Args:
-        code: PySpark DSL 代码字符串
-        spark_session: SparkSession 实例（None 时无法执行）
-        timeout_seconds: 超时时间（秒），默认 60 秒
-        source_table: 主数据来源表
-
-    Returns:
-        SQLResult——Phase 1 始终返回 error（NotImplementedError）
-    """
+    """执行 Spark DSL 草案；不可用时返回非 PASS 状态。"""
     if spark_session is None:
         return SQLResult(
             sql=code,
-            error="PySpark 执行器尚未实现——Spark 环境不可用。待 Phase 3 实现。",
+            error="SKIPPED: Spark 环境不可用，Spark sample run 跳过；Spark 执行尚未实现。",
             source_table=source_table,
         )
 
-    # Phase 3 实现：通过 spark_session 执行 PySpark 代码，
-    # 收集结果并转为 SQLResult 格式（列名、行数据等）
+    _ = timeout_seconds
     return SQLResult(
         sql=code,
-        error="PySpark 执行器尚未实现。Phase 3 待实现。",
+        error="PENDING: Spark 只读 sample run 尚未接入，尚未实现，不能标记 PASS。",
         source_table=source_table,
     )

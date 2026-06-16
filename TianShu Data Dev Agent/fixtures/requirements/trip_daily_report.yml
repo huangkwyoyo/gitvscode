@@ -1,25 +1,52 @@
-# 示例需求：2026年Q1每日行程量趋势报告
-#
-# 这是最基础的 G3 汇总表查询。
-# 注意：G3 汇总表不含 total_tip_amount 列，需要小费指标时需降级到 G2。
-# 单表查询，无需 JOIN。
+request_id: "trip_daily_report_m2"
+name: "2026年Q1每日出行汇总审查包"
+title: "2026年Q1每日出行汇总审查包"
+description: "按天统计2026年第一季度的行程量、总车费和总行驶距离，生成 Review Package 供人审查。"
+version: "2.0"
+business_goal: "生成按日汇总的出行指标代码草案，供人审查后决定是否进入上线流程。"
 
-name: "2026年Q1每日行程量趋势"
-description: "按天统计2026年第一季度的行程量、总车费和总行驶距离，生成每日趋势数据"
-version: "1.0"
+source_tables:
+  - name: "gold.dws_daily_trip_summary"
+    role: "primary"
+    source: "TianShu Gold 层 G3 每日出行汇总表"
+
+required_fields:
+  - name: "trip_date"
+    table: "gold.dws_daily_trip_summary"
+    type: "DATE"
+    alias: "trip_date"
+    source: "gold.dws_daily_trip_summary.trip_date"
 
 metrics:
   - name: "trip_count"
+    field: "trip_count"
+    table: "gold.dws_daily_trip_summary"
+    aggregation: "SUM"
+    alias: "trip_count"
+    definition_source: "meta.metric_definitions.trip_count"
   - name: "total_fare_amount"
+    field: "total_fare_amount"
+    table: "gold.dws_daily_trip_summary"
+    aggregation: "SUM"
+    alias: "total_fare_amount"
+    definition_source: "meta.metric_definitions.total_fare_amount"
   - name: "total_distance_miles"
-
-dimensions:
-  - name: "date"
+    field: "total_distance_miles"
+    table: "gold.dws_daily_trip_summary"
+    aggregation: "SUM"
+    alias: "total_distance_miles"
+    definition_source: "meta.metric_definitions.total_distance_miles"
 
 filters:
   date_range:
     - "2026-01-01"
     - "2026-03-31"
+
+dimensions:
+  - name: "date"
+
+grain:
+  - "trip_date"
 
 group_by:
   - "date"
@@ -30,3 +57,15 @@ order_by:
 
 output:
   format: "parquet"
+  include_report: true
+  include_task_config: false
+
+output_expectation: "输出 Review Package，包含 SQL 草案、PySpark DSL 草案、测试草案、PENDING/SKIPPED 报告、来源追溯和 decision.md。"
+
+human_notes:
+  - "M2 阶段不执行 SQL，不执行 Spark。"
+  - "所有代码都是草案，未经验证，未经人审，不得上线。"
+
+human_review_points:
+  - "Human Review: 请确认 2026年Q1 日期范围是否符合业务口径。"
+  - "Human Review: 请确认使用 gold.dws_daily_trip_summary 作为唯一来源表是否满足需求。"

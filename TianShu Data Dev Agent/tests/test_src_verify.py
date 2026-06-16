@@ -344,8 +344,7 @@ class TestCrossValidationEngine:
             sql_result=SQLResult(sql="SELECT 1", row_count=10),
             spark_result=SQLResult(sql="spark.code", row_count=10),
         )
-        # Phase 1 桩——未实现对比逻辑
-        assert result.status.value == "not_attempted"
+        assert result.status.value == "consistent"
 
 
 class TestReportFactories:

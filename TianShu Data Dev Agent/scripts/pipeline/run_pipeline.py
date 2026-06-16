@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-Data Dev Agent 管道主入口
+Data Dev Agent v1 legacy pipeline 主入口。
+v2 主入口在 scripts/dev_agent/，本文件不作为 v2 Review Package 验证入口。
 
 用法：
   # 完整管道（8层全链路）

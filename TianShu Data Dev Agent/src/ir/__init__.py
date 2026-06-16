@@ -21,11 +21,11 @@ from .types import (
     # ── 多计划结构 ──
     UnifiedResponse, AgentResponse,
     # ── v2.0 代码生成 ──
-    CodeGenerationRequest, CodeGenerationResult,
+    CodeGenerationRequest, CodeGenerationResult, CodeDraft,
     # ── v2.0 验证与交叉验证 ──
     CheckResult, ValidationReport, CrossValidationResult,
     # ── v2.0 审查材料 ──
-    ReviewMaterial, ReviewPackage,
+    ReviewMaterial, ReviewPackage, ReviewPackageManifest, DecisionRecord,
 )
 
 from .contracts import (
@@ -52,11 +52,11 @@ __all__ = [
     # 多计划
     "UnifiedResponse", "AgentResponse",
     # 代码生成
-    "CodeGenerationRequest", "CodeGenerationResult",
+    "CodeGenerationRequest", "CodeGenerationResult", "CodeDraft",
     # 验证
     "CheckResult", "ValidationReport", "CrossValidationResult",
     # 审查材料
-    "ReviewMaterial", "ReviewPackage",
+    "ReviewMaterial", "ReviewPackage", "ReviewPackageManifest", "DecisionRecord",
     # 契约
     "MetricSpec", "DimensionSpec", "FilterSpec",
     "OrderBySpec", "OutputSpec", "Requirement",

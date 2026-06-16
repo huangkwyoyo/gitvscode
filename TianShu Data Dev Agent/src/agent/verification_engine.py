@@ -1,0 +1,471 @@
+"""
+v2 Verification Engine 编排入口。
+
+输入 M2 生成的 Review Package，执行静态检查、SQL sample run、
+Spark sample run 或跳过、SQL vs Spark 交叉验证，并写回审查报告。
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+import yaml
+
+from src.ir.types import CrossValidateStatus, SQLResult, ValidationReport, ValidationStatus
+from src.sandbox.executor import execute_sql_sample
+from src.sandbox.spark_executor import execute_spark_dsl
+from src.verify.checker import Validator
+from src.verify.cross_validation import compare_results
+
+
+@dataclass
+class VerificationEngineResult:
+    """M3 验证引擎的结构化结果。"""
+
+    package_path: str
+    verification_report_path: str
+    cross_validation_report_path: str
+    overall_status: str
+    sql_static_status: str
+    sql_sample_status: str
+    spark_static_status: str
+    spark_sample_status: str
+    cross_validation_status: str
+    warnings: list[str] = field(default_factory=list)
+    failures: list[str] = field(default_factory=list)
+
+
+def verify_review_package(
+    package_path: str | Path,
+    conn: Any = None,
+    spark_session: Any = None,
+    no_sql_run: bool = False,
+    limit: int = 1000,
+    timeout_seconds: int = 30,
+) -> VerificationEngineResult:
+    """验证 Review Package，并写入 verification/cross_validation 报告。"""
+    package_dir = Path(package_path)
+    sql_path = package_dir / "sql" / "main.sql"
+    spark_path = package_dir / "spark" / "main.py"
+    lineage_path = package_dir / "lineage" / "source_refs.yml"
+    decision_path = package_dir / "decision.md"
+    verification_path = package_dir / "reports" / "verification.md"
+    cross_path = package_dir / "reports" / "cross_validation.md"
+
+    _require_file(sql_path)
+    _require_file(spark_path)
+    _require_file(lineage_path)
+    _require_file(decision_path)
+
+    sql = sql_path.read_text(encoding="utf-8")
+    spark_code = spark_path.read_text(encoding="utf-8")
+    lineage = yaml.safe_load(lineage_path.read_text(encoding="utf-8")) or {}
+    source_table = _first_source_table(lineage)
+
+    validator = Validator()
+    static_report = validator.validate_static(sql=sql, spark_code=spark_code, lineage=lineage)
+    sql_static_status = _sql_static_status(static_report)
+    spark_static_status = _spark_static_status(static_report)
+
+    sql_result: SQLResult | None = None
+    sql_sample_status = "PENDING"
+    if sql_static_status == "FAIL":
+        sql_sample_status = "SKIPPED"
+    elif no_sql_run:
+        sql_sample_status = "SKIPPED"
+    elif conn is None:
+        sql_sample_status = "SKIPPED"
+    else:
+        sql_result = execute_sql_sample(
+            conn=conn,
+            sql=sql,
+            limit=limit,
+            timeout_seconds=timeout_seconds,
+            source_table=source_table,
+        )
+        sql_sample_status = "FAIL" if sql_result.error else "PASS"
+
+    spark_result: SQLResult | None = None
+    spark_sample_status = "PENDING"
+    if spark_static_status == "FAIL":
+        spark_sample_status = "SKIPPED"
+    else:
+        spark_result = execute_spark_dsl(
+            code=spark_code,
+            spark_session=spark_session,
+            timeout_seconds=timeout_seconds,
+            source_table=source_table,
+        )
+        spark_sample_status = _spark_result_status(spark_result)
+
+    if sql_sample_status != "PASS":
+        cross_result = compare_results(sql_result, spark_result if spark_sample_status == "PASS" else None)
+    elif spark_sample_status != "PASS":
+        cross_result = compare_results(sql_result, None)
+    else:
+        cross_result = compare_results(sql_result, spark_result)
+    cross_status = _cross_status(cross_result.status)
+
+    warnings, failures = _collect_findings(
+        static_report=static_report,
+        sql_result=sql_result,
+        spark_result=spark_result,
+        sql_sample_status=sql_sample_status,
+        spark_sample_status=spark_sample_status,
+        cross_status=cross_status,
+        cross_detail=cross_result.detail,
+    )
+    overall_status = _overall_status(
+        sql_static_status=sql_static_status,
+        sql_sample_status=sql_sample_status,
+        spark_static_status=spark_static_status,
+        spark_sample_status=spark_sample_status,
+        cross_status=cross_status,
+        warnings=warnings,
+        failures=failures,
+    )
+
+    verification_path.parent.mkdir(parents=True, exist_ok=True)
+    verification_path.write_text(
+        _build_verification_report(
+            package_dir=package_dir,
+            static_report=static_report,
+            sql_sample_status=sql_sample_status,
+            spark_sample_status=spark_sample_status,
+            sql_result=sql_result,
+            spark_result=spark_result,
+            overall_status=overall_status,
+            warnings=warnings,
+            failures=failures,
+            no_sql_run=no_sql_run,
+            conn_provided=conn is not None,
+        ),
+        encoding="utf-8",
+    )
+    cross_path.write_text(
+        _build_cross_validation_report(
+            sql_result=sql_result,
+            spark_result=spark_result,
+            cross_status=cross_status,
+            detail=cross_result.detail,
+            value_diffs=cross_result.value_diffs,
+        ),
+        encoding="utf-8",
+    )
+
+    return VerificationEngineResult(
+        package_path=str(package_dir.resolve()),
+        verification_report_path=str(verification_path.resolve()),
+        cross_validation_report_path=str(cross_path.resolve()),
+        overall_status=overall_status,
+        sql_static_status=sql_static_status,
+        sql_sample_status=sql_sample_status,
+        spark_static_status=spark_static_status,
+        spark_sample_status=spark_sample_status,
+        cross_validation_status=cross_status,
+        warnings=warnings,
+        failures=failures,
+    )
+
+
+def _require_file(path: Path) -> None:
+    """确保 Review Package 必备文件存在。"""
+    if not path.is_file():
+        raise FileNotFoundError(f"Review Package 缺少文件: {path}")
+
+
+def _first_source_table(lineage: dict[str, Any]) -> str:
+    """从 lineage 中提取首个来源表名。"""
+    tables = lineage.get("source_tables") or []
+    if not tables:
+        return ""
+    first = tables[0]
+    if isinstance(first, dict):
+        return str(first.get("name") or "")
+    return str(first)
+
+
+def _sql_static_status(report: ValidationReport) -> str:
+    """聚合 SQL 静态检查状态。"""
+    sql_checks = [
+        check for check in report.checks
+        if check.name.startswith("SQL")
+    ]
+    return _status_from_checks(sql_checks)
+
+
+def _spark_static_status(report: ValidationReport) -> str:
+    """聚合 Spark 静态检查状态。"""
+    spark_checks = [
+        check for check in report.checks
+        if check.name.startswith("Spark")
+    ]
+    return _status_from_checks(spark_checks)
+
+
+def _status_from_checks(checks: list) -> str:
+    """把 ValidationStatus 转成报告使用的大写状态。"""
+    if any(check.status == ValidationStatus.FAILED for check in checks):
+        return "FAIL"
+    if any(check.status == ValidationStatus.WARN for check in checks):
+        return "WARN"
+    if any(check.status == ValidationStatus.PENDING for check in checks):
+        return "PENDING"
+    return "PASS"
+
+
+def _spark_result_status(result: SQLResult | None) -> str:
+    """把 Spark sample run 结果转成 M3 状态。"""
+    if result is None:
+        return "PENDING"
+    if not result.error:
+        return "PASS"
+    if "SKIPPED" in result.error.upper():
+        return "SKIPPED"
+    if "PENDING" in result.error.upper():
+        return "PENDING"
+    return "FAIL"
+
+
+def _cross_status(status: CrossValidateStatus) -> str:
+    """把交叉验证枚举转成报告状态。"""
+    if status == CrossValidateStatus.CONSISTENT:
+        return "PASS"
+    if status == CrossValidateStatus.INCONSISTENT:
+        return "WARN"
+    if status == CrossValidateStatus.SKIPPED:
+        return "SKIPPED"
+    return "PENDING"
+
+
+def _collect_findings(
+    static_report: ValidationReport,
+    sql_result: SQLResult | None,
+    spark_result: SQLResult | None,
+    sql_sample_status: str,
+    spark_sample_status: str,
+    cross_status: str,
+    cross_detail: str,
+) -> tuple[list[str], list[str]]:
+    """汇总 WARN 和 FAIL 明细。"""
+    warnings: list[str] = []
+    failures: list[str] = []
+
+    for check in static_report.checks:
+        if check.status == ValidationStatus.FAILED:
+            failures.append(f"{check.name}: {check.detail}")
+        elif check.status == ValidationStatus.WARN:
+            warnings.append(f"{check.name}: {check.detail}")
+
+    if sql_sample_status == "FAIL" and sql_result and sql_result.error:
+        failures.append(f"SQL sample run 失败: {sql_result.error}")
+    if sql_sample_status in {"SKIPPED", "PENDING"}:
+        warnings.append(f"SQL sample run 状态为 {sql_sample_status}")
+    if spark_sample_status in {"SKIPPED", "PENDING"}:
+        warnings.append(f"Spark sample run 状态为 {spark_sample_status}")
+    if spark_sample_status == "FAIL" and spark_result and spark_result.error:
+        failures.append(f"Spark sample run 失败: {spark_result.error}")
+    if cross_status in {"WARN", "SKIPPED", "PENDING"}:
+        warnings.append(f"交叉验证状态为 {cross_status}: {cross_detail}")
+
+    return warnings, failures
+
+
+def _overall_status(
+    sql_static_status: str,
+    sql_sample_status: str,
+    spark_static_status: str,
+    spark_sample_status: str,
+    cross_status: str,
+    warnings: list[str],
+    failures: list[str],
+) -> str:
+    """计算总体状态，任何跳过或待定都不能伪装 PASS。"""
+    statuses = {
+        sql_static_status,
+        sql_sample_status,
+        spark_static_status,
+        spark_sample_status,
+        cross_status,
+    }
+    if failures or "FAIL" in statuses:
+        return "FAIL"
+    if "WARN" in statuses or warnings:
+        return "WARN"
+    if "PENDING" in statuses:
+        return "PENDING"
+    if "SKIPPED" in statuses:
+        return "SKIPPED"
+    return "PASS"
+
+
+def _build_verification_report(
+    package_dir: Path,
+    static_report: ValidationReport,
+    sql_sample_status: str,
+    spark_sample_status: str,
+    sql_result: SQLResult | None,
+    spark_result: SQLResult | None,
+    overall_status: str,
+    warnings: list[str],
+    failures: list[str],
+    no_sql_run: bool,
+    conn_provided: bool,
+) -> str:
+    """生成 verification.md。"""
+    sql_static_status = _sql_static_status(static_report)
+    spark_static_status = _spark_static_status(static_report)
+    lines = [
+        "# Verification Report",
+        "",
+        f"Review Package 路径：{package_dir}",
+        f"总体状态：{overall_status}",
+        "",
+        "## 状态摘要",
+        "",
+        f"- SQL 静态检查状态：{sql_static_status}",
+        f"- SQL sample run 状态：{sql_sample_status}",
+        f"- Spark 静态检查状态：{spark_static_status}",
+        f"- Spark sample run 状态：{spark_sample_status}",
+        "",
+        "## PENDING / SKIPPED 原因",
+    ]
+
+    if no_sql_run:
+        lines.append("- SQL sample run: SKIPPED，CLI 指定 --no-sql-run。")
+    elif not conn_provided:
+        lines.append("- SQL sample run: SKIPPED，未提供开发库或 sample 数据源。")
+    if spark_result and spark_result.error:
+        lines.append(f"- Spark sample run: {spark_result.error}")
+    if sql_result and sql_result.error:
+        lines.append(f"- SQL sample run: {sql_result.error}")
+    if not any("SKIPPED" in line or "PENDING" in line for line in lines[-4:]):
+        lines.append("- 无。")
+
+    lines.extend([
+        "",
+        "## 静态检查明细",
+    ])
+    for check in static_report.checks:
+        lines.append(f"- {check.name}: {_status_text(check.status)}，{check.detail}")
+
+    lines.extend([
+        "",
+        "## WARN / FAIL 明细",
+    ])
+    lines.extend(f"- FAIL: {item}" for item in failures)
+    lines.extend(f"- WARN: {item}" for item in warnings)
+    if not failures and not warnings:
+        lines.append("- 无。")
+
+    lines.extend([
+        "",
+        "## 人审提示",
+        "",
+        "- SQL/Spark 均为草案。",
+        "- 未经人审不得上线。",
+        "- Agent 不写生产库，不自动上线，不替代人工审批。",
+        "",
+    ])
+    return "\n".join(lines)
+
+
+def _build_cross_validation_report(
+    sql_result: SQLResult | None,
+    spark_result: SQLResult | None,
+    cross_status: str,
+    detail: str,
+    value_diffs: list[dict],
+) -> str:
+    """生成 cross_validation.md。"""
+    lines = [
+        "# Cross Validation Report",
+        "",
+        f"SQL 结果状态：{_result_state(sql_result)}",
+        f"Spark 结果状态：{_result_state(spark_result)}",
+        f"cross_validation_status：{cross_status}",
+        "",
+        "## 比较项",
+        "",
+        f"- 行数比较：{_row_count_compare(sql_result, spark_result)}",
+        f"- 列名比较：{_columns_compare(sql_result, spark_result)}",
+        f"- 抽样行比较：{_sample_compare(sql_result, spark_result)}",
+        f"- 数值指标比较：{_numeric_compare(value_diffs, sql_result, spark_result)}",
+        "",
+        "## 差异摘要",
+        "",
+    ]
+    if value_diffs:
+        for diff in value_diffs:
+            lines.append(f"- {diff}")
+    else:
+        lines.append(f"- {detail}")
+
+    lines.extend([
+        "",
+        "## 人审建议",
+        "",
+        "- 交叉验证结果不能替代人工审批。",
+        "- WARN/SKIPPED/PENDING 均需要人工确认是否可继续。",
+        "- 未经人审不得上线。",
+        "",
+    ])
+    return "\n".join(lines)
+
+
+def _status_text(status: ValidationStatus) -> str:
+    """转换静态检查状态。"""
+    mapping = {
+        ValidationStatus.PASSED: "PASS",
+        ValidationStatus.WARN: "WARN",
+        ValidationStatus.FAILED: "FAIL",
+        ValidationStatus.PENDING: "PENDING",
+    }
+    return mapping[status]
+
+
+def _result_state(result: SQLResult | None) -> str:
+    """描述 sample run 结果状态。"""
+    if result is None:
+        return "SKIPPED/PENDING"
+    if result.error:
+        return result.error
+    return f"PASS，{result.row_count} 行"
+
+
+def _row_count_compare(sql_result: SQLResult | None, spark_result: SQLResult | None) -> str:
+    """描述行数比较。"""
+    if not sql_result or not spark_result or sql_result.error or spark_result.error:
+        return "SKIPPED"
+    return "PASS" if sql_result.row_count == spark_result.row_count else "WARN"
+
+
+def _columns_compare(sql_result: SQLResult | None, spark_result: SQLResult | None) -> str:
+    """描述列名比较。"""
+    if not sql_result or not spark_result or sql_result.error or spark_result.error:
+        return "SKIPPED"
+    return "PASS" if sql_result.columns == spark_result.columns else "WARN"
+
+
+def _sample_compare(sql_result: SQLResult | None, spark_result: SQLResult | None) -> str:
+    """描述抽样行比较。"""
+    if not sql_result or not spark_result or sql_result.error or spark_result.error:
+        return "SKIPPED"
+    return "PASS" if sql_result.rows[:5] == spark_result.rows[:5] else "WARN"
+
+
+def _numeric_compare(
+    value_diffs: list[dict],
+    sql_result: SQLResult | None,
+    spark_result: SQLResult | None,
+) -> str:
+    """描述数值指标比较。"""
+    if not sql_result or not spark_result or sql_result.error or spark_result.error:
+        return "SKIPPED"
+    if not value_diffs:
+        return "PASS"
+    if any(diff.get("type") == "numeric_sum" for diff in value_diffs):
+        return "WARN"
+    return "PASS"

@@ -15,6 +15,7 @@
 
 from __future__ import annotations
 
+import re
 import threading
 import time
 from typing import Any, Optional
@@ -105,3 +106,57 @@ def execute_sql(
         error=error,
         source_table=source_table,
     )
+
+
+def execute_sql_sample(
+    conn: Any,
+    sql: str,
+    limit: int = 1000,
+    timeout_seconds: int = 30,
+    source_table: str = "",
+) -> SQLResult:
+    """执行只读 SQL sample run，并强制限行限时。"""
+    if conn is None:
+        return SQLResult(
+            sql=sql,
+            error="SKIPPED: 未提供开发库或 sample 数据源，SQL sample run 跳过。",
+            source_table=source_table,
+        )
+
+    body = _strip_sql_comments(sql).strip().rstrip(";")
+    if not body.upper().startswith("SELECT"):
+        return SQLResult(
+            sql=sql,
+            error="SQL sample run 被拒绝：只允许 SELECT 查询。",
+            source_table=source_table,
+        )
+
+    forbidden = [
+        "CREATE", "INSERT", "UPDATE", "DELETE", "DROP", "ALTER",
+        "TRUNCATE", "MERGE", "COPY", "EXPORT", "ATTACH", "INSTALL", "LOAD",
+    ]
+    upper = body.upper()
+    for keyword in forbidden:
+        if re.search(rf"\b{keyword}\b", upper):
+            return SQLResult(
+                sql=sql,
+                error=f"SQL sample run 被拒绝：检测到禁止关键字 {keyword}。",
+                source_table=source_table,
+            )
+
+    wrapped = body
+    if not re.search(r"\bLIMIT\b", upper):
+        wrapped = f"SELECT * FROM ({body}) AS v2_sample LIMIT {int(limit)}"
+
+    return execute_sql(
+        conn=conn,
+        sql=wrapped,
+        timeout_seconds=timeout_seconds,
+        source_table=source_table,
+    )
+
+
+def _strip_sql_comments(sql: str) -> str:
+    """去除 SQL 注释，避免注释内容影响安全判断。"""
+    without_line = re.sub(r"--.*$", "", sql, flags=re.MULTILINE)
+    return re.sub(r"/\*.*?\*/", "", without_line, flags=re.DOTALL)

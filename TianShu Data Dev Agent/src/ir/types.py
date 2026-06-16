@@ -610,6 +610,71 @@ class CodeGenerationResult:
     generation_mode: ExecutionMode = ExecutionMode.SQL_ONLY  # 实际生成模式
 
 
+@dataclass
+class CodeDraft:
+    """单份代码草案，进入验证前一律不可信"""
+    kind: str
+    path: str
+    content: str
+    language: str
+    status: str = "draft_unverified"
+    source_refs: dict[str, str] = field(default_factory=dict)
+    pending_items: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        """序列化为字典"""
+        return {
+            "kind": self.kind,
+            "path": self.path,
+            "language": self.language,
+            "status": self.status,
+            "source_refs": self.source_refs,
+            "pending_items": self.pending_items,
+        }
+
+
+@dataclass
+class DecisionRecord:
+    """人审决策记录，默认不得为批准"""
+    default_status: str = "REQUEST_CHANGES"
+    options: list[str] = field(default_factory=lambda: [
+        "APPROVE",
+        "REQUEST_CHANGES",
+        "REJECT",
+    ])
+    human_review_required: bool = True
+    notes: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        """序列化为字典"""
+        return {
+            "default_status": self.default_status,
+            "options": self.options,
+            "human_review_required": self.human_review_required,
+            "notes": self.notes,
+        }
+
+
+@dataclass
+class ReviewPackageManifest:
+    """Review Package 的落盘清单"""
+    request_id: str
+    package_path: str
+    files: list[str] = field(default_factory=list)
+    status: str = "pending_human_review"
+    pending_items: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        """序列化为字典"""
+        return {
+            "request_id": self.request_id,
+            "package_path": self.package_path,
+            "files": self.files,
+            "status": self.status,
+            "pending_items": self.pending_items,
+        }
+
+
 # ═══════════════════════════════════════════════════════════
 # §11 v2.0 验证与交叉验证类型
 # ═══════════════════════════════════════════════════════════
