@@ -110,6 +110,27 @@ Step 5: 解释（结果 → 中文回答）
 | `evals/` | 四类评测问题集 |
 | `harness/` | 质量门禁（从 Day 1 运行） |
 | `docs/memory/` | 经验复盘 + 风险清单 + 规则来源索引（长期记忆） |
+| `docs/planning/` | 阶段规划、设计报告、项目书、技术方案（归档） |
+
+### 6.1 文档输出目录规范
+
+> **阻断性规则**：以下类型的文档必须输出到 `docs/planning/`，不得散落在项目根目录或 `docs/` 顶层。
+
+| 文档类型 | 说明 | 输出目录 | 命名格式 |
+|---------|------|:--------:|---------|
+| 阶段规划文档 | Phase X 实施计划、路线图、完成总结 | `docs/planning/` | `{内容描述}_{YYYYMMDD}_{HHMM}.md` |
+| 设计报告 | 技术方案、架构设计、接入方案 | `docs/planning/` | `{内容描述}_{YYYYMMDD}_{HHMM}.md` |
+| 项目书 | 项目立项、可行性分析、资源评估 | `docs/planning/` | `{内容描述}_{YYYYMMDD}_{HHMM}.md` |
+| 回归/评测报告 | Prompt 回归报告、E2E 评测总结 | `docs/planning/` | `{内容描述}_{YYYYMMDD}_{HHMM}.md` |
+
+**排除项**（不属于 `docs/planning/`）：
+- 长期记忆文件（经验复盘、风险清单、规则索引）→ `docs/memory/`
+- 持续维护的工程文档（工作流说明、术语表）→ `docs/`
+- Harness 运行时报告 → `harness/reports/`
+
+**命名示例**：
+- `Phase3A并行执行设计_20260616_1500.md`
+- `LLM融合方案设计报告_20260616_1600.md`
 
 ---
 
@@ -139,6 +160,8 @@ Step 5: 解释（结果 → 中文回答）
 | 修改 `src/agent.py`（主循环逻辑） | `src/repl.py`（接口兼容）、`tests/test_e2e.py`（端到端测试）、`docs/memory/经验复盘.md` | 主循环变更 → 交互入口兼容 + 测试用例同步 |
 | 修改 `harness/baselines/*.py`（基线逻辑） | `harness/run_baseline_freeze.py`、`harness/run_fast_gate.py`、`harness/run_slow_gate.py` | 基线逻辑变更 → 入口脚本同步 |
 | 修改 `src/schema_validators.py`（Schema 校验器） | `src/ir.py`（校验规则需与数据结构一致）、`tests/test_ir.py`（测试期望同步） | 校验规则变更 → 数据结构兼容性确认 |
+| 新增/修改阶段规划文档 `docs/planning/*.md` | `docs/README.md`（文档索引同步）、`docs/memory/经验复盘.md`（如有新经验沉淀） | 规划文档新增 → 索引更新 + 经验条目同步（如适用）|
+| 修改 `docs/text2sql_current_pipeline.md` 或 `docs/text2sql_engineering_glossary.md` | `docs/README.md`（如有章节变更）、`docs/planning/`（如有对应设计文档需同步）| 工程文档变更 → 关联设计文档一致性检查 |
 
 ### 8.2 执行规则
 
