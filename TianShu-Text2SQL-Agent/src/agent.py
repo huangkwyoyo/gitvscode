@@ -541,6 +541,8 @@ class Text2SQLAgent:
 
         table = config["table"]
         date_col = config["date_col"]
+        # 直接使用 _resolve_metric_table_mapping 返回的完整聚合表达式，
+        # 避免再次拼接 SUM() 导致 SUM(SUM(x)) 双包裹
         aggregation_expr = config["aggregation_expr"]
         return SQLPlan(
             strategy=Strategy.G3_DIRECT,
@@ -573,7 +575,15 @@ class Text2SQLAgent:
           1. resolver context 中的 available_metrics（在线模式，动态发现）
           2. agent_config.yml 的 rule_mode.metric_to_table（离线 fallback）
 
-        表名优先从 context 获取，列表达式优先从 config 获取（config 更精确）。
+        aggregation_expr vs value_expr：
+            - value_expr: 纯列名（如 "total_fare_amount"），用于反问文案和调试
+            - aggregation_expr: 完整聚合表达式（如 "SUM(total_fare_amount)"），
+              直接写入 SQLPlan，省去 SQL 生成环节再次拼接
+
+        B-8 修复背景：
+            此前 value_expr 直接写入 SQLPlan.aggregations，但 SQL 生成时又套了一层 SUM()，
+            导致 SUM(SUM(x)) 双包裹。现在 aggregation_expr 承载完整聚合表达式，
+            SQL 生成直接使用，不再套壳。
 
         Returns:
             {"table": "...", "date_col": "...", "aggregation_expr": "..."} 或 None
@@ -619,7 +629,14 @@ class Text2SQLAgent:
 
     @staticmethod
     def _normalize_aggregation_expr(aggregation: str, fallback: str) -> str:
-        """标准化注册表中的聚合表达式，保留 AVG/SUM 等函数语义。"""
+        """标准化注册表中的聚合表达式，保留 AVG/SUM 等函数语义。
+
+        为什么需要大写归一化：
+            注册表（从契约文件或配置加载）中的聚合表达式可能是任意大小写
+            （如 'sum(total_fare)' 或 'SUM(total_fare)'），但最终生成的 SQL
+            和 IR 中统一使用大写函数名。此方法确保无论输入什么大小写，
+            输出都是大写函数名，避免后续环节因大小写不一致而判断错误。
+        """
         if not aggregation:
             return f"SUM({fallback})"
         return re.sub(
@@ -782,7 +799,21 @@ class Text2SQLAgent:
         )
 
     def _detect_metric(self, question: str) -> Optional[dict[str, Any]]:
-        """通过注册指标目录识别 G3 指标。"""
+        """通过注册指标目录识别 G3 指标。
+
+        三返回值设计：
+            - 返回 dict(metric=..., domain=..., confidence=...)
+              → 命中唯一指标，调用方可直接使用
+            - 返回 dict(metric=None, clarification_reason=..., confidence=...)
+              → 指标歧义，需反问用户选择；confidence 来自 MetricResolver 的最高候选置信度
+            - 返回 None（metric_not_found）
+              → 完全无法匹配，触发兜底反问文案
+
+        为什么不用异常区分而是用 dict 的 metric=None：
+            异常会导致调用方 _classify_intent_rule 需要额外 try/except，
+            而 dict 三态让调用方用统一的 if metric_info is None or not metric_info.get("metric")
+            即可覆盖 all 场景，保持控制流扁平。
+        """
         result = MetricResolver(
             self._available_metric_infos(),
             aliases=self._metric_aliases(),
@@ -803,7 +834,20 @@ class Text2SQLAgent:
         }
 
     def _available_metric_infos(self) -> list[MetricInfo]:
-        """读取当前上下文中的指标目录；离线时回退到规则配置。"""
+        """读取当前上下文中的指标目录；离线时回退到规则配置。
+
+        在线/离线双路径：
+            - 在线（context 可用）：直接从 TianShu 契约文件加载的 MetricInfo 列表，
+              包含完整字段（zh_name、unit、聚合表达式等）
+            - 离线（context 不可用）：从 agent_config.yml 的 rule_mode 段提取
+              keyword_to_metric + metric_to_table 拼装 MetricInfo。
+              离线模式的 zh_name 为空、unit 为空、aggregation 为 sum 硬编码，
+              因为配置文件不包含这些信息。
+
+        为什么离线模式要走规则配置而不是直接返回空：
+            REPL 启动时即使 DuckDB 连接失败，用户仍可测试规则匹配逻辑。
+            返回空列表会导致所有问题都变成"未识别指标"。
+        """
         if self._context and self._context.available_metrics:
             return self._context.available_metrics
 
@@ -827,7 +871,18 @@ class Text2SQLAgent:
         return metrics
 
     def _metric_aliases(self) -> dict[str, list[str]]:
-        """从规则配置读取指标别名，兼容离线 fallback 关键词。"""
+        """从规则配置读取指标别名，兼容离线 fallback 关键词。
+
+        keyword_to_metric 中的 keywords 列表被复用为别名来源。
+        例如配置中 trip_count 对应 keywords=["行程数","行程量","出行量","订单数"]，
+        这些关键词会成为 trip_count 的别名，由 MetricResolver 在 alias 优先级层匹配。
+
+        与 MetricResolver._SYNONYMS 的关系：
+            - _SYNONYMS 是语言学层面的硬编码同义映射
+            - aliases 是运维在配置文件中可随时新增的业务别名
+            - MetricResolver 先查 _SYNONYMS（置信度 0.93），再查 aliases（置信度 0.90），
+              确保语言学映射优先级高于配置别名
+        """
         aliases: dict[str, list[str]] = {}
         rule_cfg = self._agent_config.get("rule_mode", {})
         for mapping in rule_cfg.get("keyword_to_metric", {}).values():
