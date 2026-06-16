@@ -51,6 +51,14 @@ behavior:
   # 是否在回答中标注数据来源表
   show_source_table: true
 
+# ── 执行策略配置 ──
+# 控制多计划场景下的执行模式
+execution:
+  # 是否启用并发执行（默认关闭，保持串行兼容）
+  parallel_enabled: false
+  # 并发执行时的最大工作线程数
+  max_workers: 2
+
 # ── 安全配置 ──
 safety:
   # 必须启用只读模式（不可关闭）

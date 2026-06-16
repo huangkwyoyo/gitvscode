@@ -21,6 +21,12 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
+from typing import Optional
+
+from .execution_strategy import (
+    ExecutionStrategy,
+    SerialExecutionStrategy,
+)
 from .ir import (
     ExecutionTrace,
     SQLPlan,
@@ -226,3 +232,46 @@ class PlanExecutor:
             ur.execution_trace = self._last_trace
 
         return responses
+
+    def execute_many(
+        self,
+        responses: list[UnifiedResponse],
+        strategy: Optional[ExecutionStrategy] = None,
+        executor_factory: Any = None,
+    ) -> list[UnifiedResponse]:
+        """
+        使用指定策略执行多个 UnifiedResponse 中的所有计划。
+
+        如果未指定策略，默认使用 SerialExecutionStrategy（完全向后兼容）。
+        并发策略通过 ThreadPoolExecutionStrategy 启用。
+
+        Args:
+            responses: 待执行的 UnifiedResponse 列表
+            strategy: 执行策略实例。None 时使用串行策略（默认行为）
+            executor_factory: 创建 PlanExecutor 的工厂函数（可选）。
+                              并发模式必须传入，确保每个 worker 获得独立连接。
+                              未传入时使用当前 PlanExecutor 的参数创建新实例。
+
+        Returns:
+            同一列表（原地修改），每个元素的 result 和 execution_trace 已回填。
+        """
+        if strategy is None:
+            strategy = SerialExecutionStrategy()
+
+        if executor_factory is None:
+            # 默认工厂：使用当前 executor 的参数创建新实例
+            # 注意：这不会创建新的 resolver/connection，仅适用于串行策略
+            _resolver = self._resolver
+            _context = self._context
+            _config = self._config
+
+            def _default_factory():
+                return PlanExecutor(
+                    resolver=_resolver,
+                    context=_context,
+                    agent_config=_config,
+                )
+
+            executor_factory = _default_factory
+
+        return strategy.execute(responses, executor_factory)

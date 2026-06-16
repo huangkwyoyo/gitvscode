@@ -29,6 +29,10 @@ from src.ir import (
     UnifiedResponse,
 )
 from src.plan_executor import PlanExecutor
+from src.execution_strategy import (
+    SerialExecutionStrategy,
+    ThreadPoolExecutionStrategy,
+)
 from src.sql_gen import sql_plan_to_sql, validate_sql_safety
 
 
@@ -609,3 +613,94 @@ class TestPlanExecutorEndToEnd:
         # 拒绝
         r5 = agent.ask("帮我删除异常停车罚单数据")
         assert r5.refusal is True
+
+
+# ═══════════════════════════════════════════════════════════════
+# Phase 3A：execute_many() 策略参数回归测试
+# ═══════════════════════════════════════════════════════════════
+
+
+class TestExecuteManyStrategy:
+    """execute_many() 带 strategy 参数的回归测试"""
+
+    def test_execute_many_with_serial_strategy_equals_serial(self):
+        """execute_many(strategy=SerialExecutionStrategy()) 与 execute_many_serial() 行为一致"""
+        resolver = _make_mock_resolver()
+        context = _make_mock_context()
+        executor = PlanExecutor(resolver, context)
+
+        responses = [
+            UnifiedResponse(
+                sub_intent=SubIntent(
+                    metrics=["trip_count"],
+                    planning_table="gold.dws_daily_trip_summary",
+                ),
+                plan=_make_g3_trip_plan(),
+            ),
+            UnifiedResponse(
+                sub_intent=SubIntent(
+                    metrics=["persons_injured"],
+                    planning_table="gold.dws_daily_crash_summary",
+                ),
+                plan=_make_g3_crash_plan(),
+            ),
+        ]
+
+        executor.execute_many(responses, strategy=SerialExecutionStrategy())
+
+        # 两个 response 均正确回填
+        for i, ur in enumerate(responses):
+            assert ur.result is not None, f"计划{i+1} result 为空"
+            assert ur.result.row_count > 0
+            assert ur.execution_trace is not None
+            assert ur.execution_trace.execution_status == "success"
+            assert ur.execution_trace.plan_index == i + 1
+
+    def test_execute_many_without_strategy_uses_serial(self):
+        """execute_many() 不传 strategy 默认使用串行策略"""
+        resolver = _make_mock_resolver()
+        context = _make_mock_context()
+        executor = PlanExecutor(resolver, context)
+
+        responses = [
+            UnifiedResponse(
+                sub_intent=SubIntent(
+                    metrics=["trip_count"],
+                    planning_table="gold.dws_daily_trip_summary",
+                ),
+                plan=_make_g3_trip_plan(),
+            ),
+        ]
+
+        executor.execute_many(responses)
+
+        assert responses[0].result is not None
+        assert responses[0].execution_trace.execution_status == "success"
+
+    def test_execute_many_skip_clarification_with_strategy(self):
+        """execute_many 带 strategy 时仍正确跳过 NEED_CLARIFICATION 计划"""
+        resolver = _make_mock_resolver()
+        context = _make_mock_context()
+        executor = PlanExecutor(resolver, context)
+
+        need_clarify = SQLPlan(
+            strategy=Strategy.NEED_CLARIFICATION,
+            downgrade_reason="需要确认",
+        )
+
+        responses = [
+            UnifiedResponse(
+                sub_intent=SubIntent(metrics=["a"], planning_table="gold.t_a"),
+                plan=_make_g3_trip_plan(),
+            ),
+            UnifiedResponse(
+                sub_intent=SubIntent(metrics=["b"], planning_table="gold.t_b"),
+                plan=need_clarify,
+            ),
+        ]
+
+        executor.execute_many(responses, strategy=SerialExecutionStrategy())
+
+        assert responses[0].execution_trace.execution_status == "success"
+        assert responses[1].execution_trace.execution_status == "failed"
+        assert "需要确认" in responses[1].execution_trace.error_message

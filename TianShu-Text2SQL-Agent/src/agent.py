@@ -51,6 +51,11 @@ from .metric_resolver import MetricResolver
 from .ambiguity import detect_ambiguity, load_clarification_rules
 from .request_guard import is_write_request, is_forbidden_layer_request
 from .plan_executor import PlanExecutor
+from .execution_strategy import (
+    ExecutionStrategy,
+    SerialExecutionStrategy,
+    ThreadPoolExecutionStrategy,
+)
 from .result_merge import merge_results_on_date
 from .explainer import explain_result, fuse_results
 from .llm import LLMClient, LLMRequest, PromptLoader
@@ -147,6 +152,59 @@ class Text2SQLAgent:
                 agent_config=self._agent_config,
             )
         return self._executor
+
+    def _get_execution_strategy(self) -> ExecutionStrategy:
+        """
+        根据配置创建执行策略。
+
+        execution.parallel_enabled=true → ThreadPoolExecutionStrategy
+        否则 → SerialExecutionStrategy（默认）
+        """
+        exec_cfg = self._agent_config.get("execution", {}) if self._agent_config else {}
+        parallel_enabled = exec_cfg.get("parallel_enabled", False)
+
+        if parallel_enabled:
+            max_workers = exec_cfg.get("max_workers", 2)
+            return ThreadPoolExecutionStrategy(max_workers=max_workers)
+
+        return SerialExecutionStrategy()
+
+    def _create_parallel_executor_factory(self):
+        """
+        创建用于并发模式的 PlanExecutor 工厂函数。
+
+        每次调用都会创建独立的 TianShuResolver（含独立 DuckDB read_only 连接）
+        和独立的 PlanExecutor，确保跨线程无共享连接。
+
+        Returns:
+            无参 callable，每次调用返回新的 PlanExecutor 实例
+
+        Raises:
+            RuntimeError: 如果 resolver 初始化失败（离线模式等）
+        """
+        # 捕获创建独立连接所需的配置路径
+        if self._resolver is not None and hasattr(self._resolver, "_config_path"):
+            tianshu_config_path = str(self._resolver._config_path)
+        else:
+            tianshu_config_path = "config/tianshu_target.yml"
+
+        agent_config = self._agent_config
+
+        def _factory():
+            """在 worker 线程中调用，创建独立 resolver + executor"""
+            from .resolver import TianShuResolver
+
+            # 创建独立的 resolver（含独立 DuckDB read_only 连接）
+            resolver = TianShuResolver(tianshu_config_path)
+            context = resolver.build_context()
+
+            return PlanExecutor(
+                resolver=resolver,
+                context=context,
+                agent_config=agent_config,
+            )
+
+        return _factory
 
     def ask(self, question: str) -> AgentResponse:
         """
@@ -297,10 +355,20 @@ class Text2SQLAgent:
                     f"{ur.plan.primary_table if ur.plan else 'N/A'}"
                 )
 
-            # ── Phase 2C：串行多计划执行（PlanExecutor 封装）──
-            response.trace.append("[STEP 4] 串行多计划执行（PlanExecutor）...")
+            # ── Phase 2C/3A：多计划执行（PlanExecutor + 策略编排）──
+            strategy = self._get_execution_strategy()
+            parallel = isinstance(strategy, ThreadPoolExecutionStrategy)
+            mode_label = (
+                f"并发(max_workers={strategy.max_workers})"
+                if parallel else "串行"
+            )
+            response.trace.append(f"[STEP 4] 多计划执行（{mode_label}）...")
             executor = self._get_executor()
-            executor.execute_many_serial(unified_responses)
+            factory = (
+                self._create_parallel_executor_factory()
+                if parallel else None
+            )
+            executor.execute_many(unified_responses, strategy=strategy, executor_factory=factory)
 
             # 记录每个子计划的执行 trace
             for i, ur in enumerate(unified_responses):
