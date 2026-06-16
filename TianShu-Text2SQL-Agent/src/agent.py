@@ -58,6 +58,14 @@ from .execution_strategy import (
 )
 from .result_merge import merge_results_on_date
 from .explainer import explain_result, fuse_results
+from .result_fusion import (
+    fuse_results_with_llm,
+    validate_fusion_output,
+    fallback_to_template,
+    build_result_fusion_payload,
+)
+from .result_summary import summarize_sql_result
+from .cross_domain_policy import CrossDomainPolicy, CrossDomainDecision
 from .llm import LLMClient, LLMRequest, PromptLoader
 from .llm_adapter import RefusalDetected
 from .llm_pipeline import extract_json_object, question_intent_from_dict, sql_plan_from_dict
@@ -93,6 +101,7 @@ class Text2SQLAgent:
         self._prompt_loader = prompt_loader or PromptLoader()
         self._last_intent_raw: str | None = None   # 最近一次 intent LLM 原始输出（供 ask() 校验失败时保存证据）
         self._last_plan_raw: str | None = None     # 最近一次 plan LLM 原始输出
+        self._last_trace_message: str | None = None  # 最近一次诊断消息（如 LLM 融合回退原因）
 
         if self._mode not in {"rule", "llm"}:
             raise ValueError("mode 只能是 'rule' 或 'llm'")
@@ -205,6 +214,126 @@ class Text2SQLAgent:
             )
 
         return _factory
+
+    def _fuse_results_with_llm(
+        self,
+        question: str,
+        unified_responses: list[UnifiedResponse],
+        merged: Any,  # MergedResult
+        cross_domain_decision: Any = None,  # CrossDomainDecision
+    ) -> str:
+        """
+        尝试 LLM 结果融合，失败时自动 fallback 到模板融合（含合并状态前缀）。
+
+        根据 fusion.llm_fusion_enabled 配置决定是否启用 LLM 融合。
+        LLM 只接触 ResultSummary / MergedResult 的结构化摘要，
+        绝不接触 SQL、DuckDB 或原始大表数据。
+
+        模板融合（默认/fallback）仍会附带合并状态前缀，
+        保持与 Phase B2 行为完全向后兼容。
+
+        Args:
+            question: 用户原始中文问题
+            unified_responses: 统一响应列表（用于 fallback）
+            merged: MergedResult 合并结果
+            cross_domain_decision: 跨域策略决策（可选，传递给后校验）
+
+        Returns:
+            中文解释文本
+        """
+        # ── 检查是否启用 LLM 融合 ──
+        fusion_cfg = self._agent_config.get("fusion", {}) if self._agent_config else {}
+        llm_fusion_enabled = fusion_cfg.get("llm_fusion_enabled", False)
+
+        if not llm_fusion_enabled:
+            # 默认路径：模板融合（带合并状态前缀）
+            return self._template_fusion_with_prefix(question, unified_responses, merged)
+
+        # ── LLM 融合需要 llm_client ──
+        if self._llm_client is None:
+            self._last_trace_message = "LLM 融合已启用但无 llm_client，回退模板融合"
+            return self._template_fusion_with_prefix(question, unified_responses, merged)
+
+        # ── 构建 summaries ──
+        summaries: list[Any] = []  # list[ResultSummary]
+        for i, ur in enumerate(unified_responses):
+            plan_index = i + 1
+            try:
+                summary = summarize_sql_result(ur, plan_index=plan_index)
+                summaries.append(summary)
+            except Exception as exc:
+                # 单个摘要构建失败不应阻止整体流程
+                from .ir import ResultSummary
+                summaries.append(
+                    ResultSummary(
+                        source_plan_index=plan_index,
+                        warnings=[f"摘要构建失败: {exc}"],
+                    )
+                )
+
+        # ── 调用 LLM 融合 ──
+        try:
+            explanation, used_llm, fallback_reason = fuse_results_with_llm(
+                question=question,
+                summaries=summaries,
+                merged_result=merged,
+                merge_status=merged.merge_status.value if merged else "not_attempted",
+                warnings=list(merged.merge_warnings) if merged else [],
+                llm_client=self._llm_client,
+                prompt_loader=self._prompt_loader,
+                cross_domain_decision=cross_domain_decision,
+            )
+        except Exception as exc:
+            # 完全意外异常，回退模板
+            self._last_trace_message = f"LLM 融合异常: {exc}"
+            return self._template_fusion_with_prefix(question, unified_responses, merged)
+
+        # ── 根据结果决定是否使用 LLM 输出 ──
+        if used_llm:
+            return explanation
+
+        # LLM 融合失败，记录原因并回退模板（带合并状态前缀）
+        if fallback_reason:
+            self._last_trace_message = f"LLM 融合回退: {fallback_reason}"
+
+        return self._template_fusion_with_prefix(question, unified_responses, merged)
+
+    @staticmethod
+    def _template_fusion_with_prefix(
+        question: str,
+        unified_responses: list[UnifiedResponse],
+        merged: Any,  # MergedResult
+    ) -> str:
+        """
+        模板融合 + 合并状态前缀。
+
+        保持与 Phase B2 行为完全向后兼容。
+        """
+        NL = "\n"
+        template_text = fallback_to_template(question, unified_responses)
+
+        if merged is None:
+            return template_text
+
+        if merged.merge_status.value == "merged":
+            metric_names = [
+                m for s in merged.source_summaries for m in s.metrics
+            ]
+            return (
+                f"多个查询结果已按 date 对齐合并展示。"
+                f"共 {merged.row_count} 天的数据，"
+                f"包含指标：{'、'.join(metric_names)}。{NL}{NL}"
+                + template_text
+            )
+        elif merged.merge_status.value == "skipped":
+            return (
+                f"由于 {merged.reason}，未进行自动合并，"
+                f"以下为并列结果。{NL}{NL}"
+                + template_text
+            )
+
+        # failed / not_attempted → 直接返回模板文本
+        return template_text
 
     def ask(self, question: str) -> AgentResponse:
         """
@@ -388,46 +517,113 @@ class Text2SQLAgent:
             if unified_responses and unified_responses[0].result:
                 response.result = unified_responses[0].result
 
+            # Phase 3D: 跨域策略评估（在 date merge 和 fusion 之前）
+            response.trace.append("[STEP 5a] 跨域策略评估...")
+            cross_domains = CrossDomainPolicy.extract_domains_from_responses(
+                unified_responses
+            )
+            cross_metrics = CrossDomainPolicy.extract_metrics_from_responses(
+                unified_responses
+            )
+            policy = CrossDomainPolicy()
+            policy_decision = policy.evaluate(
+                domains=cross_domains,
+                metrics=cross_metrics,
+            )
+            response.trace.append(
+                f"         跨域策略: {policy_decision.reason}"
+            )
+            response.trace.append(
+                f"         decision: display={policy_decision.allow_display}, "
+                f"merge={policy_decision.allow_result_merge}, "
+                f"causal={policy_decision.allow_causal_language}, "
+                f"clarify={policy_decision.requires_clarification}, "
+                f"refusal={policy_decision.refusal}"
+            )
+            if policy_decision.warnings:
+                for w in policy_decision.warnings:
+                    response.trace.append(f"         policy warning: {w}")
+
+            # ── 处理 refusal ──
+            if policy_decision.refusal:
+                response.refusal = True
+                response.refusal_reason = policy_decision.reason
+                response.chinese_answer = (
+                    f"抱歉，无法回答该问题。{policy_decision.reason}"
+                )
+                response.trace.append(
+                    f"[REFUSAL] 跨域策略拒绝: {policy_decision.reason}"
+                )
+                return response
+
+            # ── 处理 clarification ──
+            if policy_decision.requires_clarification:
+                response.clarification_needed = True
+                response.clarification_message = (
+                    f"您的查询涉及多个业务域，需要进一步确认：{policy_decision.reason}"
+                )
+                response.trace.append(
+                    f"[CLARIFY] 跨域策略需要反问: {policy_decision.reason}"
+                )
+                return response
+
             # Phase B2: 执行完毕后尝试 date merge，跳过单计划路径，进入融合阶段
             response.trace.append("[DONE] 多计划执行完成")
-            response.trace.append("[STEP 5b] 尝试 date merge...")
-            merged = merge_results_on_date(unified_responses)
 
-            if merged.merge_status.value == "merged":
-                response.trace.append(
-                    f"         date merge 成功: {merged.row_count} 行, "
-                    f"列={merged.columns}"
-                )
-                if merged.merge_warnings:
+            # ── 跨域策略控制是否允许 merge ──
+            if policy_decision.allow_result_merge:
+                response.trace.append("[STEP 5b] 尝试 date merge...")
+                merged = merge_results_on_date(unified_responses)
+
+                if merged.merge_status.value == "merged":
                     response.trace.append(
-                        f"         merge warnings: {'; '.join(merged.merge_warnings)}"
+                        f"         date merge 成功: {merged.row_count} 行, "
+                        f"列={merged.columns}"
                     )
-                # 中文解释：声明合并，不推断因果
-                metric_names = [
-                    m for s in merged.source_summaries for m in s.metrics
-                ]
-                response.chinese_answer = (
-                    f"多个查询结果已按 date 对齐合并展示。"
-                    f"共 {merged.row_count} 天的数据，"
-                    f"包含指标：{'、'.join(metric_names)}。\n\n"
-                    + fuse_results(question, unified_responses)
-                )
-            elif merged.merge_status.value == "skipped":
-                response.trace.append(
-                    f"         date merge 跳过: {merged.reason}"
-                )
-                response.chinese_answer = (
-                    f"由于 {merged.reason}，未进行自动合并，"
-                    f"以下为并列结果。\n\n"
-                    + fuse_results(question, unified_responses)
-                )
-            elif merged.merge_status.value == "failed":
-                response.trace.append(
-                    f"         date merge 失败: {merged.reason}"
-                )
-                response.chinese_answer = fuse_results(question, unified_responses)
+                    if merged.merge_warnings:
+                        response.trace.append(
+                            f"         merge warnings: {'; '.join(merged.merge_warnings)}"
+                        )
+                elif merged.merge_status.value == "skipped":
+                    response.trace.append(
+                        f"         date merge 跳过: {merged.reason}"
+                    )
+                elif merged.merge_status.value == "failed":
+                    response.trace.append(
+                        f"         date merge 失败: {merged.reason}"
+                    )
             else:
-                response.chinese_answer = fuse_results(question, unified_responses)
+                response.trace.append(
+                    f"[STEP 5b] date merge 跳过（跨域策略禁止）: {policy_decision.reason}"
+                )
+                from .ir import MergeStatus, MergedResult, ResultSummary as _RS
+                # 构造一个 skipped 的 MergedResult，原因来自策略
+                merged = MergedResult(
+                    merge_status=MergeStatus.SKIPPED,
+                    reason=f"跨域策略禁止 merge: {policy_decision.reason}",
+                )
+
+            # Phase 3B: 尝试 LLM 结果融合（可配置，默认关闭）
+            # 将跨域策略 warning 注入到 merge_warnings 中，确保它们出现在最终回答
+            if policy_decision.warnings and merged is not None:
+                all_warnings = list(merged.merge_warnings) + policy_decision.warnings
+                merged.merge_warnings = all_warnings
+
+            response.chinese_answer = self._fuse_results_with_llm(
+                question=question,
+                unified_responses=unified_responses,
+                merged=merged,
+                cross_domain_decision=policy_decision,
+            )
+
+            # ── 将策略 warning 追加到最终回答 ──
+            if policy_decision.warnings:
+                warning_prefix = "\n\n".join(
+                    f"⚠️ {w}" for w in policy_decision.warnings
+                )
+                response.chinese_answer = (
+                    warning_prefix + "\n\n" + (response.chinese_answer or "")
+                )
 
             return response
 

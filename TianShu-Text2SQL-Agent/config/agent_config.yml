@@ -51,6 +51,14 @@ behavior:
   # 是否在回答中标注数据来源表
   show_source_table: true
 
+# ── 结果融合配置 ──
+# 控制多计划结果的中文解释生成方式
+fusion:
+  # 是否启用 LLM 结果融合（默认关闭，使用模板融合 fuse_results()）
+  # 开启后 LLM 只接触 ResultSummary / MergedResult 的结构化摘要，
+  # 绝不接触 SQL、DuckDB 或原始大表数据
+  llm_fusion_enabled: false
+
 # ── 执行策略配置 ──
 # 控制多计划场景下的执行模式
 execution:
