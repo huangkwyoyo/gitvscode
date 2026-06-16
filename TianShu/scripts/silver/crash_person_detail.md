@@ -12,7 +12,7 @@
 | 来源 | `bronze.crash_person_all`（5,333,042 行，21 列，全部 VARCHAR） |
 | 预计行数 | 533 万 |
 | 主键 | `crash_person_id`（BIGINT，代理键），`unique_id`（自然键） |
-| 字段数 | 24 |
+| 字段数 | 22 |
 
 ## 设计理由
 

@@ -12,7 +12,7 @@
 | 来源 | `bronze.crash_merged`（1,655,065 行，29 列，全部 VARCHAR） |
 | 预计行数 | 166 万 |
 | 主键 | `crash_id`（BIGINT，代理键），`collision_id`（自然键） |
-| 字段数 | 26 |
+| 字段数 | 25 |
 
 ## 设计理由
 
