@@ -90,14 +90,42 @@ rule_mode:
       table: "gold.dws_daily_trip_summary"
       date_col: "trip_date"
       value_expr: "trip_count"
+    total_fare_amount:
+      table: "gold.dws_daily_trip_summary"
+      date_col: "trip_date"
+      value_expr: "total_fare_amount"
+    total_tip_amount:
+      table: "gold.dws_daily_trip_summary"
+      date_col: "trip_date"
+      value_expr: "total_tip_amount"
+    total_distance_miles:
+      table: "gold.dws_daily_trip_summary"
+      date_col: "trip_date"
+      value_expr: "total_distance_miles"
+    avg_distance_miles:
+      table: "gold.dws_daily_trip_summary"
+      date_col: "trip_date"
+      value_expr: "avg_distance_miles"
     parking_violation_count:
       table: "gold.dws_daily_parking_summary"
       date_col: "issue_date"
       value_expr: "violation_count"
+    standard_fine_total:
+      table: "gold.dws_daily_parking_summary"
+      date_col: "issue_date"
+      value_expr: "standard_fine_total"
     crash_count:
       table: "gold.dws_daily_crash_summary"
       date_col: "crash_date"
       value_expr: "crash_count"
+    persons_injured:
+      table: "gold.dws_daily_crash_summary"
+      date_col: "crash_date"
+      value_expr: "persons_injured"
+    persons_killed:
+      table: "gold.dws_daily_crash_summary"
+      date_col: "crash_date"
+      value_expr: "persons_killed"
 
 # ── 日志配置 ──
 logging:

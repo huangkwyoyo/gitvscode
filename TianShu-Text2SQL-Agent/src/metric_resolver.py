@@ -6,20 +6,30 @@
     因此规则模式和 LLM 模式共用同一套解析逻辑，保证行为一致性。
 
 匹配策略：
-    采用 4 层优先级降级匹配，高优先级命中即停止，避免关键词组合误伤精确匹配。
+    采用 5 层优先级降级匹配，高优先级命中即停止，避免关键词组合误伤精确匹配。
     优先级链：metric_name 直接命中 > 中文名 > 同义词 > 配置别名 > 关键词组合
 
 歧义处理：
     当用户问"金额是多少"而未限定具体口径时（如车费 vs 罚金），
     必须反问而非猜测——因为错误猜测会导致用户基于错误数据做决策，
     这是比"无法回答"更严重的问题。
+
+v2 变更（B 类重构）：
+    - 移除硬编码 _SYNONYMS / _KEYWORDS 类变量
+    - 同义词/关键词/别名现在从 MetricInfo 的属性中读取
+    - __init__ 兼容旧接口 (list[MetricInfo], aliases) 和新接口 (MetricCatalog)
+    - 金额候选指标改为动态计算（筛选 unit="美元" 的 G3 指标）
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 from .resolver import MetricInfo
+
+if TYPE_CHECKING:
+    from .metric_catalog import MetricCatalog
 
 
 @dataclass(frozen=True)
@@ -70,59 +80,51 @@ class MetricMatchResult:
 class MetricResolver:
     """基于注册指标目录解析用户问题中的指标。
 
-    使用方式：
+    v2 接口（推荐）：
+        from .metric_catalog import MetricCatalog
+        resolver = MetricResolver(catalog)
+        result = resolver.resolve("2026年1月每天车费总额是多少？")
+
+    v1 接口（向后兼容，逐步弃用）：
         resolver = MetricResolver(metrics, aliases=config_aliases)
         result = resolver.resolve("2026年1月每天车费总额是多少？")
-        if result.matched:
-            print(f"命中指标: {result.metric.name}")
-        else:
-            print(f"需要反问: {result.clarification_message}")
 
     设计决策：
-        - 同义词表硬编码在类中而非配置文件中，因为这些是语言学层面的同义映射，
-          不随数据仓库变化而变化；配置别名面向运维新增别名场景。
-        - 关键词组合（_KEYWORDS）要求所有词项同时出现才命中，
-          这是为了防止单关键词导致误匹配（如"订单"单独命中 trip_count，
-          但用户可能只是提到"订单"而非查询订单数）。
+        - v2 中同义词/关键词/别名从每个 MetricInfo 的自身属性读取，
+          不再使用类级别的硬编码 _SYNONYMS / _KEYWORDS 字典。
+        - _AMOUNT_WORDS 保留为类常量——这些是中文通用语义词，
+          不绑定到任何特定指标。
     """
 
-    # ── 同义词表：中文口语表达 → 注册指标名 ──
-    # 这些是语言学层面的同义映射，独立于数据仓库配置，
-    # 因此硬编码在类中而非 agent_config.yml。
-    _SYNONYMS: dict[str, list[str]] = {
-        "standard_fine_total": ["罚款总额", "标准罚款", "标准罚金", "罚单金额"],
-        "total_fare_amount": ["车费总额", "基础车费", "车费收入", "车费金额"],
-        "avg_distance_miles": ["平均行程距离", "平均里程"],
-        "persons_injured": ["受伤人数", "受伤人口", "伤者人数"],
-        "persons_killed": ["死亡人数", "死亡人口", "遇难人数"],
-        "trip_count": ["行程数", "行程量", "出行量", "订单数"],
-        "parking_violation_count": ["罚单数量", "停车罚单数量", "违章数量", "停车违章数量"],
-        "crash_count": ["事故数", "事故数量", "碰撞数量"],
-    }
-
-    # ── 关键词组合表：需同时出现的词组才触发命中 ──
-    # 每个元素是一个 tuple，tuple 中所有词必须同时出现在问题中才算命中。
-    # 单元素 tuple 如 ("受伤",) 表示该词本身已足够特异，无需搭配其他词。
-    # 多元素 tuple 如 ("平均", "距离") 防止"平均"或"距离"单独出现时误匹配。
-    _KEYWORDS: dict[str, list[tuple[str, ...]]] = {
-        "standard_fine_total": [("罚款", "总额"), ("罚金", "总额")],
-        "total_fare_amount": [("车费", "总额"), ("车费", "收入")],
-        "avg_distance_miles": [("平均", "距离"), ("平均", "里程")],
-        "persons_injured": [("受伤",), ("伤者",)],
-        "persons_killed": [("死亡",), ("遇难",)],
-        "trip_count": [("行程",), ("出行",), ("订单",)],
-        "parking_violation_count": [("停车", "罚单"), ("违章",)],
-        "crash_count": [("事故",), ("碰撞",)],
-    }
-
-    # ── 金额歧义触发词 ──
-    # 当问题包含这些词但未指定具体口径（车费/罚金）时，触发金额歧义反问。
-    # "多少钱"和"收入"也需要纳入，因为用户常说"每天多少钱"或"每天收入"。
+    # ── 金额歧义触发词（通用中文语义词，不绑定特定指标）──
     _AMOUNT_WORDS = ("金额", "费用", "多少钱", "收入")
 
-    def __init__(self, metrics: list[MetricInfo], aliases: dict[str, list[str]] | None = None):
-        self._metrics = [metric for metric in metrics if metric.g3_available]
-        self._aliases = aliases or {}
+    def __init__(
+        self,
+        catalog_or_metrics: "MetricCatalog | list[MetricInfo]",
+        aliases: dict[str, list[str]] | None = None,
+    ):
+        """初始化指标解析器。
+
+        支持两种构造方式：
+            v2（推荐）: MetricResolver(catalog)
+            v1（兼容）: MetricResolver(metrics, aliases=...)
+
+        Args:
+            catalog_or_metrics: MetricCatalog 或 list[MetricInfo]
+            aliases: 仅 v1 接口使用，v2 中忽略（别名从 MetricInfo 读取）
+        """
+        from .metric_catalog import MetricCatalog
+
+        if isinstance(catalog_or_metrics, MetricCatalog):
+            # v2 接口：从 MetricCatalog 获取 G3 指标
+            self._metrics = catalog_or_metrics.list_g3_metrics()
+            self._catalog = catalog_or_metrics
+        else:
+            # v1 接口（向后兼容）：直接传入 MetricInfo 列表
+            self._metrics = [m for m in catalog_or_metrics if m.g3_available]
+            self._aliases = aliases or {}
+            self._catalog = None
 
     def resolve(self, question: str) -> MetricMatchResult:
         """解析问题中的 G3 指标。
@@ -130,23 +132,20 @@ class MetricResolver:
         决策流程（按优先级依次判断）：
 
         1. 金额歧义优先拦截
-           ——"金额是多少"这类问题有多个金额类指标候选（车费 vs 罚金），
-           必须先反问而非走常规候选匹配，否则可能在前一步被关键词误匹配。
+           ——"金额是多少"有多个金额类候选（车费 vs 罚金），
+           必须先反问而非走常规候选匹配。
 
         2. 无候选 → 反问用户重新描述
 
         3. 多候选且置信度差距 < 0.12 → 反问用户选择
-           ——0.12 的阈值来自经验调优：太大会导致可区分场景也被反问（过度保守），
-           太小会导致真正歧义场景被放过（误答）。实际数据中同义词命中(0.93)
-           和关键词命中(0.82)差 0.11，设 0.12 可在两者之间建立缓冲区。
+           ——0.12 阈值来自经验调优：同义词命中(0.93)与关键词命中(0.82)
+           差 0.11，设 0.12 在两者间建立缓冲区。
 
         4. 唯一候选 → 返回命中结果
         """
         candidates = self._collect_candidates(question)
 
         # ── 优先级 1: 金额歧义必须先于常规候选匹配 ──
-        # 即使常规匹配也命中了某个金额指标，仍需要反问确认。
-        # 因为用户说"金额"时可能指车费也可能指罚金，猜错了后果严重。
         if self._looks_like_ambiguous_amount(question):
             amount_candidates = self._amount_candidates()
             if len(amount_candidates) > 1:
@@ -188,23 +187,41 @@ class MetricResolver:
             candidates=candidates,
         )
 
+    def resolve_all(
+        self, question: str, min_confidence: float = 0.80,
+    ) -> list[MetricCandidate]:
+        """返回所有高于置信度阈值的候选指标，不做歧义消解。
+
+        与 resolve() 的核心区别：
+            - 不提前返回：不因金额歧义或单候选而中断
+            - 不做 top-2 置信度差距判断：所有高于阈值的候选都返回
+            - 金额歧义拦截不触发：那是单指标消歧行为，多指标场景下用户可能
+              确实在问两个金额指标（如"车费收入和罚款总额"）
+
+        复用 _collect_candidates() 的 5 层匹配逻辑和按 metric.name 去重机制。
+
+        Args:
+            question: 用户问题文本
+            min_confidence: 最低置信度阈值，低于此值的候选被过滤（默认 0.80）
+
+        Returns:
+            按置信度降序排列的候选列表。空列表表示没有注册指标匹配。
+        """
+        candidates = self._collect_candidates(question)  # list[MetricCandidate]，已按 metric.name 去重
+        filtered = [c for c in candidates if c.confidence >= min_confidence]
+        return sorted(filtered, key=lambda c: c.confidence, reverse=True)
+
     def _collect_candidates(self, question: str) -> list[MetricCandidate]:
         """按优先级降级收集候选指标。
 
         匹配优先级链（高→低，命中即停止，不降级）：
-            metric_name  → 1.00   用户直接说出了英文指标名（如 "persons_injured"）
-            zh_name      → 0.98   用户说出了注册的中文名（精确匹配）
-            synonym      → 0.93   用户用了同义词（如"罚款总额"→standard_fine_total）
-            alias        → 0.90   命中配置文件中运维新增的别名
-            keyword      → 0.82   命中关键词组合（最低置信度，最宽泛）
+            metric_name  → 1.00   英文指标名直接出现在问题中
+            zh_name      → 0.98   中文指标名精确匹配
+            synonym      → 0.93   指标自身 synonyms 中任一词条命中
+            alias        → 0.90   指标自身 aliases 中任一别名命中
+            keyword      → 0.82   指标自身 keyword_groups 中任一组全部命中
 
-        优先级设计理由：
-            - metric_name/zh_name 几乎零误匹配概率 → 最高置信度
-            - synonym 是同义语言学映射，稳定性高 → 次高
-            - alias 来自运维配置，可能存在质量差异 → 中等置信度
-            - keyword 依赖词组组合，边界情况最多 → 最低置信度
-
-        使用 dict 去重：同一指标名只会保留首次（最高优先级）命中结果。
+        使用 dict 去重：同一指标名只保留首次（最高优先级）命中结果。
         """
         result: dict[str, MetricCandidate] = {}
         question_lower = question.lower()
@@ -217,42 +234,63 @@ class MetricResolver:
             if metric.zh_name and metric.zh_name in question:
                 result[metric.name] = MetricCandidate(metric, 0.98, "zh_name", [metric.zh_name])
                 continue
-            # 优先级 3: 同义词匹配
-            synonym = self._match_synonym(metric.name, question)
+            # 优先级 3: 同义词匹配（v2: 从 metric.synonyms；v1: 从 _SYNONYMS）
+            synonym = self._match_synonym(metric, question)
             if synonym:
                 result[metric.name] = MetricCandidate(metric, 0.93, "synonym", [synonym])
                 continue
-            # 优先级 4: 运维配置别名匹配
-            alias = self._match_alias(metric.name, question)
+            # 优先级 4: 配置别名匹配（v2: metric.aliases；v1: self._aliases）
+            alias = self._match_alias_for_metric(metric, question)
             if alias:
                 result[metric.name] = MetricCandidate(metric, 0.9, "alias", [alias])
                 continue
-            # 优先级 5: 关键词组合匹配（最宽泛，最后尝试）
-            keywords = self._match_keywords(metric.name, question)
+            # 优先级 5: 关键词组合匹配（v2: metric.keyword_groups；v1: 内联）
+            keywords = self._match_keywords_for_metric(metric, question)
             if keywords:
                 result[metric.name] = MetricCandidate(metric, 0.82, "keyword", list(keywords))
         return list(result.values())
 
-    def _match_synonym(self, metric_name: str, question: str) -> str | None:
-        """匹配指标同义词。"""
-        for term in self._SYNONYMS.get(metric_name, []):
+    # ── 匹配方法（v2：从 MetricInfo 属性读取）──
+
+    @staticmethod
+    def _match_synonym(metric: MetricInfo, question: str) -> str | None:
+        """从 metric.synonyms 列表中匹配同义词。
+
+        v2 优先从 MetricInfo.synonyms 读取；v1 兼容旧 _SYNONYMS 硬编码字典。
+        当 metric.synonyms 为空时回退到类级别的旧数据。
+        """
+        synonyms = metric.synonyms if metric.synonyms else _LEGACY_SYNONYMS.get(metric.name, [])
+        for term in synonyms:
             if term in question:
                 return term
         return None
 
-    def _match_alias(self, metric_name: str, question: str) -> str | None:
-        """匹配配置或契约补充的指标别名。"""
+    def _match_alias_for_metric(self, metric: MetricInfo, question: str) -> str | None:
+        """从 metric.aliases 或 v1 兼容 aliases 字典匹配别名。"""
         question_lower = question.lower()
-        for term in self._aliases.get(metric_name, []):
+        # v2: metric.aliases 优先
+        for term in metric.aliases:
             if term and term.lower() in question_lower:
                 return term
+        # v1: 回退到旧 aliases 字典
+        if hasattr(self, '_aliases') and self._aliases:
+            for term in self._aliases.get(metric.name, []):
+                if term and term.lower() in question_lower:
+                    return term
         return None
 
-    def _match_keywords(self, metric_name: str, question: str) -> tuple[str, ...] | None:
-        """匹配关键词组合。"""
-        for group in self._KEYWORDS.get(metric_name, []):
+    @staticmethod
+    def _match_keywords_for_metric(metric: MetricInfo, question: str) -> tuple | None:
+        """从 metric.keyword_groups 中匹配关键词组合。
+
+        每个 group 中的所有词必须同时出现在问题中才命中。
+        v2 优先从 MetricInfo.keyword_groups 读取；v1 回退到旧 _KEYWORDS 硬编码。
+        """
+        groups = metric.keyword_groups if metric.keyword_groups else _LEGACY_KEYWORDS.get(metric.name, [])
+        for group in groups:
+            # group 可能是 tuple 或 list（来自快照 JSON 反序列化）
             if all(term in question for term in group):
-                return group
+                return tuple(group)
         return None
 
     def _looks_like_ambiguous_amount(self, question: str) -> bool:
@@ -260,37 +298,46 @@ class MetricResolver:
 
         判断逻辑：
             1. 问题包含金额类词（"金额"/"费用"/"多少钱"/"收入"）
-            2. 且问题中没有出现任何具体口径词（如"车费总额"/"罚款总额"等 _SYNONYMS 中的词）
+            2. 且问题中没有出现任何具体口径词（所有 G3 指标的同义词）
 
-        设计理由：
-            "金额是多少"在系统中有多个金额类指标（total_fare_amount 和 standard_fine_total），
-            不能猜测用户意图，必须反问。但如果用户说了"车费金额"（包含具体同义词"车费金额"），
-            则不算歧义——因为同义词表会将"车费金额"映射到 total_fare_amount。
+        v2 变更：具体口径词不再从硬编码 _SYNONYMS 收集，
+        而是遍历所有 G3 指标的 synonyms 属性动态获取。
         """
         if not any(word in question for word in self._AMOUNT_WORDS):
             return False
-        # 收集所有具体口径词（排除金额类通用词自身，避免循环判断）
-        concrete_terms = [
-            term
-            for terms in self._SYNONYMS.values()
-            for term in terms
-            if term not in self._AMOUNT_WORDS
-        ]
-        # 如果至少命中了一个具体口径词，说明用户已经限定了范围，不算歧义
+        # 收集所有 G3 指标的具体口径词（排除金额类通用词自身）
+        concrete_terms: set[str] = set()
+        for metric in self._metrics:
+            for term in metric.synonyms:
+                if term not in self._AMOUNT_WORDS:
+                    concrete_terms.add(term)
+        # 同时纳入旧 _SYNONYMS 中未迁移到 MetricInfo.synonyms 的词
+        for terms in _LEGACY_SYNONYMS.values():
+            for term in terms:
+                if term not in self._AMOUNT_WORDS:
+                    concrete_terms.add(term)
         return not any(term in question for term in concrete_terms)
 
     def _amount_candidates(self) -> list[MetricCandidate]:
         """返回当前 G3 指标中的金额类候选。
 
-        硬编码金额类指标名集合，因为金额语义与业务强相关，不适合从配置文件中泛化推导。
-        置信度 0.72 比关键词组合(0.82)更低——因为"金额"的语义粒度比关键词更模糊。
+        v2 变更：改为动态筛选——unit 为"美元"的 G3 指标自动归为金额类。
+        不再硬编码指标名集合。
+        置信度 0.72 比关键词组合(0.82)更低——"金额"的语义粒度比关键词更模糊。
         """
-        amount_metric_names = {"total_fare_amount", "standard_fine_total"}
-        return [
-            MetricCandidate(metric, 0.72, "keyword", ["金额"])
-            for metric in self._metrics
-            if metric.name in amount_metric_names
-        ]
+        candidates: list[MetricCandidate] = []
+        for metric in self._metrics:
+            if metric.unit == "美元":
+                candidates.append(MetricCandidate(metric, 0.72, "keyword", ["金额"]))
+        # 如果按 unit 筛选为空，回退到旧硬编码集合（兼容 unit 字段缺失的场景）
+        if not candidates:
+            amount_metric_names = {"total_fare_amount", "standard_fine_total"}
+            candidates = [
+                MetricCandidate(metric, 0.72, "keyword", ["金额"])
+                for metric in self._metrics
+                if metric.name in amount_metric_names
+            ]
+        return candidates
 
     def _clarification_for_candidates(self, candidates: list[MetricCandidate]) -> str:
         """生成候选指标反问文案。"""
@@ -307,3 +354,30 @@ class MetricResolver:
             for metric in self._metrics
         ]
         return "暂未识别到已注册 G3 指标，请明确要查询：" + "、".join(labels)
+
+
+# ── v1 兼容：旧硬编码同义词/关键词（过渡用）──
+# 当 MetricInfo.synonyms / MetricInfo.keyword_groups 为空时，
+# MetricResolver 回退到这些字典。待 DuckDB 扩展列部署完成后可移除。
+
+_LEGACY_SYNONYMS: dict[str, list[str]] = {
+    "standard_fine_total": ["罚款总额", "标准罚款", "标准罚金", "罚单金额"],
+    "total_fare_amount": ["车费总额", "基础车费", "车费收入", "车费金额"],
+    "avg_distance_miles": ["平均行程距离", "平均里程"],
+    "persons_injured": ["受伤人数", "受伤人口", "伤者人数"],
+    "persons_killed": ["死亡人数", "死亡人口", "遇难人数"],
+    "trip_count": ["行程数", "行程量", "出行量", "订单数"],
+    "parking_violation_count": ["罚单数量", "停车罚单数量", "违章数量", "停车违章数量"],
+    "crash_count": ["事故数", "事故数量", "碰撞数量"],
+}
+
+_LEGACY_KEYWORDS: dict[str, list[tuple[str, ...]]] = {
+    "standard_fine_total": [("罚款", "总额"), ("罚金", "总额")],
+    "total_fare_amount": [("车费", "总额"), ("车费", "收入")],
+    "avg_distance_miles": [("平均", "距离"), ("平均", "里程")],
+    "persons_injured": [("受伤",), ("伤者",)],
+    "persons_killed": [("死亡",), ("遇难",)],
+    "trip_count": [("行程",), ("出行",), ("订单",)],
+    "parking_violation_count": [("停车", "罚单"), ("违章",)],
+    "crash_count": [("事故",), ("碰撞",)],
+}

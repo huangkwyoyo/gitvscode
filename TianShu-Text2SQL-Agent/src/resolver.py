@@ -42,14 +42,60 @@ class TableInfo:
 
 @dataclass
 class MetricInfo:
-    """指标信息（从 meta.metric_definitions 或 metric_contract.yml 加载）"""
-    name: str
-    zh_name: str
-    domain: str
-    aggregation: str
-    base_table: str
-    unit: str
-    g3_available: bool
+    """指标信息（从 meta.metric_definitions 或 metric_contract.yml 加载）。
+
+    字段来源标注：
+        - base_table: G2 事实表，来自 metric_contract.yml base_table 字段
+        - g3_table: G3 汇总表，来自 metric_contract.yml g3_table 字段
+    """
+    # ── 核心标识（D/C）──
+    name: str                   # 英文标识, 如 "trip_count"
+    zh_name: str                # 中文名, 如 "行程量"
+    domain: str                 # 业务域: traffic / violation / safety / supply
+
+    # ── 表映射（D/C）──
+    aggregation: str            # 聚合表达式, 如 "SUM(trip_count)"
+    base_table: str             # G2 事实表（metric_contract.yml）
+    unit: str                   # 单位, 如 "次"
+
+    # ── 可用性（D/C）──
+    g3_available: bool          # G3 汇总表是否可用
+    g3_table: str = ""          # G3 汇总表（metric_contract.yml g3_table 字段）
+
+    # ── 语言映射（D，JSON 列解析；不存于 contract）──
+    synonyms: list[str] = field(default_factory=list)           # 同义词列表
+    keyword_groups: list = field(default_factory=list)          # 关键词组合
+    aliases: list[str] = field(default_factory=list)            # 运维配置别名
+
+    # ── 文档补充（C，仅 contract 提供）──
+    description: str = ""       # 指标业务含义说明
+    caution: str = ""           # 使用注意事项
+
+    # ── 元信息（调试/校验用）──
+    source: str = ""            # 数据来源: "duckdb" | "snapshot" | "contract"
+
+
+@dataclass
+class G2FactInfo:
+    """G2 事实表元数据（来自 semantic_contract.yml g2_facts 段）。
+
+    证据来源：semantic_contract.yml#/g2_facts
+    """
+    table: str                          # 完全限定表名, 如 "gold.fact_crashes"
+    zh_name: str = ""                   # 中文名
+    join_keys: dict[str, str] = field(default_factory=dict)  # {事实表外键列: 维表.列}
+    note: str = ""                      # 使用说明, 如 "直接包含 borough 字段，无需 JOIN 维表"
+
+
+@dataclass
+class G3SummaryInfo:
+    """G3 汇总表元数据（来自 semantic_contract.yml g3_summary 段）。
+
+    证据来源：semantic_contract.yml#/g3_summary
+    """
+    table: str                          # 完全限定表名, 如 "gold.dws_daily_crash_summary"
+    key_dimensions: list[str] = field(default_factory=list)  # 覆盖的维度列, 如 ["crash_date"]
+    note: str = ""                      # 使用说明, 如 "不包含行政区维度，需要该维度时降级到 G2"
 
 
 @dataclass
@@ -69,6 +115,8 @@ class AgentContext:
     forbidden_patterns: list[str] = field(default_factory=list)
     forbidden_sql_keywords: list[str] = field(default_factory=list)
     dim_date_range: tuple[str, str] = ("1997-01-01", "2027-12-31")
+    g2_facts: dict[str, G2FactInfo] = field(default_factory=dict)        # G2 事实表元数据（键=完全限定表名）
+    g3_summaries: dict[str, G3SummaryInfo] = field(default_factory=dict)  # G3 汇总表元数据（键=完全限定表名）
     offline: bool = False  # 是否为离线模式（Resolver 初始化失败后为 True）
 
 
@@ -177,22 +225,48 @@ class TianShuResolver:
                     metric_name = str(row_data.get("metric_name", row[0]))
                     source_table = str(row_data.get("source_table", row_data.get("base_table", "")))
                     aggregation = str(row_data.get("calculation_sql", row_data.get("aggregation", "")))
+                    # DuckDB 中 source_table 列为 G3 汇总表；若有独立 g3_table 列则优先使用
+                    g3_table = str(row_data.get("g3_table", ""))
+                    if not g3_table and source_table.startswith("gold.dws_"):
+                        g3_table = source_table
+                    # 当 source_table 是 G3 表时，从 contract 获取真正的 G2 base_table
+                    base_table = source_table
+                    if source_table.startswith("gold.dws_"):
+                        contract_base = self._resolve_g2_base_from_contract(metric_name)
+                        if contract_base:
+                            base_table = contract_base
+                    # 解析扩展 JSON 列（缺失时降级为空）
+                    synonyms = self._parse_json_column(row_data, "synonyms")
+                    keywords_raw = self._parse_json_column(row_data, "keywords")
+                    keyword_groups = [
+                        tuple(g) if isinstance(g, list) else (g,)
+                        for g in keywords_raw
+                    ]
+                    aliases = self._parse_json_column(row_data, "aliases")
                     metrics.append(MetricInfo(
                         name=metric_name,
                         zh_name=str(row_data.get("metric_name_zh", row_data.get("zh_name", ""))),
                         domain=str(row_data.get("domain", self._infer_metric_domain(metric_name, source_table))),
                         aggregation=aggregation,
-                        base_table=source_table,
+                        base_table=base_table,
                         unit=str(row_data.get("unit", "")),
                         g3_available=bool(
                             row_data.get("g3_available", source_table.startswith("gold.dws_"))
                         ),
+                        g3_table=g3_table,
+                        synonyms=synonyms,
+                        keyword_groups=keyword_groups,
+                        aliases=aliases,
+                        description=str(row_data.get("business_meaning", "")),
+                        caution="",
+                        source="duckdb",
                     ))
                 return metrics
             except Exception:
                 pass  # 回退到 contracts
 
         # 回退：从 metric_contract.yml 加载
+        # metric_contract.yml 中 base_table 指向 G2 事实表，g3_table 指向 G3 汇总表
         metric_contract = self._contracts.get("metric_contract", {})
         for m in metric_contract.get("metrics", []):
             metrics.append(MetricInfo(
@@ -200,12 +274,48 @@ class TianShuResolver:
                 zh_name=m.get("zh_name", ""),
                 domain=m.get("domain", ""),
                 aggregation=m.get("aggregation", ""),
-                base_table=m.get("base_table", ""),
+                base_table=m.get("base_table", ""),       # G2 事实表
+                g3_table=str(m.get("g3_table") or ""),    # G3 汇总表
                 unit=m.get("unit", ""),
                 g3_available=m.get("g3_available", False),
             ))
 
         return metrics
+
+    @staticmethod
+    def _parse_json_column(row_data: dict, col_name: str) -> list:
+        """安全解析 DuckDB 中的 JSON 列。
+
+        DuckDB 的 JSON 列可能以三种形式返回：
+            - Python list（DuckDB 自动解析）
+            - JSON 字符串
+            - 列不存在时返回空列表
+        """
+        import json as _json
+        value = row_data.get(col_name)
+        if value is None:
+            return []
+        if isinstance(value, list):
+            return value
+        if isinstance(value, str):
+            try:
+                parsed = _json.loads(value)
+                return parsed if isinstance(parsed, list) else []
+            except (_json.JSONDecodeError, TypeError):
+                return []
+        return []
+
+    def _resolve_g2_base_from_contract(self, metric_name: str) -> str:
+        """当 DuckDB source_table 是 G3 表时，从 metric_contract.yml 获取 G2 事实表。
+
+        DuckDB meta.metric_definitions 的 source_table 指向 G3 汇总表，
+        但 MetricInfo.base_table 应指向 G2 事实表（供 _build_g2_plan 使用）。
+        """
+        metric_contract = self._contracts.get("metric_contract", {})
+        for m in metric_contract.get("metrics", []):
+            if m.get("name") == metric_name:
+                return str(m.get("base_table", ""))
+        return ""
 
     def _infer_metric_domain(self, metric_name: str, source_table: str) -> str:
         """从指标名和来源表推断基础业务域"""
@@ -265,6 +375,29 @@ class TianShuResolver:
         for fb in semantic.get("forbidden", []):
             forbidden_patterns.append(fb.get("pattern", ""))
 
+        # ── 解析 G2 事实表元数据（来自 semantic_contract.yml g2_facts 段）──
+        g2_facts: dict[str, G2FactInfo] = {}
+        for entry in semantic.get("g2_facts", []):
+            table = entry.get("table", "")
+            if table:
+                g2_facts[table] = G2FactInfo(
+                    table=table,
+                    zh_name=str(entry.get("zh_name", "")),
+                    join_keys=entry.get("join_keys", {}),
+                    note=str(entry.get("note", "")),
+                )
+
+        # ── 解析 G3 汇总表元数据（来自 semantic_contract.yml g3_summary 段）──
+        g3_summaries: dict[str, G3SummaryInfo] = {}
+        for entry in semantic.get("g3_summary", []):
+            table = entry.get("table", "")
+            if table:
+                g3_summaries[table] = G3SummaryInfo(
+                    table=table,
+                    key_dimensions=list(entry.get("key_dimensions", [])),
+                    note=str(entry.get("note", "")),
+                )
+
         # C-2 修复：从统一加载器获取禁止的 SQL 关键字（合并 agent_config extras）
         contracts_abs = self._tianshu_root / self._config.get("tianshu", {}).get("contracts_path", "contracts")
         forbidden_keywords: list[str] = load_forbidden_keywords(
@@ -278,6 +411,8 @@ class TianShuResolver:
             join_whitelist=join_whitelist,
             forbidden_patterns=forbidden_patterns,
             forbidden_sql_keywords=forbidden_keywords,
+            g2_facts=g2_facts,
+            g3_summaries=g3_summaries,
         )
 
     def _tables_from_contracts(self) -> list[TableInfo]:

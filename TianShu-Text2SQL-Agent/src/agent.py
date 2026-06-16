@@ -408,11 +408,314 @@ class Text2SQLAgent:
             )
             raise
 
+    # ── 维度提取：中文关键词 → 候选维度英文标识符 ──
+    # 严格约束：只负责 NLP 抽取，不决定 fact 表、SQL 字段、join。
+    # 候选维度是否可用、落在哪张表、是否需要 join，由后续方法从 semantic_contract 校验。
+    _DIMENSION_KEYWORDS: dict[str, str] = {
+        "行政区": "borough",
+        "borough": "borough",
+        "违章类型": "violation_type",
+        "车辆类型": "vehicle_type",
+        "行程来源": "trip_source",
+        "支付类型": "payment_type",
+        "区域": "zone_name",
+    }
+
+    # ── 维表→维度映射（从 join_keys 推导维表覆盖的维度）──
+    # 证据来源：semantic_contract.yml#/g2_facts/*/join_keys
+    _DIM_TABLE_TO_DIM: dict[str, str] = {
+        "gold.dim_violation_type": "violation_type",
+        "gold.dim_taxi_zone": "borough",
+        "gold.dim_vehicle": "vehicle_type",
+    }
+
+    # ── 维表的分组列映射（(维表, 维度) → 维表上的分组列）──
+    _DIM_GROUP_COL: dict[tuple[str, str], str] = {
+        ("gold.dim_violation_type", "violation_type"): "violation_code",
+        ("gold.dim_taxi_zone", "borough"): "borough",
+        ("gold.dim_taxi_zone", "zone_name"): "zone_name",
+    }
+
+    # ── Fact 表直接包含的维度列（从 g2_facts note 字段推导）──
+    # 证据来源：semantic_contract.yml#/g2_facts/*/note
+    _FACT_DIRECT_COLUMNS: dict[str, set[str]] = {
+        "gold.fact_crashes": {"borough"},  # note: "直接包含 borough 字段，无需 JOIN 维表获取行政区"
+    }
+
+    @classmethod
+    def _extract_dimensions_from_question(cls, question: str) -> list[str]:
+        """从用户问题中提取候选维度（仅 NLP 抽取，不决定表/列/join）。
+
+        严格约束：
+            - 只负责从中文文本中识别维度关键词
+            - 不决定 fact 表、不决定 SQL 字段、不决定 join
+            - 候选维度是否可用、落在哪张表、是否需要 join，由后续方法校验
+
+        Args:
+            question: 用户的中文问题
+
+        Returns:
+            候选维度英文标识符列表（去重），不含 "date"
+        """
+        found: list[str] = []
+        question_lower = question.lower()
+        for pattern, dim_name in cls._DIMENSION_KEYWORDS.items():
+            if pattern.lower() in question_lower:
+                if dim_name not in found:
+                    found.append(dim_name)
+        return found
+
+    def _get_metric_info(self, metric_name: str) -> MetricInfo | None:
+        """按名称查找完整的 MetricInfo 对象。
+
+        搜索路径：
+            1. context.available_metrics（在线 DuckDB 加载）
+            2. _available_metric_infos()（包含离线 config 回退）
+        """
+        if self._context and self._context.available_metrics:
+            for m in self._context.available_metrics:
+                if m.name == metric_name:
+                    return m
+        # 离线 fallback
+        for m in self._available_metric_infos():
+            if m.name == metric_name:
+                return m
+        return None
+
+    def _g3_covers_dimensions(
+        self, metric_info: MetricInfo, dimensions: list[str],
+    ) -> tuple[bool, list[str]]:
+        """检查 G3 汇总表是否覆盖用户请求的所有维度。
+
+        证据来源：
+            - g3_table → metric_contract.yml g3_table 字段
+            - key_dimensions → semantic_contract.yml g3_summary 段
+
+        Args:
+            metric_info: 指标信息（含 g3_table）
+            dimensions: 用户请求的维度列表
+
+        Returns:
+            (是否全覆盖, 缺失的维度列表)。"date" 维度始终视为覆盖。
+        """
+        g3_table = metric_info.g3_table or metric_info.base_table
+
+        # 若 g3_table 为空，无法判断覆盖 → 视为不覆盖
+        if not g3_table:
+            return False, [d for d in dimensions if d != "date"]
+
+        # 从 semantic_contract 获取 G3 汇总表的 key_dimensions
+        g3_meta = None
+        if self._context:
+            g3_meta = self._context.g3_summaries.get(g3_table)
+
+        # 若 G3 汇总表未在 semantic_contract 中注册 → 不覆盖（不猜字段）
+        if g3_meta is None:
+            return False, [d for d in dimensions if d != "date"]
+
+        covered_dims = set(g3_meta.key_dimensions)
+        # "date" 维度始终视为覆盖（所有 G3 表都以日期为 grain）
+        covered_dims.add("date")
+
+        missing: list[str] = []
+        for dim in dimensions:
+            if dim not in covered_dims:
+                missing.append(dim)
+
+        return len(missing) == 0, missing
+
+    def _build_g2_plan(
+        self,
+        metric_info: MetricInfo,
+        intent: QuestionIntent,
+        missing_dims: list[str],
+    ) -> SQLPlan:
+        """构建 G2 降级查询计划。
+
+        严格按证据链验证每个字段来源：
+            - base_table → metric_contract.yml
+            - join_keys → semantic_contract.yml g2_facts 段
+            - group_by 列 → g2_facts note + join_keys 推导
+            - downgrade_reason → 中文，说明为什么降级、缺失哪个维度
+
+        Args:
+            metric_info: 指标信息
+            intent: 用户查询意图
+            missing_dims: G3 不覆盖的维度（不含 "date"）
+
+        Returns:
+            SQLPlan，策略为 G2_FACT / G2_FACT_JOIN / NEED_CLARIFICATION
+        """
+        g2_table = metric_info.base_table
+
+        # ── 校验 1: base_table 必须非空 ──
+        if not g2_table:
+            return SQLPlan(
+                strategy=Strategy.NEED_CLARIFICATION,
+                downgrade_reason=(
+                    f"指标 '{metric_info.name}' 的 base_table 为空，"
+                    f"无法确定 G2 事实表（需检查 metric_contract.yml）"
+                ),
+            )
+
+        # ── 校验 2: G2 事实表必须在 semantic_contract 中注册 ──
+        g2_meta = None
+        if self._context:
+            g2_meta = self._context.g2_facts.get(g2_table)
+
+        if g2_meta is None:
+            return SQLPlan(
+                strategy=Strategy.NEED_CLARIFICATION,
+                downgrade_reason=(
+                    f"G2 事实表 '{g2_table}' 未在 semantic_contract.yml "
+                    f"g2_facts 段中注册，无法确定 JOIN 键和列信息"
+                ),
+            )
+
+        # ── 确定日期 JOIN 键（所有 G2 fact 表都需通过 dim_date 过滤日期）──
+        date_join_key: str | None = None
+        date_dim_col: str | None = None
+        for key_col, dim_ref in g2_meta.join_keys.items():
+            if "dim_date" in dim_ref:
+                date_join_key = key_col
+                # dim_ref 格式: "gold.dim_date.date_key"
+                date_dim_col = dim_ref.split(".")[-1] if "." in dim_ref else dim_ref
+                break
+
+        joins: list[JoinPlan] = []
+        group_by: list[str] = []
+        where_clauses: list[str] = []
+
+        # ── 日期维度：通过 dim_date 过滤 ──
+        if date_join_key and date_dim_col:
+            joins.append(JoinPlan(
+                table="gold.dim_date",
+                on=f"gold.dim_date.{date_dim_col} = {g2_table}.{date_join_key}",
+            ))
+            group_by.append("gold.dim_date.date")
+
+        if intent.time_range and intent.time_range.type == TimeRangeType.ABSOLUTE:
+            where_clauses.append(
+                f"gold.dim_date.date BETWEEN DATE '{intent.time_range.start}' "
+                f"AND DATE '{intent.time_range.end}'"
+            )
+
+        # ── 非日期维度：逐一校验是否能从 G2 fact 或其维表获取 ──
+        for dim in missing_dims:
+            if dim == "date":
+                continue
+
+            # 检查 fact 表是否直接包含该维度列（证据来自 g2_facts note 字段）
+            if self._fact_has_column(g2_table, dim):
+                group_by.append(f"{g2_table}.{dim}")
+                continue
+
+            # 需要 JOIN：在 join_keys 中查找匹配的维表
+            join_resolved = False
+            for key_col, dim_ref in g2_meta.join_keys.items():
+                # dim_ref 格式: "gold.dim_violation_type.violation_code"
+                parts = dim_ref.split(".")
+                if len(parts) >= 2:
+                    dim_table = ".".join(parts[:2])  # gold.dim_violation_type
+                    dim_col = parts[2] if len(parts) > 2 else parts[1]
+
+                    # 检查此维表是否覆盖缺失维度
+                    if self._dim_table_covers(dim_table, dim):
+                        group_col = self._resolve_dim_group_col(dim_table, dim, dim_col)
+                        joins.append(JoinPlan(
+                            table=dim_table,
+                            on=f"{dim_table}.{dim_col} = {g2_table}.{key_col}",
+                        ))
+                        group_by.append(f"{dim_table}.{group_col}")
+                        join_resolved = True
+                        break
+
+            if not join_resolved:
+                return SQLPlan(
+                    strategy=Strategy.NEED_CLARIFICATION,
+                    downgrade_reason=(
+                        f"维度 '{dim}' 无法从 G2 事实表 '{g2_table}' 或其 join_keys "
+                        f"（{list(g2_meta.join_keys.keys())}）中解析到对应维表，"
+                        f"请检查 semantic_contract.yml g2_facts 段"
+                    ),
+                )
+
+        # ── 生成降级原因 ──
+        g3_table = metric_info.g3_table or "未知"
+        if not metric_info.g3_available:
+            downgrade_reason = (
+                f"指标 '{metric_info.name}' 无 G3 汇总表（g3_available=false），"
+                f"直接使用 G2 事实表 {g2_table}"
+            )
+        else:
+            missing_str = "、".join(d for d in missing_dims if d != "date")
+            g3_dims = (
+                self._context.g3_summaries[g3_table].key_dimensions
+                if self._context and g3_table in self._context.g3_summaries
+                else []
+            )
+            downgrade_reason = (
+                f"G3 汇总表 {g3_table} 不包含 {missing_str} 维度"
+                f"（key_dimensions={g3_dims}），降级到 G2 事实表 {g2_table}"
+            )
+
+        # ── 构建聚合表达式 ──
+        aggregation_expr = self._normalize_aggregation_expr(
+            metric_info.aggregation, metric_info.name
+        )
+
+        # ── 确定策略类型 ──
+        # 只有 dim_date JOIN → G2_FACT；有额外维表 JOIN → G2_FACT_JOIN
+        strategy = Strategy.G2_FACT_JOIN if len(joins) > 1 else Strategy.G2_FACT
+
+        return SQLPlan(
+            strategy=strategy,
+            primary_table=g2_table,
+            joins=joins,
+            where_clauses=where_clauses,
+            group_by=group_by,
+            order_by=group_by[:1] if group_by else [],
+            aggregations=[Aggregation(expr=aggregation_expr, alias=metric_info.name)],
+            downgrade_reason=downgrade_reason,
+            confidence=0.90,
+        )
+
+    @classmethod
+    def _fact_has_column(cls, fact_table: str, dimension: str) -> bool:
+        """检查 G2 事实表是否直接包含某维度列。
+
+        证据来源：semantic_contract.yml g2_facts 段的 note 字段。
+        例如 fact_crashes 的 note 说"直接包含 borough 字段"。
+        同时查 _FACT_DIRECT_COLUMNS 硬编码表作为补充。
+        """
+        direct = cls._FACT_DIRECT_COLUMNS.get(fact_table, set())
+        return dimension in direct
+
+    @classmethod
+    def _dim_table_covers(cls, dim_table: str, dimension: str) -> bool:
+        """检查维表是否覆盖指定维度。
+
+        证据来源：semantic_contract.yml g2_facts 段的 join_keys。
+        从 join_keys 的维表引用推导维表与维度的关系。
+        """
+        mapped_dim = cls._DIM_TABLE_TO_DIM.get(dim_table)
+        return mapped_dim == dimension
+
+    @classmethod
+    def _resolve_dim_group_col(cls, dim_table: str, dimension: str, fallback: str) -> str:
+        """解析维表上的分组列名。
+
+        优先从 _DIM_GROUP_COL 映射表查找，找不到则用 join key 列名。
+        """
+        return cls._DIM_GROUP_COL.get((dim_table, dimension), fallback)
+
     def _classify_intent_rule(self, question: str) -> QuestionIntent:
         """
         规则版意图分类。
 
-        MVP 只覆盖高频 G3 日汇总问题；未覆盖的指标先反问，不编造口径。
+        从用户问题中识别指标、时间范围和多维度分组需求。
+        非 date 维度通过 _extract_dimensions_from_question() 提取，
+        由后续 _plan_query_rule() 校验维度是否可满足。
         """
         if self._has_ambiguous_amount(question):
             return QuestionIntent(
@@ -424,25 +727,29 @@ class Text2SQLAgent:
                 raw_question=question,
             )
 
-        metric_info = self._detect_metric(question)
-        if metric_info is None or not metric_info.get("metric"):
+        all_metrics = self._detect_all_metrics(question)
+        if not all_metrics:
             return QuestionIntent(
                 needs_clarification=True,
-                clarification_reason=metric_info.get("clarification_reason") if metric_info else (
-                    "暂未识别到已注册指标，请明确要查询的指标。"
-                ),
-                confidence=metric_info.get("confidence", 0.0) if metric_info else 0.0,
+                clarification_reason="暂未识别到已注册指标，请明确要查询的指标。",
+                confidence=0.0,
                 raw_question=question,
             )
+
+        # ── 提取候选维度（仅 NLP 抽取，不绑定表/列）──
+        extra_dims = self._extract_dimensions_from_question(question)
+
+        # 主 domain 取最高置信度指标的 domain
+        primary_domain = all_metrics[0]["domain"]
 
         time_range = self._parse_month_range(question)
         if time_range.type == TimeRangeType.FUZZY:
             return QuestionIntent(
-                domain=metric_info["domain"],
+                domain=primary_domain,
                 intent_type=IntentType.TREND,
-                metrics=[metric_info["metric"]],
+                metrics=[m["metric"] for m in all_metrics],
                 time_range=time_range,
-                dimensions=["date"],
+                dimensions=["date"] + extra_dims,
                 needs_clarification=True,
                 clarification_reason="请明确查询时间范围，例如“2026年1月”或“2026年Q1”。",
                 confidence=0.9,
@@ -450,11 +757,11 @@ class Text2SQLAgent:
             )
 
         return QuestionIntent(
-            domain=metric_info["domain"],
+            domain=primary_domain,
             intent_type=IntentType.TREND,
-            metrics=[metric_info["metric"]],
+            metrics=[m["metric"] for m in all_metrics],
             time_range=time_range,
-            dimensions=["date"],
+            dimensions=["date"] + extra_dims,
             confidence=0.95,
             raw_question=question,
         )
@@ -517,20 +824,300 @@ class Text2SQLAgent:
             )
             raise
 
+    @staticmethod
+    def _extract_plan_info_from_sqlplan(
+        metric_name: str, plan: SQLPlan,
+    ) -> dict[str, Any]:
+        """从 SQLPlan 对象中提取 planning_info dict。
+
+        用于 _determine_single_metric_plan() 统一 G2 降级路径的返回格式。
+        """
+        return {
+            "metric": metric_name,
+            "strategy": plan.strategy,
+            "planning_table": plan.primary_table or "",
+            "aggregation": (
+                plan.aggregations[0]
+                if plan.aggregations
+                else Aggregation(expr="", alias=metric_name)
+            ),
+            "group_by": plan.group_by,
+            "where_clauses": plan.where_clauses,
+            "joins": plan.joins,
+            "downgrade_reason": plan.downgrade_reason,
+        }
+
+    def _determine_single_metric_plan(
+        self, metric_name: str, intent: QuestionIntent,
+    ) -> dict[str, Any]:
+        """对单个指标执行完整的 G3/G2 策略决策。
+
+        从 _plan_query_rule() 中提取单指标决策逻辑，返回 planning_info dict
+        供合并条件检查使用。
+
+        Returns:
+            {
+                "metric": str,              # 指标名
+                "strategy": Strategy,       # G3_DIRECT / G2_FACT / G2_FACT_JOIN / NEED_CLARIFICATION
+                "planning_table": str,      # 最终使用的表（策略选择后）
+                "aggregation": Aggregation, # 聚合表达式
+                "group_by": list[str],      # GROUP BY 列
+                "where_clauses": list[str], # WHERE 条件
+                "joins": list[JoinPlan],    # JOIN 计划
+                "downgrade_reason": str | None,  # 降级原因
+            }
+        """
+        metric_info = self._get_metric_info(metric_name)
+        dimensions = intent.dimensions if intent.dimensions else ["date"]
+
+        # ── 情况 0: G3 不可用 → 直接走 G2 ──
+        if metric_info is not None and not metric_info.g3_available:
+            g2_plan = self._build_g2_plan(metric_info, intent, dimensions)
+            return self._extract_plan_info_from_sqlplan(metric_name, g2_plan)
+
+        config = self._resolve_metric_table_mapping(metric_name)
+
+        if config is None:
+            # table mapping 失败但 metric_info 存在 → 尝试 G2
+            if metric_info is not None:
+                g2_plan = self._build_g2_plan(metric_info, intent, dimensions)
+                return self._extract_plan_info_from_sqlplan(metric_name, g2_plan)
+            return {
+                "metric": metric_name,
+                "strategy": Strategy.NEED_CLARIFICATION,
+                "planning_table": "",
+                "aggregation": Aggregation(expr="", alias=metric_name),
+                "group_by": [],
+                "where_clauses": [],
+                "joins": [],
+                "downgrade_reason": (
+                    f"指标 '{metric_name}' 暂未纳入规则模式，"
+                    f"请明确或等待接入 LLM 规划器"
+                ),
+            }
+
+        # ── 情况 2: G3 可用，检查维度覆盖 ──
+        if metric_info is not None and metric_info.g3_available:
+            covered, missing = self._g3_covers_dimensions(metric_info, dimensions)
+            if covered:
+                # G3 覆盖所有维度 → G3_DIRECT
+                g3_table = metric_info.g3_table or config["table"]
+                date_col = config["date_col"]
+                aggregation_expr = config["aggregation_expr"]
+                return {
+                    "metric": metric_name,
+                    "strategy": Strategy.G3_DIRECT,
+                    "planning_table": g3_table,
+                    "aggregation": Aggregation(expr=aggregation_expr, alias=metric_name),
+                    "group_by": ["gold.dim_date.date"],
+                    "where_clauses": [
+                        (
+                            f"gold.dim_date.date BETWEEN DATE '{intent.time_range.start}' "
+                            f"AND DATE '{intent.time_range.end}'"
+                        )
+                    ],
+                    "joins": [
+                        JoinPlan(
+                            table="gold.dim_date",
+                            on=f"gold.dim_date.date = {g3_table}.{date_col}",
+                        )
+                    ],
+                    "downgrade_reason": None,
+                }
+            else:
+                # G3 不覆盖某些维度 → 降级 G2
+                g2_plan = self._build_g2_plan(metric_info, intent, missing)
+                return self._extract_plan_info_from_sqlplan(metric_name, g2_plan)
+
+        # ── 情况 3: metric_info 为空 → 使用配置走 G3_DIRECT（向后兼容）──
+        table = config["table"]
+        date_col = config["date_col"]
+        aggregation_expr = config["aggregation_expr"]
+        return {
+            "metric": metric_name,
+            "strategy": Strategy.G3_DIRECT,
+            "planning_table": table,
+            "aggregation": Aggregation(expr=aggregation_expr, alias=metric_name),
+            "group_by": ["gold.dim_date.date"],
+            "where_clauses": [
+                (
+                    f"gold.dim_date.date BETWEEN DATE '{intent.time_range.start}' "
+                    f"AND DATE '{intent.time_range.end}'"
+                )
+            ],
+            "joins": [
+                JoinPlan(
+                    table="gold.dim_date",
+                    on=f"gold.dim_date.date = {table}.{date_col}",
+                )
+            ],
+            "downgrade_reason": None,
+        }
+
+    @staticmethod
+    def _check_multi_metric_merge_conditions(
+        plans: list[dict[str, Any]],
+    ) -> tuple[bool, str]:
+        """检查多个指标的查询计划是否可合并为单 SQL。
+
+        六项合并条件（必须全部满足）：
+            1. strategy 一致           — 都走 G3_DIRECT 或都走 G2_FACT
+            2. planning_table 一致     — 策略选择后的最终表相同
+            3. group_by 一致           — 分组维度相同
+            4. where_clauses 一致      — 过滤条件相同
+            5. join path 一致          — JOIN 的表列表相同
+            6. grain 一致              — 隐含在 group_by 中
+
+        Args:
+            plans: _determine_single_metric_plan() 返回的 planning_info 列表
+
+        Returns:
+            (True, "") 表示可合并
+            (False, "原因描述") 表示不可合并
+        """
+        if len(plans) <= 1:
+            return True, ""
+
+        base = plans[0]
+
+        # 1. strategy 一致
+        for i, p in enumerate(plans):
+            if base["strategy"] == Strategy.NEED_CLARIFICATION:
+                return False, f"指标 '{p['metric']}' 无法规划"
+            if p["strategy"] == Strategy.NEED_CLARIFICATION:
+                return False, f"指标 '{p['metric']}' 无法规划"
+
+        for i, p in enumerate(plans[1:], 1):
+            # 1. strategy 一致
+            if base["strategy"] != p["strategy"]:
+                return False, (
+                    f"指标 '{base['metric']}'({base['strategy'].value}) 与 "
+                    f"'{p['metric']}'({p['strategy'].value}) 的 strategy 不一致"
+                )
+
+            # 2. planning_table 一致
+            if base["planning_table"] != p["planning_table"]:
+                return False, (
+                    f"指标 '{base['metric']}' 在表 {base['planning_table']}，"
+                    f"'{p['metric']}' 在表 {p['planning_table']}，planning_table 不一致"
+                )
+
+            # 3. group_by 一致
+            if base["group_by"] != p["group_by"]:
+                return False, (
+                    f"指标 '{base['metric']}' 与 '{p['metric']}' 的 group_by 不一致"
+                )
+
+            # 4. where_clauses 一致
+            if base["where_clauses"] != p["where_clauses"]:
+                return False, (
+                    f"指标 '{base['metric']}' 与 '{p['metric']}' 的 where_clauses 不一致"
+                )
+
+            # 5. join path 一致（比较 JOIN 表列表）
+            base_join_tables = sorted([j.table for j in (base["joins"] or [])])
+            p_join_tables = sorted([j.table for j in (p["joins"] or [])])
+            if base_join_tables != p_join_tables:
+                return False, (
+                    f"指标 '{base['metric']}' 与 '{p['metric']}' 的 join path 不一致"
+                )
+
+            # 6. grain 一致（隐含在 group_by 中，已通过检查 3 覆盖）
+
+        return True, ""
+
+    def _plan_query_multi_metric(self, intent: QuestionIntent) -> SQLPlan:
+        """多指标查询规划：逐个决策 → 合并校验 → 生成单 SQLPlan。
+
+        流程：
+            1. 对每个指标调用 _determine_single_metric_plan()
+            2. 检查 6 项合并条件
+            3. 可合并 → 以第一个 plan 为模板，聚合所有 Aggregation
+            4. 不可合并 → 返回 NEED_CLARIFICATION + UNSUPPORTED_MULTI_METRIC
+        """
+        # 1. 逐个决策
+        per_metric_plans = []
+        for metric_name in intent.metrics:
+            plan_info = self._determine_single_metric_plan(metric_name, intent)
+            per_metric_plans.append(plan_info)
+
+        # 2. 检查合并条件
+        can_merge, reason = self._check_multi_metric_merge_conditions(
+            per_metric_plans
+        )
+
+        if not can_merge:
+            # 收集指标名和表名用于生成清晰的错误消息
+            metric_names = [p["metric"] for p in per_metric_plans]
+            table_names = [p["planning_table"] or "未知" for p in per_metric_plans]
+            return SQLPlan(
+                strategy=Strategy.NEED_CLARIFICATION,
+                downgrade_reason=(
+                    f"UNSUPPORTED_MULTI_METRIC: 已识别多个指标（{', '.join(metric_names)}），"
+                    f"但分布在不同表（{', '.join(table_names)}），"
+                    f"当前规则模式暂不支持跨表融合。"
+                    f"原因: {reason}"
+                    f"。建议分别查询每个指标。"
+                ),
+            )
+
+        # 3. 合并：以第一个 plan 的结构为模板，聚合所有 Aggregation
+        base = per_metric_plans[0]
+        all_aggs: list[Aggregation] = []
+        for p in per_metric_plans:
+            agg = p["aggregation"]
+            if isinstance(agg, Aggregation):
+                all_aggs.append(agg)
+
+        # 合并 downgrade_reason（取第一个非空的，多指标降级原因相同）
+        merged_downgrade = None
+        for p in per_metric_plans:
+            if p.get("downgrade_reason"):
+                merged_downgrade = p["downgrade_reason"]
+                break
+
+        return SQLPlan(
+            strategy=base["strategy"],
+            primary_table=base["planning_table"],
+            joins=list(base["joins"]),
+            where_clauses=list(base["where_clauses"]),
+            group_by=list(base["group_by"]),
+            order_by=list(base["group_by"]),  # 同 group_by
+            aggregations=all_aggs,
+            downgrade_reason=merged_downgrade,
+            confidence=0.95,
+        )
+
     def _plan_query_rule(self, intent: QuestionIntent) -> SQLPlan:
-        """
-        规则版查询规划（PoC / 离线 fallback）。
+        """规则版查询规划，支持 G3→G2 降级。
 
-        B-8 修复：指标→表映射优先级：
-            1. resolver context 中的 available_metrics（从 meta.metric_definitions 动态发现）
-            2. agent_config.yml 的 rule_mode.metric_to_table（离线 fallback）
+        策略分支：
+            - G3 可用且覆盖所有维度 → G3_DIRECT
+            - G3 不可用（g3_available=False）→ _build_g2_plan()
+            - G3 可用但缺维度 → _build_g2_plan()
+            - G2 也无法确定 → NEED_CLARIFICATION
 
-        规则模式定位为 PoC / fallback，不作为生产主路径。
+        证据链：所有表名、维度、JOIN 键均来自 metric_contract.yml 和 semantic_contract.yml。
         """
+        # ── 多指标分流：len > 1 走多指标规划路径 ──
+        if len(intent.metrics) > 1:
+            return self._plan_query_multi_metric(intent)
+
         metric = intent.metrics[0] if intent.metrics else ""
+        # ── 获取完整的 MetricInfo（用于 g3_available / g3_table 判断）──
+        metric_info = self._get_metric_info(metric)
+        dimensions = intent.dimensions if intent.dimensions else ["date"]
+
+        # ── 情况 0: G3 不可用 → 直接走 G2（即使 table mapping 为 None 也尝试）──
+        if metric_info is not None and not metric_info.g3_available:
+            return self._build_g2_plan(metric_info, intent, dimensions)
+
         config = self._resolve_metric_table_mapping(metric)
 
         if config is None:
+            # 如果 MetricInfo 存在（G3 可用但 table mapping 失败），也尝试 G2
+            if metric_info is not None:
+                return self._build_g2_plan(metric_info, intent, dimensions)
             return SQLPlan(
                 strategy=Strategy.NEED_CLARIFICATION,
                 downgrade_reason=(
@@ -539,10 +1126,41 @@ class Text2SQLAgent:
                 ),
             )
 
+        # ── 情况 2: G3 可用，检查维度覆盖 ──
+        if metric_info is not None and metric_info.g3_available:
+            covered, missing = self._g3_covers_dimensions(metric_info, dimensions)
+            if covered:
+                # G3 覆盖所有维度 → G3_DIRECT（保持原有逻辑）
+                g3_table = metric_info.g3_table or config["table"]
+                date_col = config["date_col"]
+                aggregation_expr = config["aggregation_expr"]
+                return SQLPlan(
+                    strategy=Strategy.G3_DIRECT,
+                    primary_table=g3_table,
+                    joins=[
+                        JoinPlan(
+                            table="gold.dim_date",
+                            on=f"gold.dim_date.date = {g3_table}.{date_col}",
+                        )
+                    ],
+                    where_clauses=[
+                        (
+                            f"gold.dim_date.date BETWEEN DATE '{intent.time_range.start}' "
+                            f"AND DATE '{intent.time_range.end}'"
+                        )
+                    ],
+                    group_by=["gold.dim_date.date"],
+                    order_by=["gold.dim_date.date"],
+                    aggregations=[Aggregation(expr=aggregation_expr, alias=metric)],
+                    confidence=0.95,
+                )
+            else:
+                # G3 不覆盖某些维度 → 降级 G2
+                return self._build_g2_plan(metric_info, intent, missing)
+
+        # ── 情况 3: metric_info 为空 → 使用原有配置走 G3_DIRECT（向后兼容）──
         table = config["table"]
         date_col = config["date_col"]
-        # 直接使用 _resolve_metric_table_mapping 返回的完整聚合表达式，
-        # 避免再次拼接 SUM() 导致 SUM(SUM(x)) 双包裹
         aggregation_expr = config["aggregation_expr"]
         return SQLPlan(
             strategy=Strategy.G3_DIRECT,
@@ -593,7 +1211,7 @@ class Text2SQLAgent:
         value_expr = None
         aggregation_expr = None
 
-        # ── Step 1: 从 context 或 config 获取表名 ──
+        # ── Step 1: 从 context 获取 G2 事实表元数据 ──
         if self._context and self._context.available_metrics:
             for m in self._context.available_metrics:
                 if m.name == metric_name and m.base_table:
@@ -612,9 +1230,19 @@ class Text2SQLAgent:
                 table = config_entry["table"]
             if date_col is None:
                 date_col = config_entry.get("date_col", "date")
-            # config 的 value_expr 最精确，优先使用
-            value_expr = config_entry.get("value_expr", value_expr or metric_name)
-            if aggregation_expr is None:
+            # config 的 value_expr 始终优先于推导值（覆盖 G2 表的聚合表达式）
+            cfg_value_expr = config_entry.get("value_expr")
+            if cfg_value_expr:
+                value_expr = cfg_value_expr
+                # 保留 Step 1 的聚合函数（如 AVG/SUM/COUNT），只替换列名
+                func = "SUM"
+                if aggregation_expr:
+                    import re as _re
+                    func_match = _re.match(r'^(\w+)\(', aggregation_expr)
+                    if func_match:
+                        func = func_match.group(1).upper()
+                aggregation_expr = f"{func}({value_expr})"
+            elif aggregation_expr is None:
                 aggregation_expr = f"SUM({value_expr})"
 
         if table is None:
@@ -824,7 +1452,12 @@ class Text2SQLAgent:
                 "domain": Domain(result.metric.domain) if result.metric.domain else None,
                 "confidence": result.confidence,
             }
+
+        # G3 未命中时，尝试匹配非 G3 指标（用于 G2 降级查询）
         if result.failure_reason == "metric_not_found":
+            g2_match = self._detect_g2_metric(question)
+            if g2_match:
+                return g2_match
             return None
         return {
             "metric": None,
@@ -832,6 +1465,124 @@ class Text2SQLAgent:
             "confidence": result.confidence,
             "clarification_reason": result.clarification_message,
         }
+
+    def _detect_g2_metric(self, question: str) -> Optional[dict[str, Any]]:
+        """在 G3 指标未命中时，尝试匹配非 G3 指标。
+
+        非 G3 指标（g3_available=False）不使用 MetricResolver 的复杂匹配逻辑，
+        仅在中文名或关键词直接出现在问题中时命中（忽略空格差异）。
+        证据来源：metric_contract.yml 中 g3_available=false 的指标。
+        """
+        all_metrics = self._available_metric_infos()
+        g2_metrics = [m for m in all_metrics if not m.g3_available]
+        question_no_space = question.replace(" ", "")
+
+        for metric in g2_metrics:
+            # 简单匹配：中文名或英文名出现在问题中（忽略空格）
+            zh_no_space = metric.zh_name.replace(" ", "") if metric.zh_name else ""
+            if zh_no_space and zh_no_space in question_no_space:
+                return {
+                    "metric": metric.name,
+                    "domain": Domain(metric.domain) if metric.domain else None,
+                    "confidence": 0.85,
+                }
+            if metric.name.lower() in question.lower():
+                return {
+                    "metric": metric.name,
+                    "domain": Domain(metric.domain) if metric.domain else None,
+                    "confidence": 0.85,
+                }
+        return None
+
+    def _detect_all_g2_metrics(self, question: str) -> list[dict[str, Any]]:
+        """批量检测非 G3 指标，返回所有匹配的候选。
+
+        扩展自 _detect_g2_metric()：不返回第一个匹配就停止，
+        而是收集所有匹配的非 G3 指标。
+        证据来源：metric_contract.yml 中 g3_available=false 的指标。
+        """
+        all_metrics = self._available_metric_infos()
+        g2_metrics = [m for m in all_metrics if not m.g3_available]
+        question_no_space = question.replace(" ", "")
+
+        results: list[dict[str, Any]] = []
+        for metric in g2_metrics:
+            matched_text = None
+            matched_by = None
+
+            # 中文名匹配（忽略空格）
+            zh_no_space = metric.zh_name.replace(" ", "") if metric.zh_name else ""
+            if zh_no_space and zh_no_space in question_no_space:
+                matched_text = metric.zh_name
+                matched_by = "zh_name"
+            # 英文名匹配
+            elif metric.name.lower() in question.lower():
+                matched_text = metric.name
+                matched_by = "metric_name"
+
+            if matched_text:
+                results.append({
+                    "metric": metric.name,
+                    "confidence": 0.85,
+                    "matched_text": matched_text,
+                    "matched_by": matched_by,
+                    "domain": Domain(metric.domain) if metric.domain else None,
+                    "metric_info": metric,
+                })
+
+        return results
+
+    def _detect_all_metrics(self, question: str) -> list[dict[str, Any]]:
+        """批量检测问题中所有匹配的指标，输出候选证据列表。
+
+        处理流程：
+            1. G3 指标：MetricResolver.resolve_all() → MetricCandidate 列表
+            2. G2 指标：_detect_all_g2_metrics() → 简单 substring 匹配
+            3. 去重：同一 metric name 保留最高 confidence
+            4. 低置信度过滤：confidence < 0.80 淘汰
+
+        Returns:
+            候选证据列表（按置信度降序），每项包含:
+                - metric: str           # 指标英文名
+                - confidence: float     # 匹配置信度
+                - matched_text: str     # 触发匹配的文本
+                - matched_by: str       # 匹配方式: metric_name/zh_name/synonym/alias/keyword
+                - domain: Domain | None # 业务域
+                - metric_info: MetricInfo  # 完整指标信息对象
+        """
+        results: list[dict[str, Any]] = []
+
+        # 1. G3 指标匹配
+        resolver = MetricResolver(
+            self._available_metric_infos(),
+            aliases=self._metric_aliases(),
+        )
+        g3_candidates = resolver.resolve_all(question)
+        for c in g3_candidates:
+            results.append({
+                "metric": c.metric.name,
+                "confidence": c.confidence,
+                "matched_text": c.matched_terms[0] if c.matched_terms else "",
+                "matched_by": c.matched_by,
+                "domain": Domain(c.metric.domain) if c.metric.domain else None,
+                "metric_info": c.metric,
+            })
+
+        # 2. G2 指标匹配
+        g2_candidates = self._detect_all_g2_metrics(question)
+        results.extend(g2_candidates)
+
+        # 3. 去重：同一 metric name 只保留最高 confidence
+        deduped: dict[str, dict[str, Any]] = {}
+        for r in results:
+            name = r["metric"]
+            if name not in deduped or r["confidence"] > deduped[name]["confidence"]:
+                deduped[name] = r
+
+        # 4. 低置信度过滤
+        filtered = [r for r in deduped.values() if r["confidence"] >= 0.80]
+
+        return sorted(filtered, key=lambda r: r["confidence"], reverse=True)
 
     def _available_metric_infos(self) -> list[MetricInfo]:
         """读取当前上下文中的指标目录；离线时回退到规则配置。
