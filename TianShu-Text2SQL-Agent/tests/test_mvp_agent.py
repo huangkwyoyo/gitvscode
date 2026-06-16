@@ -565,13 +565,258 @@ class TestMultiMetricSameTable:
         assert "borough" in response.plan.downgrade_reason.lower()
 
     def test_multi_metric_cross_table_unsupported(self):
-        """测试 4: 每天行程数和受伤人数 → 跨表，返回 clarification"""
+        """测试 4: 每天行程数和受伤人数 → 跨表，Phase 2C 拆分为多计划并执行"""
         agent = Text2SQLAgent()
         response = agent.ask("2026年1月每天行程数和受伤人数分别是多少？")
 
-        # 跨表 → 必须反问，不允许静默只回答一个
-        assert response.clarification_needed
-        msg = response.clarification_message or ""
-        assert "跨表" in msg or "UNSUPPORTED_MULTI_METRIC" in msg
-        # 不允许只回答其中一个
-        assert response.plan is None or response.plan.strategy == Strategy.NEED_CLARIFICATION
+        # Phase 2C：跨表 → 自动拆分为多计划，串行执行，返回完整结果
+        assert response.is_multi_plan
+        assert len(response.plans) == 2
+        # 不允许静默只回答一个
+        assert response.plan is not None and response.plan.strategy != Strategy.NEED_CLARIFICATION
+        # 应有中文回答
+        assert response.chinese_answer is not None
+        assert "拆分" in response.chinese_answer
+
+
+# ═══════════════════════════════════════════════════════════════
+# Phase 2B: 多计划规划测试
+# ═══════════════════════════════════════════════════════════════
+
+
+class TestPhase2BMultiPlanPlanning:
+    """Phase 2B：跨表多指标 → SubIntent 拆分 + 多 SQLPlan 生成"""
+
+    def test_two_metrics_cross_table_is_multi_plan(self):
+        """"每天行程数和受伤人数" → is_multi_plan=True, 2 个计划"""
+        agent = Text2SQLAgent()
+        response = agent.ask("2026年1月每天行程数和受伤人数是多少？")
+
+        # Phase 2B：多计划标记
+        assert response.is_multi_plan
+        assert len(response.plans) == 2
+
+        # 每个 UnifiedResponse 有 sub_intent 和 plan
+        for ur in response.plans:
+            assert ur.sub_intent is not None
+            assert ur.plan is not None
+
+        # 第一个计划查询 trip_count（按表名字母序，crash 在前）
+        crash_plan = None
+        trip_plan = None
+        for ur in response.plans:
+            if "trip_count" in ur.sub_intent.metrics:
+                trip_plan = ur
+            if "persons_injured" in ur.sub_intent.metrics:
+                crash_plan = ur
+
+        assert trip_plan is not None, "应有 trip_count 相关计划"
+        assert crash_plan is not None, "应有 persons_injured 相关计划"
+        assert trip_plan.plan.primary_table == "gold.dws_daily_trip_summary"
+        assert crash_plan.plan.primary_table == "gold.dws_daily_crash_summary"
+
+    def test_each_plan_generates_sql(self):
+        """"每天行程数和受伤人数" → 每个计划都能生成 SQL"""
+        from src.sql_gen import sql_plan_to_sql
+
+        agent = Text2SQLAgent()
+        response = agent.ask("2026年1月每天行程数和受伤人数是多少？")
+
+        assert response.is_multi_plan
+        for i, ur in enumerate(response.plans):
+            sql = sql_plan_to_sql(ur.plan)
+            # SQL 应以 SELECT 开头
+            assert sql.startswith("SELECT"), f"计划{i+1} SQL 不以 SELECT 开头: {sql[:50]}"
+            # SQL 应引用正确的表
+            assert ur.plan.primary_table in sql, (
+                f"计划{i+1} SQL 不包含表 {ur.plan.primary_table}"
+            )
+
+    def test_three_metrics_split_into_two_groups(self):
+        """"每天行程数、车费总额和受伤人数" → 2 组：trip(2聚合) + crash(1聚合)"""
+        agent = Text2SQLAgent()
+        response = agent.ask("2026年1月每天行程数、车费总额和受伤人数是多少？")
+
+        assert response.is_multi_plan
+        assert len(response.plans) == 2
+
+        # 找到 trip 相关计划（应包含 trip_count 和 total_fare_amount）
+        trip_plan = None
+        crash_plan = None
+        for ur in response.plans:
+            if "persons_injured" in ur.sub_intent.metrics:
+                crash_plan = ur
+            else:
+                trip_plan = ur
+
+        assert trip_plan is not None, "应有 trip 相关计划"
+        assert crash_plan is not None, "应有 crash 相关计划"
+
+        # trip 计划有 2 个聚合
+        assert len(trip_plan.plan.aggregations) == 2
+        trip_agg_aliases = [a.alias for a in trip_plan.plan.aggregations]
+        assert "trip_count" in trip_agg_aliases
+        assert "total_fare_amount" in trip_agg_aliases
+
+        # crash 计划有 1 个聚合
+        assert len(crash_plan.plan.aggregations) == 1
+        assert crash_plan.plan.aggregations[0].alias == "persons_injured"
+
+    def test_single_metric_path_unchanged(self):
+        """单指标路径不受多计划逻辑影响"""
+        agent = Text2SQLAgent()
+        response = agent.ask("2026年1月每天有多少行程？")
+
+        # 单指标 → 不触发多计划
+        assert not response.is_multi_plan
+        assert len(response.plans) == 0
+        assert response.plan is not None
+        assert response.plan.strategy == Strategy.G3_DIRECT
+        assert response.plan.primary_table == "gold.dws_daily_trip_summary"
+
+    def test_same_table_multi_metric_unchanged(self):
+        """同表多指标路径不受多计划逻辑影响"""
+        agent = Text2SQLAgent()
+        response = agent.ask("2026年1月每天受伤人数和死亡人数是多少？")
+
+        # 同表 → 不触发多计划，仍走合并路径
+        assert not response.is_multi_plan
+        assert len(response.plans) == 0
+        assert response.plan is not None
+        assert response.plan.strategy == Strategy.G3_DIRECT
+        assert len(response.plan.aggregations) == 2
+
+
+# ═══════════════════════════════════════════════════════════════
+# Phase 2C: 串行多计划执行测试
+# ═══════════════════════════════════════════════════════════════
+
+
+class TestPhase2CSerialExecution:
+    """Phase 2C：跨表多指标 → 串行执行 + 独立安全校验"""
+
+    def test_each_plan_result_not_empty(self):
+        """"每天行程数和受伤人数" → 每个 UnifiedResponse.result 不为空"""
+        agent = Text2SQLAgent()
+        response = agent.ask("2026年1月每天行程数和受伤人数是多少？")
+
+        assert response.is_multi_plan
+        assert len(response.plans) == 2
+
+        for i, ur in enumerate(response.plans):
+            assert ur.result is not None, f"计划{i+1} result 为空"
+            assert ur.result.error is None or ur.result.error == "", (
+                f"计划{i+1} 执行出错: {ur.result.error}"
+            )
+            assert ur.result.row_count > 0, (
+                f"计划{i+1} 返回 0 行数据"
+            )
+
+    def test_each_sql_passes_safety_check_independently(self):
+        """"每天行程数和受伤人数" → 每个子 SQL 独立通过安全校验"""
+        from src.sql_gen import sql_plan_to_sql, validate_sql_safety
+
+        agent = Text2SQLAgent()
+        response = agent.ask("2026年1月每天行程数和受伤人数是多少？")
+
+        assert response.is_multi_plan
+        for i, ur in enumerate(response.plans):
+            sql = sql_plan_to_sql(ur.plan)
+            violations = validate_sql_safety(sql, [])
+            assert len(violations) == 0, (
+                f"计划{i+1} SQL 安全校验失败: {violations}\nSQL: {sql}"
+            )
+
+    def test_single_plan_path_not_affected(self):
+        """单指标路径执行不受多计划逻辑影响（结果正常）"""
+        agent = Text2SQLAgent()
+        response = agent.ask("2026年1月每天有多少行程？")
+
+        # 单指标 → 原路径
+        assert not response.is_multi_plan
+        assert not response.clarification_needed
+        assert not response.refusal
+        assert response.result is not None
+        assert response.result.error is None or response.result.error == ""
+        assert response.result.row_count > 0
+        assert response.chinese_answer is not None
+
+    def test_same_table_multi_metric_execution_not_affected(self):
+        """同表多指标路径执行不受影响（合并为单 SQL）"""
+        agent = Text2SQLAgent()
+        response = agent.ask("2026年1月每天受伤人数和死亡人数是多少？")
+
+        # 同表 → 合并路径
+        assert not response.is_multi_plan
+        assert not response.clarification_needed
+        assert response.result is not None
+        assert response.result.row_count > 0
+        # 两个聚合都在 SQL 中
+        assert "persons_injured" in response.result.sql
+        assert "persons_killed" in response.result.sql
+
+    def test_multi_plan_chinese_answer(self):
+        """多计划执行后应生成 chinese_answer"""
+        agent = Text2SQLAgent()
+        response = agent.ask("2026年1月每天行程数和受伤人数是多少？")
+
+        assert response.is_multi_plan
+        assert response.chinese_answer is not None
+        assert "拆分" in response.chinese_answer
+        # 兼容字段也应填充
+        assert response.result is not None
+
+
+# ═══════════════════════════════════════════════════════════════
+# Phase 2D: 模板式结果融合测试
+# ═══════════════════════════════════════════════════════════════
+
+
+class TestPhase2DResultFusion:
+    """Phase 2D：模板式多结果融合（不接 LLM，不做跨结果 join）"""
+
+    def test_chinese_answer_mentions_split(self):
+        """"每天行程数和受伤人数" → chinese_answer 包含拆分说明"""
+        agent = Text2SQLAgent()
+        response = agent.ask("2026年1月每天行程数和受伤人数是多少？")
+
+        answer = response.chinese_answer or ""
+        assert "拆分" in answer or "查询计划" in answer
+        assert "行程数" in answer or "trip_count" in answer
+        assert "受伤人数" in answer or "persons_injured" in answer
+
+    def test_chinese_answer_mentions_table_names(self):
+        """融合结果应包含两个子计划的表名或指标名"""
+        agent = Text2SQLAgent()
+        response = agent.ask("2026年1月每天行程数和受伤人数是多少？")
+
+        answer = response.chinese_answer or ""
+        # 应提及两个表
+        assert "dws_daily_trip_summary" in answer or "trip_count" in answer
+        assert "dws_daily_crash_summary" in answer or "persons_injured" in answer
+        # 应有两个子计划
+        assert "1." in answer and "2." in answer
+
+    def test_fuse_results_no_llm_no_join(self):
+        """融合结果不应包含 LLM 特征或跨结果 join 特征"""
+        agent = Text2SQLAgent()
+        response = agent.ask("2026年1月每天行程数和受伤人数是多少？")
+
+        answer = response.chinese_answer or ""
+        # 不应出现多结果 merge 的特征（如 pandas merge、JOIN 等）
+        assert "JOIN" not in answer.upper() or "gold.dim_date" in answer
+        # 不应出现 LLM 特征
+        assert "作为AI" not in answer
+        assert "我认为" not in answer
+
+    def test_single_metric_answer_unchanged(self):
+        """单指标的中文回答不受 fuse_results 影响"""
+        agent = Text2SQLAgent()
+        response = agent.ask("2026年1月每天有多少行程？")
+
+        assert not response.is_multi_plan
+        assert response.chinese_answer is not None
+        assert "查询" in response.chinese_answer
+        assert "行" in response.chinese_answer
+        # 不应包含多计划标记
+        assert "拆分" not in response.chinese_answer
