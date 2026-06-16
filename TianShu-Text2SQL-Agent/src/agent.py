@@ -34,21 +34,25 @@ from .ir import (
     AgentResponse,
     Aggregation,
     Domain,
+    ExecutionTrace,
     IntentType,
     JoinPlan,
     QuestionIntent,
     SQLPlan,
     SQLResult,
     Strategy,
+    SubIntent,
     TimeRange,
     TimeRangeType,
+    UnifiedResponse,
 )
 from .resolver import TianShuResolver, AgentContext, MetricInfo
 from .metric_resolver import MetricResolver
 from .ambiguity import detect_ambiguity, load_clarification_rules
 from .request_guard import is_write_request, is_forbidden_layer_request
-from .sql_gen import sql_plan_to_sql, validate_sql_safety
-from .explainer import explain_result
+from .plan_executor import PlanExecutor
+from .result_merge import merge_results_on_date
+from .explainer import explain_result, fuse_results
 from .llm import LLMClient, LLMRequest, PromptLoader
 from .llm_adapter import RefusalDetected
 from .llm_pipeline import extract_json_object, question_intent_from_dict, sql_plan_from_dict
@@ -100,6 +104,8 @@ class Text2SQLAgent:
 
         # 初始化 TianShu 连接
         self._init_resolver(tianshu_config_path)
+        # Phase A：初始化 PlanExecutor（执行边界，隔离执行细节）
+        self._executor: Optional[PlanExecutor] = None
         # 进程退出时自动关闭 DuckDB 连接，防止测试中未调用 close() 导致的连接泄露
         atexit.register(self.close)
 
@@ -131,6 +137,16 @@ class Text2SQLAgent:
     def is_ready(self) -> bool:
         """Agent 是否已就绪（可处理查询）"""
         return self._context is not None
+
+    def _get_executor(self) -> PlanExecutor:
+        """懒初始化 PlanExecutor（需要 resolver 和 context 就绪）"""
+        if self._executor is None:
+            self._executor = PlanExecutor(
+                resolver=self._resolver,
+                context=self._context,
+                agent_config=self._agent_config,
+            )
+        return self._executor
 
     def ask(self, question: str) -> AgentResponse:
         """
@@ -236,7 +252,7 @@ class Text2SQLAgent:
             response.clarification_message = plan.downgrade_reason or "需要进一步确认"
             return response
 
-        # ── Step 3.5: IR 校验 —— Layer 2 规划校验（表存在性、JOIN 白名单、降级原因）──
+        # ── 预加载 plan 校验所需的上下文变量（SQL 安全校验已由 PlanExecutor 承载）──
         available_tables_set: Optional[set[str]] = None
         join_whitelist_set: Optional[set[tuple[str, str]]] = None
         if self._context:
@@ -244,6 +260,111 @@ class Text2SQLAgent:
                 f"{t.schema}.{t.name}" for t in self._context.available_tables
             }
             join_whitelist_set = set(self._context.join_whitelist)
+
+        # ── Phase 2B/2C：跨表多指标 → SubIntent 拆分 + 多计划生成 + 串行执行 ──
+        if plan.strategy == Strategy.UNSUPPORTED_MULTI_PLAN:
+            response.trace.append("[STEP 3b] 跨表多指标 → SubIntent 拆分...")
+            # 重新获取逐指标决策结果（_plan_query_multi_metric 中已经算过一次，
+            # 这里需要重新获取以便分组。为保持干净，调用内部方法重新规划）
+            per_metric_plans: list[dict[str, Any]] = []
+            for metric_name in intent.metrics:
+                plan_info = self._determine_single_metric_plan(metric_name, intent)
+                per_metric_plans.append(plan_info)
+
+            sub_intents = self._split_into_sub_intents(intent, per_metric_plans)
+            response.trace.append(
+                f"         拆分为 {len(sub_intents)} 个 SubIntent: "
+                + ", ".join(
+                    f"[{', '.join(si.metrics)}]→{si.planning_table}"
+                    for si in sub_intents
+                )
+            )
+
+            unified_responses = self._plan_sub_intents(sub_intents, intent)
+            response.plans = unified_responses
+            response.is_multi_plan = True
+
+            # 填充兼容字段（plan/result 指向第一个子计划）
+            if unified_responses:
+                response.plan = unified_responses[0].plan
+
+            response.trace.append(
+                f"         生成 {len(unified_responses)} 个查询计划"
+            )
+            for i, ur in enumerate(unified_responses):
+                response.trace.append(
+                    f"          计划{i+1}: {ur.sub_intent.metrics} → "
+                    f"{ur.plan.primary_table if ur.plan else 'N/A'}"
+                )
+
+            # ── Phase 2C：串行多计划执行（PlanExecutor 封装）──
+            response.trace.append("[STEP 4] 串行多计划执行（PlanExecutor）...")
+            executor = self._get_executor()
+            executor.execute_many_serial(unified_responses)
+
+            # 记录每个子计划的执行 trace
+            for i, ur in enumerate(unified_responses):
+                tr = ur.execution_trace
+                if tr:
+                    if tr.execution_status == "success":
+                        response.trace.append(
+                            f"         计划{i+1} 结果: 状态=success, "
+                            f"行数={tr.row_count}, 耗时={tr.execution_time_ms}ms"
+                        )
+                    else:
+                        response.trace.append(
+                            f"         计划{i+1} 失败: {tr.error_message}"
+                        )
+
+            # 填充兼容字段：第一个子计划的结果
+            if unified_responses and unified_responses[0].result:
+                response.result = unified_responses[0].result
+
+            # Phase B2: 执行完毕后尝试 date merge，跳过单计划路径，进入融合阶段
+            response.trace.append("[DONE] 多计划执行完成")
+            response.trace.append("[STEP 5b] 尝试 date merge...")
+            merged = merge_results_on_date(unified_responses)
+
+            if merged.merge_status.value == "merged":
+                response.trace.append(
+                    f"         date merge 成功: {merged.row_count} 行, "
+                    f"列={merged.columns}"
+                )
+                if merged.merge_warnings:
+                    response.trace.append(
+                        f"         merge warnings: {'; '.join(merged.merge_warnings)}"
+                    )
+                # 中文解释：声明合并，不推断因果
+                metric_names = [
+                    m for s in merged.source_summaries for m in s.metrics
+                ]
+                response.chinese_answer = (
+                    f"多个查询结果已按 date 对齐合并展示。"
+                    f"共 {merged.row_count} 天的数据，"
+                    f"包含指标：{'、'.join(metric_names)}。\n\n"
+                    + fuse_results(question, unified_responses)
+                )
+            elif merged.merge_status.value == "skipped":
+                response.trace.append(
+                    f"         date merge 跳过: {merged.reason}"
+                )
+                response.chinese_answer = (
+                    f"由于 {merged.reason}，未进行自动合并，"
+                    f"以下为并列结果。\n\n"
+                    + fuse_results(question, unified_responses)
+                )
+            elif merged.merge_status.value == "failed":
+                response.trace.append(
+                    f"         date merge 失败: {merged.reason}"
+                )
+                response.chinese_answer = fuse_results(question, unified_responses)
+            else:
+                response.chinese_answer = fuse_results(question, unified_responses)
+
+            return response
+
+        # ── Step 3.5: IR 校验 —— Layer 2 规划校验（表存在性、JOIN 白名单、降级原因）──
+        # 上下文变量已在 Step 3 后预加载，此处直接使用
 
         plan_errors = plan.validate(
             available_tables=available_tables_set,
@@ -270,61 +391,44 @@ class Text2SQLAgent:
                 )
             return response
 
-        # ── Step 4: SQL 生成 + 安全检查（二层防线）──
-        # B-7 职责分离：
+        # ── Step 4-5: SQL 生成 + 安全检查 + 执行（PlanExecutor 封装）──
+        # Phase A：执行逻辑已抽离到 PlanExecutor，agent.py 只负责调度
         #   - 主防线: SQLPlan.validate() 已在 Step 3.5 完成 JOIN 白名单校验
-        #   - 兜底防线: validate_sql_safety() 在此检查 SQL 中是否引入了计划外 JOIN
-        #   - 两层都检查：SELECT only、表白名单、禁止关键字、日期过滤
-        response.trace.append("[STEP 4] SQL 生成 + 安全检查...")
-        sql = sql_plan_to_sql(plan)
-
-        forbidden_kw = self._context.forbidden_sql_keywords if self._context else []
-        violations = validate_sql_safety(
-            sql, forbidden_kw,
-            available_tables=available_tables_set,
-            join_whitelist=join_whitelist_set,
-        )
-        if violations:
-            response.refusal = True
-            response.refusal_reason = f"SQL 安全检查失败: {'; '.join(violations)}"
-            response.trace.append(f"         [FAIL] {response.refusal_reason}")
-            # 保存证据：SQL 本身即 raw_output，plan raw 提供上下文
-            self._save_raw_output_on_failure(
-                question=question,
-                stage="sql_safety",
-                prompt_name="sql_planner",
-                raw_output=sql,
-                parsed_output=plan.to_dict() if plan else {},
-                parse_success=True,
-                validation_success=False,
-                error_message=response.refusal_reason,
-            )
-            return response
-
-        # ── Step 5: 执行 SQL ──
-        response.trace.append("[STEP 5] 执行 SQL...")
-        # C-1 修复：离线模式必须阻断 SQL 执行（防御深度）
-        # 即使前面的安全校验因为某种原因未拦截，这一层也必须阻断
-        if self._context and self._context.offline:
-            result = SQLResult(
-                sql=sql,
-                error="Agent 处于离线模式，禁止执行 SQL（安全约束）",
-            )
-            response.trace.append("         [BLOCKED] 离线模式禁止执行 SQL")
-        elif self._resolver:
-            timeout_seconds = self._agent_config.get("safety", {}).get("query_timeout", 30)
-            result = self._resolver.execute_sql(
-                sql,
-                timeout_seconds=timeout_seconds,
-                source_table=plan.primary_table or "",
-            )
-        else:
-            result = SQLResult(
-                sql=sql,
-                error="数据库未连接（离线模式）",
-            )
+        #   - 兜底防线: validate_sql_safety() 在 PlanExecutor 中检查
+        response.trace.append("[STEP 4-5] SQL 生成 + 安全检查 + 执行（PlanExecutor）...")
+        executor = self._get_executor()
+        result = executor.execute_one(plan)
         response.result = result
-        response.trace.append(f"         行数={result.row_count}, 耗时={result.execution_time_ms}ms")
+
+        # 记录执行 trace 到 AgentResponse
+        if executor.last_trace:
+            exec_trace = executor.last_trace
+            if exec_trace.execution_status == "failed" and not result.error:
+                # trace 标记失败但 result 无 error（离线模式等）→ 直接记录
+                pass
+            response.trace.append(
+                f"         状态={exec_trace.execution_status}, "
+                f"行数={result.row_count}, 耗时={result.execution_time_ms}ms"
+            )
+            if not exec_trace.safety_check_passed:
+                response.refusal = True
+                response.refusal_reason = result.error or "SQL 安全检查失败"
+                response.trace.append(f"         [FAIL] {response.refusal_reason}")
+                # 保存证据：SQL 本身即 raw_output
+                self._save_raw_output_on_failure(
+                    question=question,
+                    stage="sql_safety",
+                    prompt_name="sql_planner",
+                    raw_output=exec_trace.generated_sql,
+                    parsed_output=plan.to_dict() if plan else {},
+                    parse_success=True,
+                    validation_success=False,
+                    error_message=response.refusal_reason,
+                )
+                return response
+
+            if result.error:
+                response.trace.append(f"         [ERROR] {result.error}")
 
         # ── Step 6: 中文解释 ──
         response.trace.append("[STEP 6] 生成解释...")
@@ -1050,12 +1154,33 @@ class Text2SQLAgent:
             # 收集指标名和表名用于生成清晰的错误消息
             metric_names = [p["metric"] for p in per_metric_plans]
             table_names = [p["planning_table"] or "未知" for p in per_metric_plans]
+
+            # ── Phase 2A：显式跨表检测 ──
+            # 判断是否属于跨表场景（同一指标在不同 planning_table）
+            unique_tables = set(t for t in table_names if t and t != "未知")
+            is_cross_table = len(unique_tables) > 1
+
+            if is_cross_table:
+                # 跨表多指标：显式标记，Phase 2B 将在此处拆分为 SubIntent
+                return SQLPlan(
+                    strategy=Strategy.UNSUPPORTED_MULTI_PLAN,
+                    downgrade_reason=(
+                        f"[cross_table_multi_metric] 已识别 {len(metric_names)} 个指标"
+                        f"（{', '.join(metric_names)}），"
+                        f"分布在 {len(unique_tables)} 张表"
+                        f"（{', '.join(sorted(unique_tables))}），"
+                        f"当前规则模式暂不支持跨表融合。"
+                        f"原因: {reason}"
+                        f"。建议分别查询每个指标。"
+                    ),
+                )
+
+            # 其他不兼容（strategy 不一致、group_by 不一致等）→ 仍然反问
             return SQLPlan(
                 strategy=Strategy.NEED_CLARIFICATION,
                 downgrade_reason=(
                     f"UNSUPPORTED_MULTI_METRIC: 已识别多个指标（{', '.join(metric_names)}），"
-                    f"但分布在不同表（{', '.join(table_names)}），"
-                    f"当前规则模式暂不支持跨表融合。"
+                    f"但查询计划不兼容。"
                     f"原因: {reason}"
                     f"。建议分别查询每个指标。"
                 ),
@@ -1087,6 +1212,100 @@ class Text2SQLAgent:
             downgrade_reason=merged_downgrade,
             confidence=0.95,
         )
+
+    # ═══════════════════════════════════════════════════════════
+    # Phase 2B：跨表多指标 → SubIntent 拆分 + 多计划生成
+    # ═══════════════════════════════════════════════════════════
+
+    def _split_into_sub_intents(
+        self, intent: QuestionIntent, per_metric_plans: list[dict[str, Any]],
+    ) -> list[SubIntent]:
+        """将跨表多指标按 planning_table 分组为 SubIntent 列表。
+
+        分组逻辑：
+            - 同一 planning_table 的指标合并到同一个 SubIntent
+            - 每个 SubIntent 继承父意图的 time_range 和 dimensions
+            - domain 取自第一个指标（按 planning_table 分组后的子域）
+
+        Args:
+            intent: 父级 QuestionIntent
+            per_metric_plans: _determine_single_metric_plan() 返回的列表
+
+        Returns:
+            按 planning_table 分组后的 SubIntent 列表
+        """
+        # 按 planning_table 分组
+        groups: dict[str, list[dict[str, Any]]] = {}
+        for plan_info in per_metric_plans:
+            table = plan_info.get("planning_table", "") or "未知"
+            groups.setdefault(table, []).append(plan_info)
+
+        sub_intents: list[SubIntent] = []
+        for table, plans in sorted(groups.items()):
+            metrics = [p["metric"] for p in plans]
+            # 取第一个非空 domain
+            domain = None
+            for p in plans:
+                d = p.get("domain")
+                if d:
+                    domain = d
+                    break
+            if domain is None:
+                domain = intent.domain
+
+            sub_intent = SubIntent(
+                metrics=metrics,
+                domain=domain,
+                planning_table=table,
+                time_range=intent.time_range,
+                dimensions=list(intent.dimensions) if intent.dimensions else ["date"],
+            )
+            sub_intents.append(sub_intent)
+
+        return sub_intents
+
+    def _plan_sub_intents(
+        self, sub_intents: list[SubIntent], parent_intent: QuestionIntent,
+    ) -> list[UnifiedResponse]:
+        """为每个 SubIntent 生成独立的 SQLPlan，返回 UnifiedResponse 列表。
+
+        每个 SubIntent 复用 _plan_query_rule() 的等价逻辑：
+            - 如果 SubIntent 只有 1 个指标 → 走单指标路径
+            - 如果 SubIntent 有多个指标 → 走同表合并路径（_plan_query_multi_metric）
+
+        Args:
+            sub_intents: 拆分后的子意图列表
+            parent_intent: 父级意图（用于传递 time_range / dimensions 等上下文）
+
+        Returns:
+            UnifiedResponse 列表，每个包含 sub_intent 和 plan
+        """
+        unified_responses: list[UnifiedResponse] = []
+
+        for si in sub_intents:
+            # 构造 mini intent（与 SubIntent 匹配的单意图）
+            mini_intent = QuestionIntent(
+                domain=si.domain,
+                intent_type=parent_intent.intent_type,
+                metrics=si.metrics,
+                time_range=si.time_range or parent_intent.time_range,
+                dimensions=si.dimensions,
+                confidence=0.95,
+                raw_question=parent_intent.raw_question,
+            )
+
+            # 复用现有规划逻辑
+            if len(si.metrics) == 1:
+                plan = self._plan_query_rule(mini_intent)
+            else:
+                plan = self._plan_query_multi_metric(mini_intent)
+
+            unified_responses.append(UnifiedResponse(
+                sub_intent=si,
+                plan=plan,
+            ))
+
+        return unified_responses
 
     def _plan_query_rule(self, intent: QuestionIntent) -> SQLPlan:
         """规则版查询规划，支持 G3→G2 降级。
