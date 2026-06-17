@@ -8,19 +8,10 @@
 检查顺序（fail-fast，第一项失败立即中断）：
     1. compileall  — 代码编译检查
     2. pytest      — 单元测试套件
-    3. harness     — 六项安全检查（含 Memory Gate）+ 五项观察期检查
+    3. harness     — 十一项安全检查（含 Memory Gate）
     4. mock 回归   — Mock Prompt Regression
     5. mock E2E    — Mock E2E Eval
 
-观察期检查（warn-only）：
-    以下 5 个安全检查处于观察期，发现问题仅警告，不阻断 fast gate：
-    - check_plan_executor_safety.py       (PlanExecutor 安全链路)
-    - check_execution_strategy_safety.py  (执行策略串行/隔离)
-    - check_result_fusion_safety.py       (LLM 融合 SQL/因果/编造检测)
-    - check_cross_domain_policy.py        (隐私保护/因果禁止/跨域降级)
-    - check_chart_spec_safety.py          (HTML/JS/LLM/DuckDB 禁止)
-
-    观察期结束后，经连续稳定运行验证，可升级为 error 模式（阻断）。
 
 快速门禁硬性约束：
     - 所有步骤使用 --provider mock，不接受 CLI 覆盖
@@ -52,38 +43,26 @@ from typing import Any
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# 观察期检查配置（warn-only）
+# 观察期检查配置（已结束）
 # ═══════════════════════════════════════════════════════════════════════════════
-# 这些检查处于观察期（observation mode），在 run_harness.py STEPS 中的索引（1-based）
-# 发现问题时打印 WARNING，不阻断 fast gate。
-# 仅基础设施错误（脚本不存在、Python 语法错误、超时）会导致失败。
-#
-# 索引对应关系（run_harness.py STEPS）：
-#   7 = check_execution_strategy_safety.py  (执行策略安全门禁)
-#   8 = check_result_fusion_safety.py       (LLM 融合安全门禁)
-#   9 = check_cross_domain_policy.py        (跨域策略安全门禁)
-#  10 = check_chart_spec_safety.py          (图表规格安全门禁)
-#  11 = check_plan_executor_safety.py       (PlanExecutor 安全门禁)
-#
-# 升级条件（全部满足后可将对应索引移出此列表）：
-#   1. 连续 30 天无规则误报
-#   2. 所有 warn 触达率 > 90%（该 warn 的规则确有对应业务代码变更）
-#   3. 团队确认接受该检查的阻断语义
-#   4. pre-commit 接入是最后一步，不在观察期内完成
-WARN_ONLY_CHECK_INDICES: list[int] = [7, 8, 9, 10, 11]
+# Step 9 已将原 steps 7-11 从观察期（warn-only）升级为阻断模式。
+# 保留 WARN_ONLY_CHECK_INDICES 空列表以兼容现有代码路径，
+# 正常运行时 warn_pass/warn_warn/warn_infra_fail 均为 0。
+WARN_ONLY_CHECK_INDICES: list[int] = []
 
-# 观察期检查对应的脚本路径（文档用，与上方索引一一对应）
-WARN_ONLY_CHECKS: list[str] = [
-    "harness/checks/check_execution_strategy_safety.py",
-    "harness/checks/check_result_fusion_safety.py",
-    "harness/checks/check_cross_domain_policy.py",
-    "harness/checks/check_chart_spec_safety.py",
-    "harness/checks/check_plan_executor_safety.py",
-]
+# 观察期检查对应的脚本路径（已清空，保留列表以兼容现有引用）
+WARN_ONLY_CHECKS: list[str] = []
 # ═══════════════════════════════════════════════════════════════════════════════
 
 # 快速门禁步骤定义（按执行顺序）
 # 格式: (步骤名称, 命令列表, 预期耗时估计)
+
+# 构建 harness 步骤命令（观察期结束后不再传 --warn-steps）
+_harness_cmd = [sys.executable, "harness/run_harness.py"]
+if WARN_ONLY_CHECK_INDICES:
+    _harness_cmd.extend(["--warn-steps", ",".join(str(i) for i in WARN_ONLY_CHECK_INDICES)])
+_harness_cmd.append("--json-summary")
+
 STEPS: list[dict[str, Any]] = [
     {
         "name": "compileall",
@@ -106,14 +85,8 @@ STEPS: list[dict[str, Any]] = [
     },
     {
         "name": "harness",
-        "display": "Harness 安全检查（6 项阻断 + 5 项观察期）",
-        "command": [
-            sys.executable,
-            "harness/run_harness.py",
-            "--warn-steps",
-            ",".join(str(i) for i in WARN_ONLY_CHECK_INDICES),
-            "--json-summary",
-        ],
+        "display": "Harness 安全检查（11 项阻断）",
+        "command": _harness_cmd,
         "estimate": "< 15s",
     },
     {
@@ -372,11 +345,13 @@ def render_markdown(report: FastGateReport) -> str:
         lines.append(f"- 退出码: {step['exit_code']}")
         if step.get("error_message"):
             lines.append(f"- 错误: {step['error_message']}")
-        # 观察期子检查统计
+        # 安全检查子项统计
         hs = step.get("harness_summary")
         if hs:
             lines.append(f"- 阻断检查: {hs.get('blocking_pass', 0)} 通过 / {hs.get('blocking_fail', 0)} 失败")
-            lines.append(f"- 观察期检查: {hs.get('warn_pass', 0)} 通过 / {hs.get('warn_warn', 0)} 警告 / {hs.get('warn_infra_fail', 0)} 基础设施失败")
+            # 仅在仍有观察期检查或存在非零 warn 数据时显示观察期行
+            if WARN_ONLY_CHECK_INDICES or hs.get('warn_pass', 0) > 0 or hs.get('warn_warn', 0) > 0:
+                lines.append(f"- 观察期检查: {hs.get('warn_pass', 0)} 通过 / {hs.get('warn_warn', 0)} 警告 / {hs.get('warn_infra_fail', 0)} 基础设施失败")
         lines.append("")
         if step.get("stdout"):
             lines.append("```text")
