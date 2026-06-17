@@ -469,32 +469,294 @@ def check_rule_index() -> dict[str, Any]:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-def load_memory_rules_registry() -> dict[str, Any] | None:
+def load_memory_rules_registry() -> dict[str, Any]:
     """加载 memory_rules.yml 并返回规则列表和解析状态。
 
+    Step 8a 增强：始终返回 dict，通过 load_error 字段区分失败原因。
+    调用方不再需要检查 None，改为检查 registry.get("load_error")。
+
     Returns:
-        {"rules": [...], "path": Path} 或 None（文件不存在/解析失败）
+        {"rules": [...], "path": Path, "load_error": None}   — 成功
+        {"rules": [], "path": Path, "load_error": str}        — 失败（含失败原因）
     """
     registry_path = PROJECT_ROOT / "docs/memory/memory_rules.yml"
 
     if not registry_path.exists():
-        return None
+        return {
+            "rules": [],
+            "path": registry_path,
+            "load_error": f"文件不存在: docs/memory/memory_rules.yml",
+        }
 
     try:
         import yaml
     except ImportError:
-        return None
+        return {
+            "rules": [],
+            "path": registry_path,
+            "load_error": "PyYAML 未安装，无法解析 memory_rules.yml",
+        }
 
     try:
         with open(registry_path, "r", encoding="utf-8") as fh:
             data = yaml.safe_load(fh)
-    except yaml.YAMLError:
-        return None
+    except yaml.YAMLError as exc:
+        return {
+            "rules": [],
+            "path": registry_path,
+            "load_error": f"YAML 格式错误: {exc}",
+        }
 
     if not data or "rules" not in data:
-        return None
+        return {
+            "rules": [],
+            "path": registry_path,
+            "load_error": "memory_rules.yml 缺少顶层 'rules' 键或内容为空",
+        }
 
-    return {"rules": data["rules"], "path": registry_path}
+    return {"rules": data["rules"], "path": registry_path, "load_error": None}
+
+
+def check_registry_infrastructure(
+    registry: dict[str, Any],
+) -> dict[str, Any]:
+    """Step 8a：检查 registry 基础设施完整性。
+
+    将可自动检测的错误分为 infrastructure_failures（→ FAIL）和
+    warnings（→ WARN），不再混在一起。
+
+    基础设施 FAIL 条件（7 项）：
+        1. docs/memory/memory_rules.yml 不存在
+        2. YAML 格式错误
+        3. duplicate rule_id
+        4. rule_id 前缀不符合 TA-Rxxx
+        5. scripts/generate_rule_index.py 执行失败
+        6. 生成的 规则来源索引.md 缺失核心字段
+        7. active + blocking=true 规则的 required_* 路径不存在
+
+    WARN 条件（不阻断）：
+        - proposed/blocking=false 规则的 required_* 路径不存在
+        - proposed/blocking=false 规则缺 required_checks/tests/evals
+
+    Returns:
+        {
+            "checks": [...],
+            "infrastructure_failures": int,
+            "warnings": int,
+            "pass_count": int,
+            "fail_count": int,
+        }
+    """
+    checks: list[dict[str, Any]] = []
+    infra_failures = 0
+    warnings = 0
+
+    # ── Infra-1/2: 文件不存在 / YAML 格式错误 ──
+    load_error = registry.get("load_error")
+    if load_error:
+        checks.append({
+            "name": "registry 文件加载",
+            "status": "FAIL",
+            "detail": load_error,
+        })
+        infra_failures += 1
+        return {
+            "checks": checks,
+            "infrastructure_failures": infra_failures,
+            "warnings": warnings,
+            "pass_count": 0,
+            "fail_count": infra_failures,
+        }
+
+    rules: list[dict[str, Any]] = registry["rules"]
+    registry_path: Path = registry["path"]
+
+    # ── Infra-3: duplicate rule_id ──
+    rule_ids = [r.get("rule_id", "?") for r in rules]
+    duplicates = sorted(set(rid for rid in rule_ids if rule_ids.count(rid) > 1))
+    if duplicates:
+        checks.append({
+            "name": "rule_id 唯一性",
+            "status": "FAIL",
+            "detail": f"发现重复 rule_id: {', '.join(duplicates)}",
+        })
+        infra_failures += 1
+    else:
+        checks.append({
+            "name": "rule_id 唯一性",
+            "status": "PASS",
+            "detail": f"全部 {len(rule_ids)} 条规则 ID 唯一",
+        })
+
+    # ── Infra-4: rule_id 前缀 TA-Rxxx ──
+    bad_prefix_ids: list[str] = []
+    for r in rules:
+        rid = r.get("rule_id", "?")
+        if not re.match(r"^TA-R\d+$", rid):
+            bad_prefix_ids.append(rid)
+    if bad_prefix_ids:
+        checks.append({
+            "name": "rule_id 前缀规范",
+            "status": "FAIL",
+            "detail": (
+                f"{len(bad_prefix_ids)} 条规则 ID 不符合 TA-Rxxx 规范: "
+                + ", ".join(bad_prefix_ids)
+            ),
+        })
+        infra_failures += 1
+    else:
+        checks.append({
+            "name": "rule_id 前缀规范",
+            "status": "PASS",
+            "detail": f"全部 {len(rule_ids)} 条规则符合 TA-Rxxx 前缀",
+        })
+
+    # ── Infra-5: generate_rule_index.py 执行成功 ──
+    index_script = PROJECT_ROOT / "scripts" / "generate_rule_index.py"
+    if not index_script.exists():
+        checks.append({
+            "name": "索引生成脚本存在",
+            "status": "FAIL",
+            "detail": f"脚本不存在: scripts/generate_rule_index.py",
+        })
+        infra_failures += 1
+    else:
+        try:
+            result = subprocess.run(
+                [sys.executable, str(index_script), "--check-only"],
+                cwd=PROJECT_ROOT,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=30,
+            )
+            if result.returncode != 0:
+                checks.append({
+                    "name": "索引生成脚本校验",
+                    "status": "FAIL",
+                    "detail": (
+                        f"generate_rule_index.py --check-only 返回 "
+                        f"exit code {result.returncode}:\n{result.stderr[:500]}"
+                    ),
+                })
+                infra_failures += 1
+            else:
+                checks.append({
+                    "name": "索引生成脚本校验",
+                    "status": "PASS",
+                    "detail": "generate_rule_index.py --check-only 执行成功",
+                })
+        except (subprocess.TimeoutExpired, OSError) as exc:
+            checks.append({
+                "name": "索引生成脚本校验",
+                "status": "FAIL",
+                "detail": f"执行 generate_rule_index.py 异常: {exc}",
+            })
+            infra_failures += 1
+
+    # ── Infra-6: 生成的 规则来源索引.md 包含核心字段 ──
+    index_md_path = PROJECT_ROOT / "docs" / "memory" / "规则来源索引.md"
+    if not index_md_path.exists():
+        checks.append({
+            "name": "索引 Markdown 存在",
+            "status": "FAIL",
+            "detail": f"文件不存在: docs/memory/规则来源索引.md（请运行 generate_rule_index.py）",
+        })
+        infra_failures += 1
+    else:
+        index_content = index_md_path.read_text(encoding="utf-8")
+        # 核心列名（必须出现在 Markdown 表格中）
+        required_columns = [
+            "rule_id", "title", "status", "blocking",
+            "risk_ids", "applies_to", "required_checks",
+            "required_tests", "required_evals",
+        ]
+        missing_cols = [c for c in required_columns if c not in index_content]
+        if missing_cols:
+            checks.append({
+                "name": "索引 Markdown 核心字段",
+                "status": "FAIL",
+                "detail": f"缺失核心列: {', '.join(missing_cols)}",
+            })
+            infra_failures += 1
+        else:
+            checks.append({
+                "name": "索引 Markdown 核心字段",
+                "status": "PASS",
+                "detail": "全部核心字段完整",
+            })
+
+    # ── Infra-7: active + blocking=true 规则的 required_* 路径存在性 ──
+    active_blocking_rules = [
+        r for r in rules
+        if r.get("status") == "active" and r.get("blocking") is True
+    ]
+    missing_path_errors: list[str] = []
+    for r in active_blocking_rules:
+        rid = r.get("rule_id", "?")
+        for field_name in ["required_checks", "required_tests", "required_evals"]:
+            for p in r.get(field_name, []):
+                full_path = PROJECT_ROOT / p
+                if not full_path.exists():
+                    missing_path_errors.append(
+                        f"{rid}.{field_name}: {p}（文件不存在）"
+                    )
+
+    if missing_path_errors:
+        checks.append({
+            "name": "active+blocking 规则路径存在性",
+            "status": "FAIL",
+            "detail": (
+                f"{len(missing_path_errors)} 个路径不存在:\n    "
+                + "\n    ".join(missing_path_errors)
+            ),
+        })
+        infra_failures += 1
+    elif active_blocking_rules:
+        checks.append({
+            "name": "active+blocking 规则路径存在性",
+            "status": "PASS",
+            "detail": f"{len(active_blocking_rules)} 条 active+blocking 规则路径全部存在",
+        })
+    else:
+        checks.append({
+            "name": "active+blocking 规则路径存在性",
+            "status": "PASS",
+            "detail": "当前无 active+blocking=true 规则，跳过路径存在性检查",
+        })
+
+    # ── WARN: proposed 规则缺 required_* ──
+    proposed_rules = [r for r in rules if r.get("status") == "proposed"]
+    proposed_missing: list[str] = []
+    for r in proposed_rules:
+        rid = r.get("rule_id", "?")
+        for field_name in ["required_checks", "required_tests", "required_evals"]:
+            values = r.get(field_name, [])
+            if not values:
+                proposed_missing.append(f"{rid}.{field_name} 为空")
+    if proposed_missing:
+        checks.append({
+            "name": "proposed 规则 coverage 缺口",
+            "status": "WARN",
+            "detail": (
+                f"{len(proposed_missing)} 项缺失（proposed 规则仅 WARN，不阻断）:\n    "
+                + "\n    ".join(proposed_missing[:10])
+                + ("\n    ..." if len(proposed_missing) > 10 else "")
+            ),
+        })
+        warnings += 1
+
+    pass_count = sum(1 for c in checks if c["status"] == "PASS")
+    fail_count = sum(1 for c in checks if c["status"] == "FAIL")
+
+    return {
+        "checks": checks,
+        "infrastructure_failures": infra_failures,
+        "warnings": warnings,
+        "pass_count": pass_count,
+        "fail_count": fail_count,
+    }
 
 
 def build_registry_reverse_index(rules: list[dict[str, Any]]) -> dict[str, list[str]]:
@@ -578,14 +840,18 @@ def check_registry_closure(
     rules: list[dict[str, Any]],
     reverse_index: dict[str, list[str]],
 ) -> dict[str, Any]:
-    """Step 6 Rule Closure：检查关键路径变更是否被规则注册表覆盖。
+    """Step 8a Rule Closure：检查关键路径变更是否被规则注册表覆盖。
+
+    Step 8a 增强：区分 active+blocking=true 规则的闭缺口（→ FAIL）和
+    proposed/blocking=false 规则的闭缺口（→ WARN）。
 
     对每个关键路径变更文件：
         1. 查找覆盖该文件的规则（通过反向索引）
-        2. 如果无规则覆盖 → WARN: 孤儿文件
+        2. 如果无规则覆盖 → WARN: 孤儿文件（不 FAIL）
         3. 如果是 check 文件变更 → 验证规则的 required_checks 是否包含该 check
         4. 如果是 test 文件变更 → 验证规则的 required_tests 是否包含该 test
         5. 如果是 eval 文件变更 → 验证规则的 required_evals 是否包含该 eval
+        6. 对于 active+blocking=true 规则的闭缺口 → FAIL
 
     Args:
         changed_files: 变更文件列表
@@ -593,10 +859,16 @@ def check_registry_closure(
         reverse_index: 文件→规则反向索引
 
     Returns:
-        {checks, pass_count, fail_count, coverage_matrix}
+        {checks, pass_count, fail_count, coverage_matrix,
+         active_blocking_closure_failures, proposed_closure_warnings}
     """
     checks: list[dict[str, Any]] = []
     coverage_matrix: dict[str, dict[str, Any]] = {}
+    active_blocking_closure_failures = 0
+    proposed_closure_warnings = 0
+
+    # 构建 rule_id → rule 索引
+    rule_map: dict[str, dict[str, Any]] = {r.get("rule_id", "?"): r for r in rules}
 
     if not rules:
         checks.append({
@@ -604,7 +876,12 @@ def check_registry_closure(
             "status": "FAIL",
             "detail": "memory_rules.yml 为空或无法解析，跳过闭环检查",
         })
-        return {"checks": checks, "pass_count": 0, "fail_count": 1, "coverage_matrix": {}}
+        return {
+            "checks": checks, "pass_count": 0, "fail_count": 1,
+            "coverage_matrix": {},
+            "active_blocking_closure_failures": 1,
+            "proposed_closure_warnings": 0,
+        }
 
     # 筛选关键路径变更
     critical_changes: list[tuple[str, str]] = []  # [(file_path, critical_pattern)]
@@ -619,7 +896,12 @@ def check_registry_closure(
             "status": "PASS",
             "detail": "未检测到关键路径变更，跳过闭环检查",
         })
-        return {"checks": checks, "pass_count": 1, "fail_count": 0, "coverage_matrix": {}}
+        return {
+            "checks": checks, "pass_count": 1, "fail_count": 0,
+            "coverage_matrix": {},
+            "active_blocking_closure_failures": 0,
+            "proposed_closure_warnings": 0,
+        }
 
     orphan_files: list[str] = []
     metadata_mismatches: list[dict[str, Any]] = []
@@ -641,51 +923,73 @@ def check_registry_closure(
 
         # 传播检测：check/test/eval 变更 → 验证规则的 required_* 字段
         for rid in covering_rules:
-            rule = next((r for r in rules if r.get("rule_id") == rid), None)
+            rule = rule_map.get(rid)
             if not rule:
                 continue
 
-            # check 文件 → 验证 required_checks
+            is_active_blocking = (
+                rule.get("status") == "active" and rule.get("blocking") is True
+            )
+
+            # check / scripts 文件 → 验证 required_checks
             if "harness/checks/" in file_path or "scripts/" in file_path:
                 req_checks = rule.get("required_checks", [])
                 if file_path not in req_checks:
-                    metadata_mismatches.append({
+                    issue = {
                         "file": file_path,
                         "rule": rid,
                         "field": "required_checks",
+                        "is_active_blocking": is_active_blocking,
                         "detail": (
                             f"{file_path} 变更但未被 {rid} 的 required_checks 包含，"
                             f"可能需要更新规则注册表"
                         ),
-                    })
+                    }
+                    metadata_mismatches.append(issue)
+                    if is_active_blocking:
+                        active_blocking_closure_failures += 1
+                    else:
+                        proposed_closure_warnings += 1
 
             # test 文件 → 验证 required_tests
             if "tests/" in file_path and file_path.endswith(".py"):
                 req_tests = rule.get("required_tests", [])
                 if file_path not in req_tests:
-                    metadata_mismatches.append({
+                    issue = {
                         "file": file_path,
                         "rule": rid,
                         "field": "required_tests",
+                        "is_active_blocking": is_active_blocking,
                         "detail": (
                             f"{file_path} 变更但未被 {rid} 的 required_tests 包含，"
                             f"可能需要更新规则注册表"
                         ),
-                    })
+                    }
+                    metadata_mismatches.append(issue)
+                    if is_active_blocking:
+                        active_blocking_closure_failures += 1
+                    else:
+                        proposed_closure_warnings += 1
 
             # eval 文件 → 验证 required_evals
             if "evals/" in file_path and file_path.endswith(".yml"):
                 req_evals = rule.get("required_evals", [])
                 if file_path not in req_evals:
-                    metadata_mismatches.append({
+                    issue = {
                         "file": file_path,
                         "rule": rid,
                         "field": "required_evals",
+                        "is_active_blocking": is_active_blocking,
                         "detail": (
                             f"{file_path} 变更但未被 {rid} 的 required_evals 包含，"
                             f"可能需要更新规则注册表"
                         ),
-                    })
+                    }
+                    metadata_mismatches.append(issue)
+                    if is_active_blocking:
+                        active_blocking_closure_failures += 1
+                    else:
+                        proposed_closure_warnings += 1
 
     # 构建输出
     checks.append({
@@ -707,6 +1011,7 @@ def check_registry_closure(
                 + "\n  建议: 在 memory_rules.yml 中新增或更新规则的 applies_to 字段"
             ),
         })
+        proposed_closure_warnings += len(orphan_files)
     else:
         checks.append({
             "name": "注册表闭环——孤儿文件",
@@ -715,9 +1020,10 @@ def check_registry_closure(
         })
 
     for mm in metadata_mismatches:
+        status = "FAIL" if mm.get("is_active_blocking") else "WARN"
         checks.append({
             "name": f"传播检测: {mm['file']} → {mm['rule']}.{mm['field']}",
-            "status": "WARN",
+            "status": status,
             "detail": mm["detail"],
         })
 
@@ -738,6 +1044,8 @@ def check_registry_closure(
         "pass_count": pass_count,
         "fail_count": fail_count,
         "coverage_matrix": coverage_matrix,
+        "active_blocking_closure_failures": active_blocking_closure_failures,
+        "proposed_closure_warnings": proposed_closure_warnings,
     }
 
 
@@ -817,8 +1125,12 @@ def print_report(
     changed_files: list[str],
     registry_closure_result: dict[str, Any] | None = None,
     registry_coverage_result: dict[str, Any] | None = None,
+    registry_infra_result: dict[str, Any] | None = None,
 ) -> int:
     """打印检查报告，返回退出码。
+
+    Step 8a 增强：退出码由 infrastructure_failures + active_blocking_closure_failures
+    决定。proposed 规则的 WARN 不影响退出码。
 
     Args:
         existence_result: 记忆文件存在性检查结果
@@ -827,8 +1139,9 @@ def print_report(
         risk_result: 风险清单检查结果
         index_result: 规则来源索引检查结果
         changed_files: 变更文件列表
-        registry_closure_result: （可选）--registry 模式下的闭环检查结果
-        registry_coverage_result: （可选）--registry 模式下的静态覆盖率结果
+        registry_closure_result: --registry 模式下的闭环检查结果
+        registry_coverage_result: --registry 模式下的静态覆盖率结果
+        registry_infra_result: --registry 模式下的基础设施检查结果
     """
     print("=" * 60)
     print("Memory Gate —— 记忆更新检查")
@@ -885,6 +1198,15 @@ def print_report(
         if c.get("detail"):
             print(f"         {c['detail']}")
 
+    # ── Registry 基础设施状态（Step 8a）──
+    if registry_infra_result is not None:
+        print("\n── Registry 基础设施状态 ──")
+        for c in registry_infra_result["checks"]:
+            tag = c["status"]
+            print(f"  [{tag}] {c['name']}")
+            if c.get("detail"):
+                print(f"         {c['detail']}")
+
     # Step 6: Registry Closure（--registry 模式）
     if registry_closure_result is not None:
         print("\n── Step 6 规则闭环（Registry Closure）──")
@@ -911,11 +1233,51 @@ def print_report(
             if c.get("detail"):
                 print(f"         {c['detail']}")
 
+    # ── Registry 状态汇总（Step 8a）──
+    if registry_infra_result is not None:
+        infra_failures = registry_infra_result.get("infrastructure_failures", 0)
+        infra_warnings = registry_infra_result.get("warnings", 0)
+        closure_active_failures = (
+            registry_closure_result.get("active_blocking_closure_failures", 0)
+            if registry_closure_result else 0
+        )
+        closure_proposed_warnings = (
+            registry_closure_result.get("proposed_closure_warnings", 0)
+            if registry_closure_result else 0
+        )
+
+        # 确定 registry 最终状态
+        if infra_failures > 0 or closure_active_failures > 0:
+            registry_status = "FAIL"
+        elif infra_warnings > 0 or closure_proposed_warnings > 0:
+            registry_status = "WARN"
+        else:
+            registry_status = "PASS"
+
+        print(f"\n── Registry 状态汇总 ──")
+        # 判断 registry 是否成功加载：load_error 为空且无 FAIL 状态的基础设施检查指向加载失败
+        load_failed = any(
+            '文件不存在' in c.get('detail', '')
+            or 'YAML 格式错误' in c.get('detail', '')
+            or 'PyYAML' in c.get('detail', '')
+            or '缺少顶层' in c.get('detail', '')
+            for c in registry_infra_result.get('checks', [])
+            if c['status'] == 'FAIL'
+        )
+        print(f"  registry loaded: {'no' if load_failed else 'yes'}")
+        print(f"  infrastructure failures: {infra_failures}")
+        print(f"  infrastructure warnings: {infra_warnings}")
+        print(f"  active blocking closure failures: {closure_active_failures}")
+        print(f"  proposed closure warnings: {closure_proposed_warnings}")
+        print(f"  final registry status: {registry_status}")
+
     # 汇总（包含 registry 结果）
     all_results = [
         existence_result, coverage_result, quality_result,
         risk_result, index_result,
     ]
+    if registry_infra_result is not None:
+        all_results.append(registry_infra_result)
     if registry_closure_result is not None:
         all_results.append(registry_closure_result)
     if registry_coverage_result is not None:
@@ -931,6 +1293,10 @@ def print_report(
 
     print(f"\n  检查完成 — 通过: {total_pass}, 失败: {total_fail}, 提醒: {total_warn}")
 
+    # ── Step 8a 退出码逻辑 ──
+    # infrastructure_failures > 0 → exit 1
+    # active+blocking=true closure_failures > 0 → exit 1
+    # 仅 WARN（含 proposed closure warnings）→ exit 0
     if total_fail > 0:
         print(f"\n[FAIL] Memory Gate: 发现 {total_fail} 项失败！")
         print("")
@@ -973,13 +1339,19 @@ def main() -> int:
     args = parser.parse_args()
 
     # ── 注册表闭环检查（可在 content-only 或完整模式下启用） ──
+    registry_infra_result: dict[str, Any] | None = None
     registry_closure_result: dict[str, Any] | None = None
     registry_coverage_result: dict[str, Any] | None = None
 
     if args.registry:
         registry = load_memory_rules_registry()
-        if registry:
-            rules = registry["rules"]
+        rules = registry["rules"]
+
+        # Step 8a: 基础设施检查（始终运行，包含 7 项 FAIL 条件）
+        registry_infra_result = check_registry_infrastructure(registry)
+
+        # 仅在加载成功时运行后续检查
+        if not registry.get("load_error"):
             reverse_index = build_registry_reverse_index(rules)
 
             # 静态覆盖率（始终运行）
@@ -991,20 +1363,6 @@ def main() -> int:
                 registry_closure_result = check_registry_closure(
                     changed_files_all, rules, reverse_index
                 )
-        else:
-            # 注册表加载失败
-            registry_coverage_result = {
-                "checks": [{
-                    "name": "注册表加载",
-                    "status": "FAIL",
-                    "detail": (
-                        "无法加载 docs/memory/memory_rules.yml。"
-                        "请确认文件存在且 YAML 语法正确。"
-                    ),
-                }],
-                "pass_count": 0,
-                "fail_count": 1,
-            }
 
     if args.content_only:
         quality_result = check_entry_quality()
@@ -1021,6 +1379,7 @@ def main() -> int:
             [],
             registry_closure_result=registry_closure_result,
             registry_coverage_result=registry_coverage_result,
+            registry_infra_result=registry_infra_result,
         )
 
     # 完整模式
@@ -1042,6 +1401,7 @@ def main() -> int:
         changed_files,
         registry_closure_result=registry_closure_result,
         registry_coverage_result=registry_coverage_result,
+        registry_infra_result=registry_infra_result,
     )
 
 

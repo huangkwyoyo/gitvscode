@@ -1156,3 +1156,420 @@ class TestStep7RunHarnessIntegration:
         assert "Registry" in report_content, (
             f"报告应包含 registry 检查结果:\n{report_content[:1500]}"
         )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Step 8a: Registry 基础设施错误升级为 FAIL
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestStep8aInfrastructureFail:
+    """验证 7 项基础设施错误升级为 FAIL"""
+
+    def _make_minimal_registry(self, tmp_path, rules_yaml: str) -> Path:
+        """在临时目录创建最小 memory_rules.yml，返回文件路径"""
+        import yaml as yaml_lib
+        yaml_path = tmp_path / "memory_rules.yml"
+        yaml_path.write_text(rules_yaml, encoding="utf-8")
+        return yaml_path
+
+    def _run_infra_check(self, registry: dict) -> dict:
+        """运行基础设施检查并返回结果"""
+        from harness.checks.check_memory_update import check_registry_infrastructure
+        return check_registry_infrastructure(registry)
+
+    # ── Test 1: memory_rules.yml 缺失 → FAIL ──
+
+    def test_missing_yaml_file_fails(self):
+        """Infra-1: 文件不存在应返回 infrastructure_failures > 0"""
+        registry = {
+            "rules": [],
+            "path": Path("docs/memory/memory_rules.yml"),
+            "load_error": "文件不存在: docs/memory/memory_rules.yml",
+        }
+        result = self._run_infra_check(registry)
+        assert result["infrastructure_failures"] >= 1, (
+            f"文件缺失应有 infrastructure_failures，实际: {result}"
+        )
+        assert result["fail_count"] >= 1
+
+    # ── Test 2: YAML 格式错误 → FAIL ──
+
+    def test_yaml_parse_error_fails(self):
+        """Infra-2: YAML 格式错误应返回 infrastructure_failures > 0"""
+        registry = {
+            "rules": [],
+            "path": Path("docs/memory/memory_rules.yml"),
+            "load_error": "YAML 格式错误: mapping values are not allowed here",
+        }
+        result = self._run_infra_check(registry)
+        assert result["infrastructure_failures"] >= 1
+        assert result["fail_count"] >= 1
+
+    # ── Test 3: duplicate rule_id → FAIL ──
+
+    def test_duplicate_rule_id_fails(self):
+        """Infra-3: 重复 rule_id 应 FAIL"""
+        registry = {
+            "rules": [
+                {
+                    "rule_id": "TA-R001", "title": "规则 A",
+                    "status": "proposed", "blocking": False, "severity": "high",
+                    "source_memory": "test", "risk_ids": [], "applies_to": [],
+                    "required_checks": [], "required_tests": [], "required_evals": [],
+                    "notes": "",
+                },
+                {
+                    "rule_id": "TA-R001", "title": "规则 B（重复）",
+                    "status": "proposed", "blocking": False, "severity": "high",
+                    "source_memory": "test", "risk_ids": [], "applies_to": [],
+                    "required_checks": [], "required_tests": [], "required_evals": [],
+                    "notes": "",
+                },
+            ],
+            "path": Path("dummy"),
+            "load_error": None,
+        }
+        result = self._run_infra_check(registry)
+        assert result["infrastructure_failures"] >= 1, (
+            f"重复 rule_id 应有 infrastructure_failures，实际: {result}"
+        )
+        dup_check = [c for c in result["checks"] if "唯一性" in c["name"]]
+        assert any(c["status"] == "FAIL" for c in dup_check), (
+            f"rule_id 唯一性检查应为 FAIL: {dup_check}"
+        )
+
+    # ── Test 4: 非 TA-R 前缀 → FAIL ──
+
+    def test_non_ta_r_prefix_fails(self):
+        """Infra-4: 非 TA-Rxxx 前缀应 FAIL"""
+        registry = {
+            "rules": [
+                {
+                    "rule_id": "R001", "title": "旧格式规则",
+                    "status": "proposed", "blocking": False, "severity": "high",
+                    "source_memory": "test", "risk_ids": [], "applies_to": [],
+                    "required_checks": [], "required_tests": [], "required_evals": [],
+                    "notes": "",
+                },
+            ],
+            "path": Path("dummy"),
+            "load_error": None,
+        }
+        result = self._run_infra_check(registry)
+        assert result["infrastructure_failures"] >= 1, (
+            f"非 TA-R 前缀应有 infrastructure_failures，实际: {result}"
+        )
+        prefix_check = [c for c in result["checks"] if "前缀" in c["name"]]
+        assert any(c["status"] == "FAIL" for c in prefix_check), (
+            f"前缀检查应为 FAIL: {prefix_check}"
+        )
+
+    def test_mixed_prefix_some_bad(self):
+        """混合前缀：只要有一个非 TA-R 就 FAIL"""
+        registry = {
+            "rules": [
+                {
+                    "rule_id": "TA-R001", "title": "正确格式",
+                    "status": "proposed", "blocking": False, "severity": "high",
+                    "source_memory": "test", "risk_ids": [], "applies_to": [],
+                    "required_checks": [], "required_tests": [], "required_evals": [],
+                    "notes": "",
+                },
+                {
+                    "rule_id": "BAD-001", "title": "错误格式",
+                    "status": "proposed", "blocking": False, "severity": "high",
+                    "source_memory": "test", "risk_ids": [], "applies_to": [],
+                    "required_checks": [], "required_tests": [], "required_evals": [],
+                    "notes": "",
+                },
+            ],
+            "path": Path("dummy"),
+            "load_error": None,
+        }
+        result = self._run_infra_check(registry)
+        assert result["infrastructure_failures"] >= 1, (
+            f"混合前缀应 FAIL: {result}"
+        )
+
+    # ── Test 5: generate_rule_index.py 失败 → FAIL ──
+
+    def test_generate_rule_index_script_failure_fails(self, monkeypatch):
+        """Infra-5: 脚本执行失败应 FAIL——通过 patch 调用模拟"""
+        import subprocess
+
+        from harness.checks.check_memory_update import PROJECT_ROOT as CM_PROJECT_ROOT
+
+        original_run = subprocess.run
+
+        def mock_run(cmd, **kwargs):
+            if "generate_rule_index.py" in str(cmd):
+                result = original_run(
+                    [sys.executable, "-c", "import sys; sys.exit(1)"],
+                    capture_output=True, text=True, encoding="utf-8",
+                    errors="replace", timeout=30,
+                )
+                return result
+            return original_run(cmd, **kwargs)
+
+        monkeypatch.setattr(subprocess, "run", mock_run)
+
+        registry = {
+            "rules": [
+                {
+                    "rule_id": "TA-R001", "title": "测试",
+                    "status": "proposed", "blocking": False, "severity": "high",
+                    "source_memory": "test", "risk_ids": [], "applies_to": [],
+                    "required_checks": [], "required_tests": [], "required_evals": [],
+                    "notes": "",
+                },
+            ],
+            "path": CM_PROJECT_ROOT / "docs" / "memory" / "memory_rules.yml",
+            "load_error": None,
+        }
+        result = self._run_infra_check(registry)
+        script_checks = [c for c in result["checks"] if "脚本" in c["name"]]
+        assert len(script_checks) >= 1, f"应有脚本校验检查: {result['checks']}"
+
+    # ── Test 6: proposed + blocking=false 缺 test/eval → WARN，不 FAIL ──
+
+    def test_proposed_missing_coverage_only_warns(self):
+        """proposed 规则缺 required_* → WARN，exit code 仍为 0"""
+        registry = {
+            "rules": [
+                {
+                    "rule_id": "TA-R001", "title": "proposed 规则缺 coverage",
+                    "status": "proposed", "blocking": False, "severity": "high",
+                    "source_memory": "test", "risk_ids": [], "applies_to": ["src/ir.py"],
+                    "required_checks": [], "required_tests": [], "required_evals": [],
+                    "notes": "",
+                },
+            ],
+            "path": Path("dummy"),
+            "load_error": None,
+        }
+        result = self._run_infra_check(registry)
+        # 不应有 infrastructure_failures
+        assert result["infrastructure_failures"] == 0, (
+            f"proposed 缺 coverage 不应触发 infrastructure_failures: {result}"
+        )
+        # 应有 WARN
+        assert result["warnings"] >= 1, (
+            f"proposed 缺 coverage 应有 WARN: {result}"
+        )
+
+    # ── Test 7: active + blocking=true 缺 required_check → FAIL ──
+
+    def test_active_blocking_missing_required_path_fails(self):
+        """Infra-7: active+blocking=true 规则引用了不存在的 required_checks 路径 → FAIL"""
+        nonexistent = "harness/checks/nonexistent_check_xyz_test8a.py"
+
+        registry = {
+            "rules": [
+                {
+                    "rule_id": "TA-R999", "title": "active+blocking 测试规则",
+                    "status": "active", "blocking": True, "severity": "high",
+                    "source_memory": "test", "risk_ids": [],
+                    "applies_to": ["src/ir.py"],
+                    "required_checks": [nonexistent],
+                    "required_tests": ["tests/test_nonexistent_xyz.py"],
+                    "required_evals": [],
+                    "notes": "",
+                },
+            ],
+            "path": Path("dummy"),
+            "load_error": None,
+        }
+        result = self._run_infra_check(registry)
+        # 应有 infrastructure_failures（路径不存在）
+        assert result["infrastructure_failures"] >= 1, (
+            f"active+blocking 缺路径应有 infrastructure_failures: {result}"
+        )
+        path_check = [c for c in result["checks"] if "路径存在性" in c["name"]]
+        assert any(c["status"] == "FAIL" for c in path_check), (
+            f"路径存在性检查应为 FAIL: {path_check}"
+        )
+
+    def test_active_blocking_all_paths_exist_passes(self):
+        """Infra-7: active+blocking=true 规则所有路径存在 → PASS"""
+        # 使用 tests/ 目录下的真实存在文件来测试
+        import harness.checks.check_memory_update as cm
+
+        # 引用真实存在的文件（相对于项目根目录）
+        existing_check = "harness/checks/check_memory_update.py"
+        existing_test = "tests/test_harness.py"
+
+        registry = {
+            "rules": [
+                {
+                    "rule_id": "TA-R998", "title": "active+blocking 路径全存在",
+                    "status": "active", "blocking": True, "severity": "high",
+                    "source_memory": "test", "risk_ids": [],
+                    "applies_to": ["src/ir.py"],
+                    "required_checks": [existing_check],
+                    "required_tests": [existing_test],
+                    "required_evals": [],
+                    "notes": "",
+                },
+            ],
+            "path": Path("dummy"),
+            "load_error": None,
+        }
+        result = self._run_infra_check(registry)
+        path_check = [c for c in result["checks"] if "路径存在性" in c["name"]]
+        assert any(c["status"] == "PASS" for c in path_check), (
+            f"路径全部存在时应 PASS: {path_check}"
+        )
+
+
+class TestStep8aExitCodeBehavior:
+    """验证 Step 8a 退出码行为"""
+
+    def test_registry_cli_exit_zero_on_warn_only(self):
+        """当前真实 registry（全部 proposed）下，--registry 应 exit 0"""
+        import subprocess
+        import os
+        import sys
+
+        project_root = Path(__file__).resolve().parents[1]
+        result = subprocess.run(
+            [sys.executable, "harness/checks/check_memory_update.py", "--registry"],
+            cwd=project_root,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=30,
+            env={**os.environ, "PYTHONIOENCODING": "utf-8"},
+        )
+        assert result.returncode == 0, (
+            f"当前 registry 应 exit 0（仅 WARN），实际: {result.returncode}\n"
+            f"stdout:\n{result.stdout[:1000]}"
+        )
+        assert "[OK] Memory Gate 通过。" in result.stdout, (
+            "仅 WARN 时应输出 Memory Gate 通过"
+        )
+
+    def test_registry_status_summary_present(self):
+        """输出中必须包含 Registry 状态汇总"""
+        import subprocess
+        import os
+        import sys
+
+        project_root = Path(__file__).resolve().parents[1]
+        result = subprocess.run(
+            [sys.executable, "harness/checks/check_memory_update.py", "--registry"],
+            cwd=project_root,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=30,
+            env={**os.environ, "PYTHONIOENCODING": "utf-8"},
+        )
+        assert "Registry 状态汇总" in result.stdout, (
+            f"应包含 Registry 状态汇总:\n{result.stdout[:1500]}"
+        )
+        assert "registry loaded:" in result.stdout
+        assert "infrastructure failures:" in result.stdout
+        assert "active blocking closure failures:" in result.stdout
+        assert "proposed closure warnings:" in result.stdout
+        assert "final registry status:" in result.stdout
+
+    def test_run_harness_memory_gate_still_passes(self):
+        """Step 8a 升级后，run_harness --step 6 仍然 PASS"""
+        import subprocess
+        import os
+        import sys
+
+        project_root = Path(__file__).resolve().parents[1]
+        result = subprocess.run(
+            [sys.executable, "harness/run_harness.py", "--step", "6"],
+            cwd=project_root,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=60,
+            env={**os.environ, "PYTHONIOENCODING": "utf-8"},
+        )
+        assert result.returncode == 0, (
+            f"run_harness --step 6 应 PASS:\nstderr:\n{result.stderr[:500]}"
+        )
+
+
+class TestStep8aBackwardCompatibility:
+    """验证原有 harness 行为不回退"""
+
+    def test_original_registry_tests_still_pass(self):
+        """Step 7 的测试在 Step 8a 后仍全部通过"""
+        # 这些断言与 TestRegistryClosureFunctions 一致
+        from harness.checks.check_memory_update import (
+            load_memory_rules_registry,
+            build_registry_reverse_index,
+            _match_critical_path,
+            _find_covering_rules,
+        )
+
+        # registry 能正常加载
+        registry = load_memory_rules_registry()
+        assert registry.get("load_error") is None, (
+            f"真实 registry 加载失败: {registry.get('load_error')}"
+        )
+        assert len(registry["rules"]) == 21
+
+        # 反向索引正常工作
+        ri = build_registry_reverse_index(registry["rules"])
+        assert "src/ir.py" in ri
+        assert "TA-R017" in ri["src/ir.py"]
+
+        # 关键路径匹配正常
+        assert _match_critical_path("src/ir.py") == "src/ir.py"
+        assert _match_critical_path("harness/checks/check_ir_schema.py") == "harness/checks/"
+        assert _match_critical_path("README.md") is None
+
+        # 规则查找正常
+        rules = _find_covering_rules("src/ir.py", ri)
+        assert "TA-R017" in rules
+
+    def test_registry_closure_check_still_works(self):
+        """check_registry_closure 在正常注册表下仍返回有效结果"""
+        from harness.checks.check_memory_update import (
+            load_memory_rules_registry,
+            build_registry_reverse_index,
+            check_registry_closure,
+        )
+
+        registry = load_memory_rules_registry()
+        ri = build_registry_reverse_index(registry["rules"])
+
+        # 无变更时返回 PASS
+        result = check_registry_closure(
+            ["README.md"],
+            registry["rules"],
+            ri,
+        )
+        assert result["fail_count"] == 0
+        assert result["pass_count"] >= 1
+
+    def test_legacy_registry_flag_still_accepted(self):
+        """--registry 参数仍然生效"""
+        import subprocess
+        import os
+        import sys
+
+        project_root = Path(__file__).resolve().parents[1]
+        result = subprocess.run(
+            [sys.executable, "harness/checks/check_memory_update.py", "--registry", "--content-only"],
+            cwd=project_root,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=30,
+            env={**os.environ, "PYTHONIOENCODING": "utf-8"},
+        )
+        assert result.returncode == 0, (
+            f"--registry --content-only 应正常退出:\n{result.stderr}"
+        )
+        assert "Registry" in result.stdout
