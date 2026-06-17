@@ -314,7 +314,7 @@ class TestProposedNotBlocking:
                 f"{rid}: Step 5 所有规则 blocking 应为 false，实际: {rule['blocking']}"
             )
 
-    def test_proposed_with_blocking_true_warns(self):
+    def test_proposed_with_blocking_true_warns(self, tmp_path):
         """proposed + blocking=true 应产生警告"""
         import yaml
 
@@ -333,10 +333,6 @@ rules:
     required_evals: []
     notes: ""
 """
-        yaml_path = tmp_path = (
-            Path(__file__).resolve().parent / "tmp_test_registry"
-        )
-        tmp_path.mkdir(exist_ok=True)
         yaml_file = tmp_path / "proposed_blocking.yml"
         yaml_file.write_text(yaml_content, encoding="utf-8")
         rules = load_rules(yaml_file)
@@ -348,7 +344,7 @@ rules:
             f"警告应提及 blocking=true: {warnings}"
         )
 
-    def test_active_with_blocking_true_info(self):
+    def test_active_with_blocking_true_info(self, tmp_path):
         """active + blocking=true 应产生提示信息"""
         import yaml
 
@@ -367,8 +363,6 @@ rules:
     required_evals: []
     notes: ""
 """
-        tmp_path = Path(__file__).resolve().parent / "tmp_test_registry"
-        tmp_path.mkdir(exist_ok=True)
         yaml_file = tmp_path / "active_blocking.yml"
         yaml_file.write_text(yaml_content, encoding="utf-8")
         rules = load_rules(yaml_file)

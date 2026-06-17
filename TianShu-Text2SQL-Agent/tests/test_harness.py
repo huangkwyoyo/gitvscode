@@ -640,3 +640,309 @@ class TestHarnessWarnModeStep3:
         finally:
             if temp_script.exists():
                 temp_script.unlink()
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Step 6: Registry Closure 测试（check_memory_update.py --registry）
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestRegistryClosureFunctions:
+    """验证 registry closure 的基础函数"""
+
+    def test_load_memory_rules_registry_succeeds(self):
+        """load_memory_rules_registry 能成功加载 memory_rules.yml"""
+        from harness.checks.check_memory_update import load_memory_rules_registry
+
+        registry = load_memory_rules_registry()
+        assert registry is not None, "registry 应能成功加载"
+        assert "rules" in registry, "registry 应包含 rules 键"
+        assert len(registry["rules"]) == 9, (
+            f"期望 9 条规则，实际: {len(registry['rules'])}"
+        )
+
+    def test_build_registry_reverse_index_structure(self):
+        """反向索引应有正确的结构"""
+        from harness.checks.check_memory_update import (
+            load_memory_rules_registry,
+            build_registry_reverse_index,
+        )
+
+        registry = load_memory_rules_registry()
+        reverse_index = build_registry_reverse_index(registry["rules"])
+
+        assert isinstance(reverse_index, dict), "反向索引必须是字典"
+        assert len(reverse_index) > 0, "反向索引不能为空"
+        assert "src/ir.py" in reverse_index, "src/ir.py 应在反向索引中"
+        assert "evals/e2e_cases.yml" in reverse_index, (
+            "evals/e2e_cases.yml 应在反向索引中"
+        )
+
+    def test_reverse_index_multiple_rules_per_file(self):
+        """一个文件可被多条规则覆盖"""
+        from harness.checks.check_memory_update import (
+            load_memory_rules_registry,
+            build_registry_reverse_index,
+        )
+
+        registry = load_memory_rules_registry()
+        reverse_index = build_registry_reverse_index(registry["rules"])
+
+        eval_rules = reverse_index.get("evals/e2e_cases.yml", [])
+        assert len(eval_rules) >= 3, (
+            f"e2e_cases.yml 应被至少 3 条规则覆盖，实际: {len(eval_rules)}"
+        )
+
+    def test_match_critical_path_exact(self):
+        """_match_critical_path 精确匹配"""
+        from harness.checks.check_memory_update import _match_critical_path
+
+        assert _match_critical_path("src/ir.py") == "src/ir.py"
+        assert _match_critical_path("src/agent.py") == "src/agent.py"
+
+    def test_match_critical_path_directory_prefix(self):
+        """_match_critical_path 目录前缀匹配"""
+        from harness.checks.check_memory_update import _match_critical_path
+
+        assert _match_critical_path("harness/checks/check_ir_schema.py") == "harness/checks/"
+        assert _match_critical_path("evals/e2e_cases.yml") == "evals/"
+        assert _match_critical_path("harness/baselines/dual_baseline.py") == "harness/baselines/"
+
+    def test_match_critical_path_no_match(self):
+        """_match_critical_path 不匹配非关键路径"""
+        from harness.checks.check_memory_update import _match_critical_path
+
+        assert _match_critical_path("README.md") is None
+        assert _match_critical_path("docs/random_file.md") is None
+        assert _match_critical_path("tests/test_nonexistent.py") is None
+
+    def test_find_covering_rules_exact_match(self):
+        """_find_covering_rules 精确匹配"""
+        from harness.checks.check_memory_update import (
+            load_memory_rules_registry,
+            build_registry_reverse_index,
+            _find_covering_rules,
+        )
+
+        registry = load_memory_rules_registry()
+        ri = build_registry_reverse_index(registry["rules"])
+
+        rules = _find_covering_rules("src/ir.py", ri)
+        assert "TA-R017" in rules, (
+            f"src/ir.py 应被 TA-R017 覆盖，实际: {rules}"
+        )
+
+    def test_find_covering_rules_directory_prefix(self):
+        """_find_covering_rules 目录前缀匹配"""
+        from harness.checks.check_memory_update import (
+            load_memory_rules_registry,
+            build_registry_reverse_index,
+            _find_covering_rules,
+        )
+
+        registry = load_memory_rules_registry()
+        ri = build_registry_reverse_index(registry["rules"])
+
+        rules = _find_covering_rules("harness/checks/check_refusal_policy.py", ri)
+        assert len(rules) >= 1, (
+            f"harness/checks/check_refusal_policy.py 应被至少 1 条规则覆盖"
+        )
+
+    def test_find_covering_rules_no_match(self):
+        """_find_covering_rules 孤儿文件返回空列表"""
+        from harness.checks.check_memory_update import (
+            load_memory_rules_registry,
+            build_registry_reverse_index,
+            _find_covering_rules,
+        )
+
+        registry = load_memory_rules_registry()
+        ri = build_registry_reverse_index(registry["rules"])
+
+        rules = _find_covering_rules("README.md", ri)
+        assert rules == [], f"README.md 不应被任何规则覆盖"
+
+
+class TestRegistryClosureCheck:
+    """验证 check_registry_closure 的主要逻辑"""
+
+    def test_no_critical_changes_returns_pass(self):
+        """无关键路径变更时应返回 PASS"""
+        from harness.checks.check_memory_update import (
+            load_memory_rules_registry,
+            build_registry_reverse_index,
+            check_registry_closure,
+        )
+
+        registry = load_memory_rules_registry()
+        ri = build_registry_reverse_index(registry["rules"])
+
+        result = check_registry_closure(
+            ["README.md", "docs/something.md"],
+            registry["rules"],
+            ri,
+        )
+        assert result["fail_count"] == 0
+        assert result["pass_count"] >= 1
+
+    def test_orphan_file_detected(self):
+        """孤儿文件（关键路径变更但无规则覆盖）应被检测"""
+        from harness.checks.check_memory_update import (
+            load_memory_rules_registry,
+            build_registry_reverse_index,
+            check_registry_closure,
+        )
+
+        registry = load_memory_rules_registry()
+        ri = build_registry_reverse_index(registry["rules"])
+
+        result = check_registry_closure(
+            ["src/executor.py"],
+            registry["rules"],
+            ri,
+        )
+        assert result["coverage_matrix"]["src/executor.py"]["is_orphan"] is True
+
+    def test_covered_file_not_orphan(self):
+        """被规则覆盖的文件不应标记为孤儿"""
+        from harness.checks.check_memory_update import (
+            load_memory_rules_registry,
+            build_registry_reverse_index,
+            check_registry_closure,
+        )
+
+        registry = load_memory_rules_registry()
+        ri = build_registry_reverse_index(registry["rules"])
+
+        result = check_registry_closure(
+            ["src/ir.py"],
+            registry["rules"],
+            ri,
+        )
+        assert result["coverage_matrix"]["src/ir.py"]["is_orphan"] is False
+        assert "TA-R017" in result["coverage_matrix"]["src/ir.py"]["covered_by"]
+
+    def test_empty_rules_returns_fail(self):
+        """空规则列表应返回 FAIL"""
+        from harness.checks.check_memory_update import check_registry_closure
+
+        result = check_registry_closure(["src/ir.py"], [], {})
+        assert result["fail_count"] >= 1
+
+
+class TestRegistryCoverageCheck:
+    """验证 check_registry_coverage 静态覆盖率"""
+
+    def test_static_coverage_returns_result(self):
+        """静态覆盖率应返回检查结果"""
+        from harness.checks.check_memory_update import (
+            load_memory_rules_registry,
+            build_registry_reverse_index,
+            check_registry_coverage,
+        )
+
+        registry = load_memory_rules_registry()
+        ri = build_registry_reverse_index(registry["rules"])
+
+        result = check_registry_coverage(registry["rules"], ri)
+        has_pass = any(c["status"] == "PASS" for c in result["checks"])
+        assert has_pass, "至少应有 PASS 检查"
+
+    def test_static_coverage_empty_rules(self):
+        """空规则列表应返回 SKIP"""
+        from harness.checks.check_memory_update import check_registry_coverage
+
+        result = check_registry_coverage([], {})
+        assert any(c["status"] == "SKIP" for c in result["checks"])
+
+
+class TestRegistryCriticalPaths:
+    """验证 Step 5-6 新增的关键路径和记忆文件"""
+
+    def test_memory_rules_yml_in_critical_paths(self):
+        """memory_rules.yml 应在 CRITICAL_PATHS 中"""
+        from harness.checks.check_memory_update import CRITICAL_PATHS
+        assert "docs/memory/memory_rules.yml" in CRITICAL_PATHS
+
+    def test_generate_rule_index_in_critical_paths(self):
+        """generate_rule_index.py 应在 CRITICAL_PATHS 中"""
+        from harness.checks.check_memory_update import CRITICAL_PATHS
+        assert "scripts/generate_rule_index.py" in CRITICAL_PATHS
+
+    def test_memory_rules_yml_in_memory_files(self):
+        """memory_rules.yml 应在 MEMORY_FILES 中"""
+        from harness.checks.check_memory_update import MEMORY_FILES
+        assert "docs/memory/memory_rules.yml" in MEMORY_FILES
+
+    def test_new_paths_have_memory_hints(self):
+        """新增关键路径应有 memory hint"""
+        from harness.checks.check_memory_update import CHANGE_MEMORY_HINTS
+
+        assert "docs/memory/memory_rules.yml" in CHANGE_MEMORY_HINTS
+        assert "scripts/generate_rule_index.py" in CHANGE_MEMORY_HINTS
+        assert "注册表" in CHANGE_MEMORY_HINTS["docs/memory/memory_rules.yml"]
+        assert "索引" in CHANGE_MEMORY_HINTS["scripts/generate_rule_index.py"]
+
+
+class TestRegistryCliFlag:
+    """验证 --registry CLI 标志"""
+
+    def test_registry_flag_succeeds(self):
+        """--registry 标志应正常退出"""
+        import os
+        import subprocess
+
+        project_root = Path(__file__).resolve().parents[1]
+        result = subprocess.run(
+            [sys.executable, "harness/checks/check_memory_update.py", "--registry"],
+            cwd=project_root,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=30,
+            env={**os.environ, "PYTHONIOENCODING": "utf-8"},
+        )
+        assert result.returncode == 0, (
+            f"--registry 应正常退出:\nstderr:\n{result.stderr}"
+        )
+        assert "Registry Closure" in result.stdout, (
+            f"输出应包含 Registry Closure:\n{result.stdout[:500]}"
+        )
+
+    def test_registry_with_content_only(self):
+        """--registry --content-only 应运行静态覆盖率但不运行闭环"""
+        import os
+        import subprocess
+
+        project_root = Path(__file__).resolve().parents[1]
+        result = subprocess.run(
+            [
+                sys.executable,
+                "harness/checks/check_memory_update.py",
+                "--registry",
+                "--content-only",
+            ],
+            cwd=project_root,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=30,
+            env={**os.environ, "PYTHONIOENCODING": "utf-8"},
+        )
+        assert result.returncode == 0, (
+            f"--registry --content-only 应正常退出:\nstderr:\n{result.stderr}"
+        )
+        assert "Registry Coverage" in result.stdout, (
+            "content-only + registry 仍应运行静态覆盖率"
+        )
+
+    def test_check_rule_index_counts_ta_r_entries(self):
+        """check_rule_index 应统计 TA-R 前缀条目"""
+        from harness.checks.check_memory_update import check_rule_index
+
+        result = check_rule_index()
+        assert result["pass_count"] >= 1, "规则来源索引应通过"
+        detail_checks = [c for c in result["checks"] if "TA-R" in c.get("detail", "")]
+        assert len(detail_checks) >= 1, "应包含 TA-R 前缀计数"
