@@ -47,7 +47,7 @@ STEPS: list[tuple[str, list[str]]] = [
     ("反问/拒绝策略完备性", [sys.executable, "harness/checks/check_refusal_policy.py"]),
     ("层级合规门禁", [sys.executable, "harness/checks/check_layer_compliance.py"]),
     ("指标注册合规门禁", [sys.executable, "harness/checks/check_metric_registered.py"]),
-    ("Memory Gate", [sys.executable, "harness/checks/check_memory_update.py"]),
+    ("Memory Gate", [sys.executable, "harness/checks/check_memory_update.py", "--registry"]),
     # Step 2 新增: 执行层/结果层/融合层/图表层安全门禁
     ("执行策略安全门禁", [sys.executable, "harness/checks/check_execution_strategy_safety.py"]),
     ("LLM 融合安全门禁", [sys.executable, "harness/checks/check_result_fusion_safety.py"]),

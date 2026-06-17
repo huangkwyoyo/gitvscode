@@ -657,8 +657,8 @@ class TestRegistryClosureFunctions:
         registry = load_memory_rules_registry()
         assert registry is not None, "registry 应能成功加载"
         assert "rules" in registry, "registry 应包含 rules 键"
-        assert len(registry["rules"]) == 9, (
-            f"期望 9 条规则，实际: {len(registry['rules'])}"
+        assert len(registry["rules"]) == 21, (
+            f"期望 21 条规则（9 条迁移 + 12 条补齐），实际: {len(registry['rules'])}"
         )
 
     def test_build_registry_reverse_index_structure(self):
@@ -786,19 +786,34 @@ class TestRegistryClosureCheck:
         assert result["pass_count"] >= 1
 
     def test_orphan_file_detected(self):
-        """孤儿文件（关键路径变更但无规则覆盖）应被检测"""
+        """孤儿文件（关键路径变更但无规则覆盖）应被检测——使用自定义规则列表模拟"""
         from harness.checks.check_memory_update import (
-            load_memory_rules_registry,
             build_registry_reverse_index,
             check_registry_closure,
         )
 
-        registry = load_memory_rules_registry()
-        ri = build_registry_reverse_index(registry["rules"])
+        # 构造一个不覆盖 src/executor.py 的自定义规则列表
+        custom_rules = [
+            {
+                "rule_id": "TA-R900",
+                "title": "测试规则",
+                "status": "proposed",
+                "blocking": False,
+                "severity": "high",
+                "source_memory": "test",
+                "risk_ids": [],
+                "applies_to": ["src/ir.py"],
+                "required_checks": [],
+                "required_tests": [],
+                "required_evals": [],
+                "notes": "",
+            },
+        ]
+        ri = build_registry_reverse_index(custom_rules)
 
         result = check_registry_closure(
             ["src/executor.py"],
-            registry["rules"],
+            custom_rules,
             ri,
         )
         assert result["coverage_matrix"]["src/executor.py"]["is_orphan"] is True
@@ -946,3 +961,198 @@ class TestRegistryCliFlag:
         assert result["pass_count"] >= 1, "规则来源索引应通过"
         detail_checks = [c for c in result["checks"] if "TA-R" in c.get("detail", "")]
         assert len(detail_checks) >= 1, "应包含 TA-R 前缀计数"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Step 7: Registry 覆盖补充 + run_harness 默认启用 --registry 测试
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestStep7FullCoverage:
+    """验证 Step 7a: 12 个关键路径全部覆盖"""
+
+    def test_all_24_critical_paths_covered(self):
+        """静态覆盖率必须达到 100%——24/24 关键路径均有规则覆盖"""
+        from harness.checks.check_memory_update import (
+            load_memory_rules_registry,
+            build_registry_reverse_index,
+            check_registry_coverage,
+        )
+
+        registry = load_memory_rules_registry()
+        assert registry is not None, "registry 应能成功加载"
+        ri = build_registry_reverse_index(registry["rules"])
+        result = check_registry_coverage(registry["rules"], ri)
+
+        # 必须有一个 PASS 状态的"全部覆盖"检查
+        pass_checks = [c for c in result["checks"] if c["status"] == "PASS"]
+        full_coverage = [c for c in pass_checks if "全部覆盖" in c.get("name", "")]
+        assert len(full_coverage) >= 1, (
+            f"应达到 100% 静态覆盖，实际检查结果: {pass_checks}"
+        )
+
+    def test_no_critical_path_is_uncovered(self):
+        """不应有任何关键路径被报告为未覆盖"""
+        from harness.checks.check_memory_update import (
+            load_memory_rules_registry,
+            build_registry_reverse_index,
+            check_registry_coverage,
+        )
+
+        registry = load_memory_rules_registry()
+        ri = build_registry_reverse_index(registry["rules"])
+        result = check_registry_coverage(registry["rules"], ri)
+
+        # 查找 WARN 状态的"未覆盖"检查 —— 不应该存在
+        warn_uncovered = [
+            c for c in result["checks"]
+            if c["status"] == "WARN" and "未覆盖" in c.get("detail", "")
+        ]
+        assert len(warn_uncovered) == 0, (
+            f"不应有关键路径未覆盖:\n{warn_uncovered}"
+        )
+
+    def test_total_rule_count_is_21(self):
+        """规则总数应为 21（9 条迁移 + 12 条补齐）"""
+        from harness.checks.check_memory_update import load_memory_rules_registry
+
+        registry = load_memory_rules_registry()
+        assert len(registry["rules"]) == 21, (
+            f"期望 21 条规则，实际: {len(registry['rules'])}"
+        )
+
+    def test_all_new_rules_are_proposed_not_blocking(self):
+        """所有 21 条规则必须保持 proposed + blocking=false（本轮不升级）"""
+        from harness.checks.check_memory_update import load_memory_rules_registry
+
+        registry = load_memory_rules_registry()
+        for rule in registry["rules"]:
+            rid = rule["rule_id"]
+            assert rule["status"] == "proposed", (
+                f"{rid}: 本轮所有规则必须为 proposed，实际: {rule['status']}"
+            )
+            assert rule["blocking"] is False, (
+                f"{rid}: 本轮所有规则 blocking 必须为 false，实际: {rule['blocking']}"
+            )
+
+    def test_generated_md_contains_21_rules(self):
+        """生成的 Markdown 应包含 21 条规则——统计详情章节标题"""
+        output_path = Path(__file__).resolve().parents[1] / "docs" / "memory" / "规则来源索引.md"
+        content = output_path.read_text(encoding="utf-8")
+        # 统计详情章节标题（### TA-Rxxx），每个规则仅出现一次
+        ta_r_count = content.count("### TA-R")
+        assert ta_r_count == 21, (
+            f"Markdown 应包含 21 条 TA-R 规则详情，实际: {ta_r_count}"
+        )
+
+
+class TestStep7WarnOnlySemantics:
+    """验证 Step 7 的 warn-only 语义：proposed+blocking=false 不 FAIL"""
+
+    def test_proposed_with_missing_coverage_only_warns(self):
+        """proposed + blocking=false 规则即使缺 test/eval 也只 WARN，不 FAIL"""
+        from harness.checks.check_memory_update import (
+            load_memory_rules_registry,
+            build_registry_reverse_index,
+            check_registry_closure,
+        )
+
+        registry = load_memory_rules_registry()
+        ri = build_registry_reverse_index(registry["rules"])
+
+        # TA-R021 (ResultSummary) 的 required_checks/tests/evals 全为空
+        # 变更 src/result_summary.py 时应该被 TA-R021 覆盖（不孤儿），
+        # 但因为 required_* 为空，会检测到但只 WARN
+        result = check_registry_closure(
+            ["src/result_summary.py"],
+            registry["rules"],
+            ri,
+        )
+
+        # 不应该有 FAIL
+        assert result["fail_count"] == 0, (
+            f"proposed 规则缺失 coverage 不应 FAIL，实际 fail_count={result['fail_count']}"
+        )
+        # 应该被覆盖（不是孤儿）
+        assert not result["coverage_matrix"]["src/result_summary.py"]["is_orphan"], (
+            "src/result_summary.py 应被 TA-R021 覆盖"
+        )
+
+    def test_registry_check_exit_code_zero_when_only_warnings(self):
+        """--registry 在仅有 WARN 时应返回 exit code 0"""
+        import os
+        import subprocess
+
+        project_root = Path(__file__).resolve().parents[1]
+        result = subprocess.run(
+            [sys.executable, "harness/checks/check_memory_update.py", "--registry"],
+            cwd=project_root,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=30,
+            env={**os.environ, "PYTHONIOENCODING": "utf-8"},
+        )
+        assert result.returncode == 0, (
+            f"--registry 在 warn-only 模式下应返回 0:\nstderr:\n{result.stderr}"
+        )
+        assert "[OK] Memory Gate 通过。" in result.stdout, (
+            "warn-only 模式应输出 Memory Gate 通过"
+        )
+
+
+class TestStep7RunHarnessIntegration:
+    """验证 Step 7b: run_harness.py Memory Gate 默认启用 --registry"""
+
+    def test_memory_gate_step_in_run_harness(self):
+        """Memory Gate 步骤应在 run_harness.py 的 STEPS 中"""
+        # 动态导入检查
+        import importlib
+        spec = importlib.util.spec_from_file_location(
+            "run_harness",
+            Path(__file__).resolve().parents[1] / "harness" / "run_harness.py",
+        )
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        memory_step = [s for s in module.STEPS if "Memory Gate" in s[0]]
+        assert len(memory_step) == 1, "应有且仅有一个 Memory Gate 步骤"
+
+        name, cmd = memory_step[0]
+        assert "check_memory_update.py" in str(cmd), (
+            f"Memory Gate 应调用 check_memory_update.py: {cmd}"
+        )
+        # Step 7b 要求：默认启用 --registry
+        assert "--registry" in cmd, (
+            f"Memory Gate 默认应包含 --registry 标志: {cmd}"
+        )
+
+    def test_run_harness_memory_gate_with_registry(self):
+        """run_harness.py Memory Gate 步骤应包含 --registry 参数，报告文件应包含 registry 检查结果"""
+        import os
+        import subprocess
+
+        project_root = Path(__file__).resolve().parents[1]
+        report_path = project_root / "harness" / "reports" / "harness_report_latest.md"
+
+        result = subprocess.run(
+            [sys.executable, "harness/run_harness.py", "--step", "6"],
+            cwd=project_root,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=60,
+            env={**os.environ, "PYTHONIOENCODING": "utf-8"},
+        )
+        # 应该成功退出
+        assert result.returncode == 0, (
+            f"Memory Gate 步骤应正常退出:\nstdout:\n{result.stdout[:1000]}\nstderr:\n{result.stderr}"
+        )
+        # 报告文件应包含 registry 相关信息（run_harness 将 check 输出写入报告）
+        assert report_path.exists(), f"报告文件不存在: {report_path}"
+        report_content = report_path.read_text(encoding="utf-8")
+        assert "Registry" in report_content, (
+            f"报告应包含 registry 检查结果:\n{report_content[:1500]}"
+        )

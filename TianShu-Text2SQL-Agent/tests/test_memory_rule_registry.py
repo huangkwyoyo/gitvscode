@@ -46,7 +46,7 @@ class TestYamlParsing:
         rules = load_rules(RULES_YAML_PATH)
         assert isinstance(rules, list), "规则必须是列表"
         assert len(rules) > 0, "规则列表不能为空"
-        assert len(rules) == 9, f"期望 9 条规则，实际: {len(rules)}"
+        assert len(rules) == 21, f"期望 21 条规则（9 条迁移 + 12 条补齐），实际: {len(rules)}"
 
     def test_each_rule_is_dict(self):
         """每条规则必须是字典"""

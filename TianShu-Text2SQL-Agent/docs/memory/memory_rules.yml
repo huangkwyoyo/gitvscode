@@ -73,7 +73,6 @@ rules:
       - RISK-004
     applies_to:
       - config/tianshu_target.yml
-      - contracts/question_policy.yml
       - harness/checks/check_refusal_policy.py
       - AGENTS.md
     required_checks:
@@ -83,7 +82,7 @@ rules:
       - tests/test_c2_safety_regression.py
     required_evals:
       - evals/unsafe_questions.yml
-    notes: "越权意图检测应在 QuestionIntent 阶段完成，不能仅依赖 SQL 生成阶段的英文关键词检查。"
+    notes: "越权意图检测应在 QuestionIntent 阶段完成，不能仅依赖 SQL 生成阶段的英文关键词检查。contracts/question_policy.yml 已从 applies_to 移除（文件未创建）。"
 
   # ═════════════════════════════════════════════════════════════════════════════
   # TA-R011: 歧义检测不能仅依赖置信度
@@ -288,3 +287,247 @@ rules:
     required_evals:
       - evals/e2e_cases.yml
     notes: "LLM 融合 Prompt 必须包含反例约束——只描述已提供的数据，不要推断因果关系，不要修改任何数值。"
+
+  # ═════════════════════════════════════════════════════════════════════════════
+  # TA-R019: PlanExecutor 安全链路不可绕过
+  # 来源: Phase 3 架构设计
+  # ═════════════════════════════════════════════════════════════════════════════
+  - rule_id: TA-R019
+    title: "PlanExecutor 安全链路不可绕过——read_only、离线阻断、validate_sql_safety、execution trace"
+    status: proposed
+    blocking: false
+    severity: high
+    source_memory: "Phase 3 架构设计——PlanExecutor 执行层安全"
+    risk_ids:
+      - RISK-018
+      - RISK-019
+    applies_to:
+      - src/plan_executor.py
+    required_checks:
+      - harness/checks/check_plan_executor_safety.py
+    required_tests:
+      - tests/test_plan_executor.py
+    required_evals: []
+    notes: "新功能必须走 PlanExecutor，不可绕过安全链路。TODO: add eval coverage in Step 8/9。"
+
+  # ═════════════════════════════════════════════════════════════════════════════
+  # TA-R020: ExecutionStrategy 并发安全边界
+  # 来源: Phase 3 架构设计
+  # ═════════════════════════════════════════════════════════════════════════════
+  - rule_id: TA-R020
+    title: "ExecutionStrategy 并发安全边界——默认串行、DuckDB 连接不跨线程共享、每个 plan 独立安全校验"
+    status: proposed
+    blocking: false
+    severity: high
+    source_memory: "Phase 3 架构设计——ExecutionStrategy 执行策略"
+    risk_ids:
+      - RISK-018
+      - RISK-019
+    applies_to:
+      - src/execution_strategy.py
+    required_checks:
+      - harness/checks/check_execution_strategy_safety.py
+    required_tests:
+      - tests/test_execution_strategy.py
+    required_evals: []
+    notes: "并发默认关闭，DuckDB connection 不可跨线程共享，每个 plan 必须独立走 validate_sql_safety()。TODO: add eval coverage in Step 8/9。"
+
+  # ═════════════════════════════════════════════════════════════════════════════
+  # TA-R021: ResultSummary 是下游的结构化输入
+  # 来源: Phase 3B/3C 架构设计
+  # ═════════════════════════════════════════════════════════════════════════════
+  - rule_id: TA-R021
+    title: "ResultSummary 是 merge/fusion/chart 的结构化输入——grain/date/columns/row_count 不能被随意推断"
+    status: proposed
+    blocking: false
+    severity: high
+    source_memory: "Phase 3B/3C 架构设计——ResultSummary 结构化结果"
+    risk_ids:
+      - RISK-020
+    applies_to:
+      - src/result_summary.py
+    required_checks: []
+    required_tests: []
+    required_evals: []
+    notes: "ResultSummary 字段变更需评估对 result_fusion/result_merge/chart_spec 的下游影响。_detect_grain() 逻辑变更影响 merge 对齐。TODO: add check/test/eval coverage in Step 8/9。"
+
+  # ═════════════════════════════════════════════════════════════════════════════
+  # TA-R022: ResultMerge 只允许严格 date/grain 对齐
+  # 来源: Phase 3B/3C 架构设计
+  # ═════════════════════════════════════════════════════════════════════════════
+  - rule_id: TA-R022
+    title: "ResultMerge 只允许严格 date/grain 对齐——不做 SQL 层跨表 JOIN、不做因果解释、缺 date 不 merge"
+    status: proposed
+    blocking: false
+    severity: high
+    source_memory: "Phase 3B/3C 架构设计——ResultMerge 结果合并"
+    risk_ids:
+      - RISK-022
+    applies_to:
+      - src/result_merge.py
+    required_checks: []
+    required_tests:
+      - tests/test_result_merge.py
+    required_evals: []
+    notes: "merge 条件仅限于 date 列对齐 + grain 一致，禁止非因果解释。TODO: add harness check and eval coverage in Step 8/9。"
+
+  # ═════════════════════════════════════════════════════════════════════════════
+  # TA-R023: CrossDomainPolicy 不得削弱跨域拒绝和因果边界
+  # 来源: Phase 3B/3D 架构设计
+  # ═════════════════════════════════════════════════════════════════════════════
+  - rule_id: TA-R023
+    title: "CrossDomainPolicy 不得削弱跨域拒绝和因果边界——unknown 反问、traffic+safety 禁止因果、standard_fine_total 非实际收入"
+    status: proposed
+    blocking: false
+    severity: high
+    source_memory: "Phase 3B/3D 架构设计——CrossDomainPolicy 跨域策略"
+    risk_ids:
+      - RISK-023
+      - RISK-024
+    applies_to:
+      - src/cross_domain_policy.py
+    required_checks:
+      - harness/checks/check_cross_domain_policy.py
+    required_tests:
+      - tests/test_cross_domain_policy.py
+    required_evals: []
+    notes: "跨域隐私保护、因果禁止、unknown 反问不可削弱。decision.reason 必须清晰可追溯。TODO: add eval coverage in Step 8/9。"
+
+  # ═════════════════════════════════════════════════════════════════════════════
+  # TA-R024: ChartSpec 不生成前端代码
+  # 来源: Phase 5 架构设计
+  # ═════════════════════════════════════════════════════════════════════════════
+  - rule_id: TA-R024
+    title: "ChartSpec 不生成 HTML/JS、不访问 DuckDB、不调用 LLM——纯规则 JSON 可序列化图表规格"
+    status: proposed
+    blocking: false
+    severity: high
+    source_memory: "Phase 5 架构设计——ChartSpec 图表规格生成"
+    risk_ids:
+      - RISK-025
+    applies_to:
+      - src/chart_spec.py
+    required_checks:
+      - harness/checks/check_chart_spec_safety.py
+    required_tests: []
+    required_evals: []
+    notes: "ChartSpec 仅生成 JSON 可序列化的规则图表规格，不可执行前端代码。TODO: add test and eval coverage in Step 8/9。"
+
+  # ═════════════════════════════════════════════════════════════════════════════
+  # TA-R025: Legacy executor 不应承载新执行能力
+  # 来源: Phase 3 架构演进
+  # ═════════════════════════════════════════════════════════════════════════════
+  - rule_id: TA-R025
+    title: "Legacy executor 不应承载新执行能力——新功能应走 PlanExecutor，不绕过安全链路"
+    status: proposed
+    blocking: false
+    severity: medium
+    source_memory: "Phase 3 架构演进——PlanExecutor 替代旧 executor"
+    risk_ids:
+      - RISK-018
+    applies_to:
+      - src/executor.py
+    required_checks: []
+    required_tests: []
+    required_evals: []
+    notes: "旧版 executor.py 仅用于兼容历史路径，新功能必须走 PlanExecutor 全链路。TODO: add check/test/eval coverage in Step 8/9。"
+
+  # ═════════════════════════════════════════════════════════════════════════════
+  # TA-R026: Harness checks 变更必须同步 registry
+  # 来源: Memory Harness 方案
+  # ═════════════════════════════════════════════════════════════════════════════
+  - rule_id: TA-R026
+    title: "Harness checks 变更必须同步 registry——新增/修改 check 时需更新 memory_rules.yml 的 required_checks"
+    status: proposed
+    blocking: false
+    severity: medium
+    source_memory: "Memory Harness 方案——规则注册表 Meta 规则"
+    risk_ids:
+      - RISK-006
+    applies_to:
+      - harness/checks/
+    required_checks: []
+    required_tests:
+      - tests/test_harness.py
+    required_evals: []
+    notes: "Meta 规则：新增 check 脚本时必须同步更新对应规则的 required_checks 字段。TODO: add check and eval coverage in Step 8/9。"
+
+  # ═════════════════════════════════════════════════════════════════════════════
+  # TA-R027: Harness baselines 变更必须审计稳定性语义
+  # 来源: Memory Harness 方案
+  # ═════════════════════════════════════════════════════════════════════════════
+  - rule_id: TA-R027
+    title: "Harness baselines 变更必须审计稳定性语义——基线逻辑变化需评估对 UNSTABLE/FAIL 判定的影响"
+    status: proposed
+    blocking: false
+    severity: medium
+    source_memory: "Memory Harness 方案——基线稳定性审计"
+    risk_ids:
+      - RISK-003
+    applies_to:
+      - harness/baselines/
+    required_checks: []
+    required_tests:
+      - tests/test_dual_baseline.py
+    required_evals: []
+    notes: "基线变更需评估对 UNSTABLE 与 FAIL 判定边界的影响。TODO: add harness check and eval coverage in Step 8/9。"
+
+  # ═════════════════════════════════════════════════════════════════════════════
+  # TA-R028: evals 变更必须同步 required_evals
+  # 来源: Memory Harness 方案
+  # ═════════════════════════════════════════════════════════════════════════════
+  - rule_id: TA-R028
+    title: "evals 变更必须同步 required_evals——新增 eval case 时需更新对应规则的 eval 映射"
+    status: proposed
+    blocking: false
+    severity: medium
+    source_memory: "Memory Harness 方案——Eval 覆盖完整性"
+    risk_ids:
+      - RISK-006
+    applies_to:
+      - evals/
+    required_checks: []
+    required_tests: []
+    required_evals: []
+    notes: "Meta 规则：新增 eval 用例时必须同步更新对应规则的 required_evals 字段。TODO: add check/test/eval coverage in Step 8/9。"
+
+  # ═════════════════════════════════════════════════════════════════════════════
+  # TA-R029: memory_rules.yml 变更必须重新生成索引
+  # 来源: Memory Harness 方案
+  # ═════════════════════════════════════════════════════════════════════════════
+  - rule_id: TA-R029
+    title: "memory_rules.yml 变更必须重新生成规则来源索引——运行 generate_rule_index.py，禁止手动编辑 Markdown"
+    status: proposed
+    blocking: false
+    severity: medium
+    source_memory: "Memory Harness 方案——注册表变更审计"
+    risk_ids:
+      - RISK-006
+    applies_to:
+      - docs/memory/memory_rules.yml
+    required_checks:
+      - harness/checks/check_memory_update.py
+    required_tests:
+      - tests/test_memory_rule_registry.py
+    required_evals: []
+    notes: "修改 memory_rules.yml 后必须运行 python scripts/generate_rule_index.py 重新生成 规则来源索引.md。TODO: add eval coverage in Step 8/9。"
+
+  # ═════════════════════════════════════════════════════════════════════════════
+  # TA-R030: generate_rule_index.py 变更必须验证输出不退化
+  # 来源: Memory Harness 方案
+  # ═════════════════════════════════════════════════════════════════════════════
+  - rule_id: TA-R030
+    title: "generate_rule_index.py 变更必须验证 Markdown 输出不退化——rule_id 唯一、TA-R 前缀、核心字段完整"
+    status: proposed
+    blocking: false
+    severity: medium
+    source_memory: "Memory Harness 方案——索引生成脚本审计"
+    risk_ids:
+      - RISK-006
+    applies_to:
+      - scripts/generate_rule_index.py
+    required_checks: []
+    required_tests:
+      - tests/test_memory_rule_registry.py
+    required_evals: []
+    notes: "修改生成脚本后必须验证输出 Markdown 结构不退化、rule_id 唯一性、TA-R 前缀规范。TODO: add harness check and eval coverage in Step 8/9。"
