@@ -37,11 +37,11 @@ def test_workflow_chains_full_m2_pipeline(tmp_path):
 
     assert isinstance(manifest, ReviewPackageManifest)
     assert manifest.request_id == "trip_daily_report_m2"
-    assert manifest.status == "pending_human_review"
+    assert manifest.status == "PENDING_REVIEW"
 
 
 def test_workflow_outputs_all_required_files(tmp_path):
-    """工作流输出的 Review Package 必须包含全部 7 个文件。"""
+    """工作流输出的 Review Package 必须包含全部 9 个文件（M4a：含 decision.yml/decision_log.yml）。"""
     from src.agent.review_publisher import REQUIRED_FILES
 
     manifest = build_review_package(TRIP_FIXTURE, output_root=tmp_path)

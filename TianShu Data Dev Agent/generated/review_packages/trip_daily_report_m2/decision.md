@@ -3,7 +3,7 @@
 草案：未经验证，未经人审，不得上线。
 
 请求 ID：trip_daily_report_m2
-默认状态：REQUEST_CHANGES
+当前状态：PENDING_REVIEW
 
 ## 决策选项
 - APPROVE

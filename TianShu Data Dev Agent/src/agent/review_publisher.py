@@ -2,16 +2,18 @@
 Review Package 发布器。
 
 M2 阶段只写审查材料，不写生产数据。
+M4a：新增 decision.yml（机读权威状态）和 decision_log.yml（审计日志）。
 """
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 import yaml
 
-from src.ir.types import DecisionRecord, ReviewPackageManifest
+from src.ir.types import DecisionRecord, DecisionStatus, ReviewPackageManifest
 
 from .design_planner import DevPlan
 from .dual_code_generator import DualCodeDrafts
@@ -26,6 +28,8 @@ REQUIRED_FILES = [
     "reports/cross_validation.md",
     "lineage/source_refs.yml",
     "decision.md",
+    "decision.yml",
+    "decision_log.yml",
 ]
 
 
@@ -84,7 +88,7 @@ def _build_cross_validation_report() -> str:
 
 
 def _build_decision_md(decision: DecisionRecord, plan: DevPlan, drafts: DualCodeDrafts) -> str:
-    """生成人审决策文件"""
+    """生成人审决策文件（人读 Markdown）"""
     pending = list(dict.fromkeys(plan.pending_items + drafts.pending_items))
     review_points = list(dict.fromkeys(plan.human_review_points + drafts.human_review_points))
     lines = [
@@ -93,7 +97,7 @@ def _build_decision_md(decision: DecisionRecord, plan: DevPlan, drafts: DualCode
         "草案：未经验证，未经人审，不得上线。",
         "",
         f"请求 ID：{plan.request_id}",
-        f"默认状态：{decision.default_status}",
+        f"当前状态：{decision.current_state.value}",
         "",
         "## 决策选项",
     ]
@@ -154,6 +158,45 @@ def _build_lineage(requirement: RequirementSpec, plan: DevPlan) -> dict[str, Any
     }
 
 
+def _build_decision_yml(requirement: RequirementSpec) -> dict[str, Any]:
+    """构造 decision.yml——机读权威状态源（M4a）。
+
+    Agent 只能写入 PENDING_REVIEW，绝不写入 APPROVED/REQUEST_CHANGES/REJECTED。
+    verification_overall_status 初始为 PENDING——等 M3 运行后才更新。
+    """
+    now_iso = datetime.now(timezone.utc).isoformat()
+    return {
+        "request_id": requirement.request_id,
+        "current_state": DecisionStatus.PENDING_REVIEW.value,
+        "human_review_required": True,
+        "last_updated": now_iso,
+        "last_updated_by": "agent",
+        "verification_report_ref": "reports/verification.md",
+        "verification_overall_status": "PENDING",
+        "human_decision_note": "",
+    }
+
+
+def _build_decision_log_yml(requirement: RequirementSpec) -> dict[str, Any]:
+    """构造 decision_log.yml 初始审计日志（M4a）。
+
+    记录 Review Package 创建事件——这是审计链的起点。
+    """
+    now_iso = datetime.now(timezone.utc).isoformat()
+    return {
+        "request_id": requirement.request_id,
+        "entries": [
+            {
+                "timestamp": now_iso,
+                "from_state": None,
+                "to_state": DecisionStatus.PENDING_REVIEW.value,
+                "changed_by": "agent",
+                "reason": "Review Package 创建，初始状态为 PENDING_REVIEW",
+            },
+        ],
+    }
+
+
 def publish_review_package(
     requirement: RequirementSpec,
     plan: DevPlan,
@@ -177,6 +220,22 @@ def publish_review_package(
     )
     decision = DecisionRecord(notes=plan.human_review_points + drafts.pending_items)
     _write_text(package_dir / "decision.md", _build_decision_md(decision, plan, drafts))
+    _write_text(
+        package_dir / "decision.yml",
+        yaml.safe_dump(
+            _build_decision_yml(requirement),
+            allow_unicode=True,
+            sort_keys=False,
+        ),
+    )
+    _write_text(
+        package_dir / "decision_log.yml",
+        yaml.safe_dump(
+            _build_decision_log_yml(requirement),
+            allow_unicode=True,
+            sort_keys=False,
+        ),
+    )
 
     return ReviewPackageManifest(
         request_id=requirement.request_id,

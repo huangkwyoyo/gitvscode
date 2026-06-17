@@ -94,7 +94,7 @@ TianShu Data Dev Agent/
 │   └── quality/                # 质量检查入口
 ├── generated/                   # Review Package 和验证产物
 │   └── review_packages/         # M2 审查材料包
-├── tests/                       # 测试（475 passed）
+├── tests/                       # 测试（529 passed）
 └── docs/                        # 设计文档
 ```
 

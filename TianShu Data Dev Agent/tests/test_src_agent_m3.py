@@ -216,15 +216,15 @@ def test_cross_validation_skips_when_spark_missing_or_sql_failed():
 
 
 def test_verification_reports_written_and_decision_not_approved(tmp_path):
-    """M3 必须写报告，decision.md 默认仍待人审。"""
+    """M3 必须写报告，decision.md 当前状态仍待人审。"""
     package_dir = _build_package(tmp_path)
     result = verify_review_package(package_dir)
 
     assert Path(result.verification_report_path).is_file()
     assert Path(result.cross_validation_report_path).is_file()
     decision = (package_dir / "decision.md").read_text(encoding="utf-8")
-    assert "默认状态：REQUEST_CHANGES" in decision
-    assert "默认状态：APPROVE" not in decision
+    assert "当前状态：PENDING_REVIEW" in decision
+    assert "当前状态：APPROVED" not in decision
 
 
 def test_verify_cli_outputs_report_paths(tmp_path):

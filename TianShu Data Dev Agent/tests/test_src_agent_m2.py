@@ -51,7 +51,7 @@ def test_workflow_generates_complete_review_package(tmp_path):
 
     _assert_package_complete(package_dir)
     assert manifest.request_id == "trip_daily_report_m2"
-    assert manifest.status == "pending_human_review"
+    assert manifest.status == "PENDING_REVIEW"
 
 
 def test_cli_generates_review_package(tmp_path):
@@ -79,15 +79,15 @@ def test_cli_generates_review_package(tmp_path):
 
 
 def test_decision_contains_required_options(tmp_path):
-    """decision.md 必须包含三种人审决策，默认不是 APPROVE。"""
+    """decision.md 必须包含三种人审决策，默认状态为 PENDING_REVIEW。"""
     manifest = build_review_package(FIXTURE, output_root=tmp_path)
     decision = Path(manifest.package_path, "decision.md").read_text(encoding="utf-8")
 
     assert "APPROVE" in decision
     assert "REQUEST_CHANGES" in decision
     assert "REJECT" in decision
-    assert "默认状态：REQUEST_CHANGES" in decision
-    assert "默认状态：APPROVE" not in decision
+    assert "当前状态：PENDING_REVIEW" in decision
+    assert "当前状态：APPROVED" not in decision
 
 
 def test_package_marks_drafts_unverified_unreviewed_not_for_release(tmp_path):

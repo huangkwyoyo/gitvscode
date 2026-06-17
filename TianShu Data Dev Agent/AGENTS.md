@@ -531,7 +531,7 @@ scripts/dev_agent/                 ← v2 CLI 入口
 | M3 表访问权限 | ✅ | bronze/silver 禁止 + 可用表白名单 |
 | M3 JOIN 白名单合规 | ✅ | IR 路径 A + SQL 文本路径 B 双路径 |
 | M3 SQL 样本执行 | ✅ | `sandbox/executor.py`，只读 + LIMIT 1000 + 超时保护 |
-| M3 安全压实（3 缺口） | ✅ | G1/G2/G3 修复，475 测试零回归 |
+| M3 安全压实（3 缺口） | ✅ | G1/G2/G3 修复，529 测试零回归 |
 | v1 pipeline 保留 | ✅ | `scripts/pipeline/` 完整保留，143 测试通过 |
 
 ### 10.3 部分完成（PARTIAL）

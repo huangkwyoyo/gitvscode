@@ -3,17 +3,27 @@ v2 Verification Engine 编排入口。
 
 输入 M2 生成的 Review Package，执行静态检查、SQL sample run、
 Spark sample run 或跳过、SQL vs Spark 交叉验证，并写回审查报告。
+
+M4a：新增 verification_summary.yml——结构化验证摘要。
+      绝不修改 decision.yml.current_state（SUPERSEDED 为 M4b+）。
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 import yaml
 
-from src.ir.types import CrossValidateStatus, SQLResult, ValidationReport, ValidationStatus
+from src.ir.types import (
+    CrossValidateStatus,
+    DecisionStatus,
+    SQLResult,
+    ValidationReport,
+    ValidationStatus,
+)
 from src.sandbox.executor import execute_sql_sample
 from src.sandbox.spark_executor import execute_spark_dsl
 from src.verify.checker import Validator
@@ -51,6 +61,8 @@ def verify_review_package(
     spark_path = package_dir / "spark" / "main.py"
     lineage_path = package_dir / "lineage" / "source_refs.yml"
     decision_path = package_dir / "decision.md"
+    decision_yml_path = package_dir / "decision.yml"
+    decision_log_path = package_dir / "decision_log.yml"
     verification_path = package_dir / "reports" / "verification.md"
     cross_path = package_dir / "reports" / "cross_validation.md"
 
@@ -58,6 +70,8 @@ def verify_review_package(
     _require_file(spark_path)
     _require_file(lineage_path)
     _require_file(decision_path)
+    _require_file(decision_yml_path)
+    _require_file(decision_log_path)
 
     sql = sql_path.read_text(encoding="utf-8")
     spark_code = spark_path.read_text(encoding="utf-8")
@@ -155,6 +169,28 @@ def verify_review_package(
         encoding="utf-8",
     )
 
+    # M4a：写入结构化验证摘要——不修改 decision.yml.current_state
+    summary_path = package_dir / "reports" / "verification_summary.yml"
+    summary_path.parent.mkdir(parents=True, exist_ok=True)
+    summary_path.write_text(
+        yaml.safe_dump(
+            _build_verification_summary_yml(
+                package_dir=package_dir,
+                overall_status=overall_status,
+                sql_static_status=sql_static_status,
+                sql_sample_status=sql_sample_status,
+                spark_static_status=spark_static_status,
+                spark_sample_status=spark_sample_status,
+                cross_status=cross_status,
+                warnings=warnings,
+                failures=failures,
+            ),
+            allow_unicode=True,
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+
     return VerificationEngineResult(
         package_path=str(package_dir.resolve()),
         verification_report_path=str(verification_path.resolve()),
@@ -174,6 +210,44 @@ def _require_file(path: Path) -> None:
     """确保 Review Package 必备文件存在。"""
     if not path.is_file():
         raise FileNotFoundError(f"Review Package 缺少文件: {path}")
+
+
+def _build_verification_summary_yml(
+    package_dir: Path,
+    overall_status: str,
+    sql_static_status: str,
+    sql_sample_status: str,
+    spark_static_status: str,
+    spark_sample_status: str,
+    cross_status: str,
+    warnings: list[str],
+    failures: list[str],
+) -> dict[str, Any]:
+    """构造 verification_summary.yml——结构化验证摘要（M4a）。
+
+    严格只读：不读取也不修改 decision.yml.current_state。
+    只记录验证结论和 stale 风险提示——SUPERSEDED 自动变更为 M4b+。
+    """
+    now_iso = datetime.now(timezone.utc).isoformat()
+    return {
+        "generated_at": now_iso,
+        "package_path": str(package_dir.resolve()),
+        "overall_status": overall_status,
+        "sql_static_status": sql_static_status,
+        "sql_sample_status": sql_sample_status,
+        "spark_static_status": spark_static_status,
+        "spark_sample_status": spark_sample_status,
+        "cross_validation_status": cross_status,
+        "warnings": warnings,
+        "failures": failures,
+        "stale_risk_note": (
+            "M4a：本文件记录了最新验证结果。"
+            "若 decision.yml 的 current_state 仍为 APPROVED，"
+            "人审时需注意当前验证结论可能已使旧批准过期。"
+            "SUPERSEDED 自动状态变更将在 M4b+ 实现——"
+            "届时重新验证检测到旧 APPROVED 时将自动过渡至 SUPERSEDED。"
+        ),
+    }
 
 
 def _first_source_table(lineage: dict[str, Any]) -> str:

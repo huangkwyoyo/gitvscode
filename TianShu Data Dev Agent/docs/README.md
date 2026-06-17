@@ -128,14 +128,15 @@ Obsidian/
 
 | 模块 | 状态 | 说明 |
 |------|------|------|
-| M2 Review Package 完整生成 | ✅ | `src/agent/workflow.py` → `build_review_package()` 输出 7 文件审查材料包 |
-| `generated/review_packages/{request_id}/` 结构 | ✅ | 完整 7 文件目录骨架 |
+| M2 Review Package 完整生成 | ✅ | `src/agent/workflow.py` → `build_review_package()` 输出 9 文件审查材料包（M4a：+decision.yml +decision_log.yml） |
+| `generated/review_packages/{request_id}/` 结构 | ✅ | 完整 9 文件目录骨架 |
 | SQL + Spark DSL 双份草案 | ✅ | `dual_code_generator.py` 确定性生成（不接 LLM） |
 | `reports/verification.md` 真实验证报告 | ✅ | M3 运行后覆盖 M2 占位桩，含静态检查 + WARN/FAIL 明细 |
 | M3 静态检查（5 项） | ✅ | `Validator.validate_static()` —— SQL/Spark 前缀 + 关键字 + lineage |
 | M3 SQL 样本执行 | ✅ | `sandbox/executor.py`，只读 + LIMIT 1000 + 超时保护 |
 | M3 安全压实（3 缺口闭合） | ✅ | `check_sample_execution` / `execute_sql` / `validate_context` 防御纵深 |
-| 测试 | ✅ | 475 passed，零回归 |
+| **M4a 人审状态机最小实现** | ✅ | DecisionStatus enum + decision.yml（机读权威状态）+ decision_log.yml（审计日志）+ verification_summary.yml（结构化摘要） |
+| 测试 | ✅ | 529 passed，零回归 |
 | `src/agent/` 模块直接测试 | ✅ | 6 文件、142 测试覆盖 6 个 M2/M3 核心模块 |
 
 ### ⚠️ PARTIAL（部分完成）
@@ -143,14 +144,14 @@ Obsidian/
 | 模块 | 状态 | 说明 |
 |------|------|------|
 | `reports/cross_validation.md` | ⚠️ | 逻辑完整，但始终 SKIPPED（Spark executor 是桩） |
-| `decision.md` | ⚠️ | 已生成人审模板（APPROVE/REQUEST/REJECT 选项），**不是程序化状态机** |
+| `decision.md` + `decision.yml` | ⚠️ | M4a 已有程序化状态机基础（DecisionStatus enum + decision.yml），**人审 CLI 待 M4b 实现** |
 | Spark 只读样本执行 | ⚠️ | `spark_executor.py` 始终返回 SKIPPED/PENDING |
 | SQL/Spark 双结果交叉验证 | ⚠️ | `cross_validation.py` 逻辑完整，输入缺失→始终 SKIPPED |
 ### ❌ TODO（待完成）
 
 | 模块 | 阻塞原因 |
 |------|---------|
-| 人审状态机 | 尚未设计 |
+| 人审 CLI（M4b） | M4a 已完成 DecisionStatus + decision.yml/decision_log.yml/verification_summary.yml |
 | LLM 接入代码生成 | 项目边界：当前不接真实 LLM API |
 | 真实 SQL/Spark 交叉验证 | 需 Spark 环境就绪 |
 | Prompt 回归系统 | 需 LLM API |

@@ -155,15 +155,15 @@ def test_manifest_has_correct_request_id(tmp_path):
     assert manifest.request_id == "my_custom_req"
 
 
-def test_manifest_status_is_pending_human_review(tmp_path):
-    """manifest.status 默认为 pending_human_review。"""
+def test_manifest_status_is_pending_review(tmp_path):
+    """manifest.status 默认为 PENDING_REVIEW（M4a DecisionStatus）。"""
     req = _make_requirement()
     plan = _make_plan()
     drafts = _make_drafts()
 
     manifest = publish_review_package(req, plan, drafts, output_root=tmp_path)
 
-    assert manifest.status == "pending_human_review"
+    assert manifest.status == "PENDING_REVIEW"
 
 
 # ═════════════════════════════════════════════════════════════
@@ -171,8 +171,8 @@ def test_manifest_status_is_pending_human_review(tmp_path):
 # ═════════════════════════════════════════════════════════════
 
 
-def test_decision_default_status_is_request_changes(tmp_path):
-    """decision.md 默认状态必须是 REQUEST_CHANGES。"""
+def test_decision_default_status_is_pending_review(tmp_path):
+    """decision.md 默认状态必须是 PENDING_REVIEW（M4a）。"""
     req = _make_requirement()
     plan = _make_plan()
     drafts = _make_drafts()
@@ -180,11 +180,11 @@ def test_decision_default_status_is_request_changes(tmp_path):
     manifest = publish_review_package(req, plan, drafts, output_root=tmp_path)
     decision = (Path(manifest.package_path) / "decision.md").read_text(encoding="utf-8")
 
-    assert "默认状态：REQUEST_CHANGES" in decision
+    assert "当前状态：PENDING_REVIEW" in decision
 
 
 def test_decision_must_not_default_to_approve(tmp_path):
-    """decision.md 默认状态绝对不能是 APPROVE。"""
+    """decision.md 默认状态绝对不能是 APPROVED。"""
     req = _make_requirement()
     plan = _make_plan()
     drafts = _make_drafts()
@@ -192,7 +192,7 @@ def test_decision_must_not_default_to_approve(tmp_path):
     manifest = publish_review_package(req, plan, drafts, output_root=tmp_path)
     decision = (Path(manifest.package_path) / "decision.md").read_text(encoding="utf-8")
 
-    assert "默认状态：APPROVE" not in decision
+    assert "当前状态：APPROVED" not in decision
 
 
 def test_decision_contains_all_three_options(tmp_path):
@@ -219,6 +219,68 @@ def test_decision_states_not_approved(tmp_path):
     decision = (Path(manifest.package_path) / "decision.md").read_text(encoding="utf-8")
 
     assert "不是 APPROVE" in decision
+
+
+# ═════════════════════════════════════════════════════════════
+# M4a decision.yml / decision_log.yml
+# ═════════════════════════════════════════════════════════════
+
+
+def test_decision_yml_contains_required_fields(tmp_path):
+    """decision.yml 必须包含 M4a 规定的全部字段。"""
+    req = _make_requirement()
+    plan = _make_plan()
+    drafts = _make_drafts()
+
+    manifest = publish_review_package(req, plan, drafts, output_root=tmp_path)
+    decision_yml = yaml.safe_load(
+        (Path(manifest.package_path) / "decision.yml").read_text(encoding="utf-8")
+    )
+
+    assert decision_yml["request_id"] == req.request_id
+    assert decision_yml["current_state"] == "PENDING_REVIEW"
+    assert decision_yml["human_review_required"] is True
+    assert "last_updated" in decision_yml
+    assert decision_yml["last_updated_by"] == "agent"
+    assert decision_yml["verification_report_ref"] == "reports/verification.md"
+    assert decision_yml["verification_overall_status"] == "PENDING"
+    assert decision_yml["human_decision_note"] == ""
+
+
+def test_decision_yml_initial_state_not_approved(tmp_path):
+    """decision.yml 初始状态绝对不能是 APPROVED/REQUEST_CHANGES/REJECTED。"""
+    req = _make_requirement()
+    plan = _make_plan()
+    drafts = _make_drafts()
+
+    manifest = publish_review_package(req, plan, drafts, output_root=tmp_path)
+    decision_yml = yaml.safe_load(
+        (Path(manifest.package_path) / "decision.yml").read_text(encoding="utf-8")
+    )
+
+    assert decision_yml["current_state"] == "PENDING_REVIEW"
+    assert decision_yml["current_state"] not in ("APPROVED", "REQUEST_CHANGES", "REJECTED")
+
+
+def test_decision_log_yml_contains_creation_entry(tmp_path):
+    """decision_log.yml 必须包含 Review Package 创建事件。"""
+    req = _make_requirement()
+    plan = _make_plan()
+    drafts = _make_drafts()
+
+    manifest = publish_review_package(req, plan, drafts, output_root=tmp_path)
+    log_yml = yaml.safe_load(
+        (Path(manifest.package_path) / "decision_log.yml").read_text(encoding="utf-8")
+    )
+
+    assert log_yml["request_id"] == req.request_id
+    assert len(log_yml["entries"]) == 1
+    entry = log_yml["entries"][0]
+    assert entry["from_state"] is None
+    assert entry["to_state"] == "PENDING_REVIEW"
+    assert entry["changed_by"] == "agent"
+    assert "timestamp" in entry
+    assert "Review Package 创建" in entry["reason"]
 
 
 # ═════════════════════════════════════════════════════════════

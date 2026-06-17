@@ -17,6 +17,7 @@ import sys
 from pathlib import Path
 
 import pytest
+import yaml
 
 try:
     import duckdb
@@ -192,22 +193,22 @@ def test_cross_validation_skipped_when_spark_is_pending(tmp_path):
 # ═════════════════════════════════════════════════════════════
 
 
-def test_decision_remains_request_changes_after_verify(tmp_path):
-    """M3 验证后 decision.md 默认状态必须仍然是 REQUEST_CHANGES。"""
+def test_decision_remains_pending_review_after_verify(tmp_path):
+    """M3 验证后 decision.md 当前状态必须仍然是 PENDING_REVIEW。"""
     package_dir = _build_package(tmp_path)
     verify_review_package(package_dir)
 
     decision = (package_dir / "decision.md").read_text(encoding="utf-8")
-    assert "默认状态：REQUEST_CHANGES" in decision
+    assert "当前状态：PENDING_REVIEW" in decision
 
 
-def test_decision_never_becomes_approve_after_verify(tmp_path):
-    """M3 验证后 decision.md 绝对不能变成 APPROVE。"""
+def test_decision_never_becomes_approved_after_verify(tmp_path):
+    """M3 验证后 decision.md 绝对不能变成 APPROVED。"""
     package_dir = _build_package(tmp_path)
     verify_review_package(package_dir)
 
     decision = (package_dir / "decision.md").read_text(encoding="utf-8")
-    assert "默认状态：APPROVE" not in decision
+    assert "当前状态：APPROVED" not in decision
 
 
 def test_verify_does_not_modify_decision_file(tmp_path):
@@ -219,6 +220,81 @@ def test_verify_does_not_modify_decision_file(tmp_path):
 
     # decision.md 在 M3 前后应完全一致
     assert before == after
+
+
+# ═════════════════════════════════════════════════════════════
+# M4a verification_summary.yml
+# ═════════════════════════════════════════════════════════════
+
+
+def test_verification_summary_yml_is_written(tmp_path):
+    """M4a：M3 验证后必须写入 verification_summary.yml。"""
+    package_dir = _build_package(tmp_path)
+    verify_review_package(package_dir)
+
+    summary_path = package_dir / "reports" / "verification_summary.yml"
+    assert summary_path.is_file(), "M4a 必须生成 verification_summary.yml"
+
+    summary = yaml.safe_load(summary_path.read_text(encoding="utf-8"))
+    assert "overall_status" in summary
+    assert "sql_static_status" in summary
+    assert "sql_sample_status" in summary
+    assert "spark_static_status" in summary
+    assert "spark_sample_status" in summary
+    assert "cross_validation_status" in summary
+    assert "warnings" in summary
+    assert "failures" in summary
+    assert "stale_risk_note" in summary
+
+
+def test_verification_summary_contains_stale_risk_note(tmp_path):
+    """M4a：verification_summary.yml 必须包含 stale 风险提示但不自动 SUPERSEDED。"""
+    package_dir = _build_package(tmp_path)
+    verify_review_package(package_dir)
+
+    summary = yaml.safe_load(
+        (package_dir / "reports" / "verification_summary.yml").read_text(encoding="utf-8")
+    )
+
+    assert "stale_risk_note" in summary
+    # 风险提示告知人审者注意 stale 状态，但不自动变更
+    assert "SUPERSEDED" in summary["stale_risk_note"]
+    assert "M4b+" in summary["stale_risk_note"]
+
+
+def test_verify_does_not_modify_decision_yml(tmp_path):
+    """M4a：M3 验证绝对不能修改 decision.yml.current_state。"""
+    package_dir = _build_package(tmp_path)
+
+    before = yaml.safe_load(
+        (package_dir / "decision.yml").read_text(encoding="utf-8")
+    )
+    verify_review_package(package_dir)
+    after = yaml.safe_load(
+        (package_dir / "decision.yml").read_text(encoding="utf-8")
+    )
+
+    # decision.yml 的 current_state 在 M3 前后必须完全一致
+    assert before["current_state"] == after["current_state"]
+    assert after["current_state"] == "PENDING_REVIEW"
+
+
+def test_missing_decision_yml_raises(tmp_path):
+    """M4a：缺少 decision.yml 时必须抛出 FileNotFoundError。"""
+    package_dir = _build_package(tmp_path)
+    (package_dir / "decision.yml").unlink()
+
+    with pytest.raises(FileNotFoundError, match="decision"):
+        verify_review_package(package_dir)
+
+
+def test_missing_decision_log_yml_raises(tmp_path):
+    """M4a：缺少 decision_log.yml 时必须抛出 FileNotFoundError。"""
+    package_dir = _build_package(tmp_path)
+    (package_dir / "decision_log.yml").unlink()
+
+    with pytest.raises(FileNotFoundError, match="decision"):
+        verify_review_package(package_dir)
 
 
 # ═════════════════════════════════════════════════════════════

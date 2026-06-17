@@ -104,6 +104,20 @@ class CrossValidateStatus(str, Enum):
     NOT_ATTEMPTED = "not_attempted"   # 未尝试
 
 
+class DecisionStatus(str, Enum):
+    """人审决策状态——M4a 最小实现。
+
+    Agent 只能写入 PENDING_REVIEW。
+    APPROVED / REQUEST_CHANGES / REJECTED 只能由人设置。
+    SUPERSEDED 为 M4b+ 预留——当前允许定义但不自动变更。
+    """
+    PENDING_REVIEW = "PENDING_REVIEW"       # 等待人审（Agent 初始写入）
+    APPROVED = "APPROVED"                   # 人审通过（仅人可设置）
+    REQUEST_CHANGES = "REQUEST_CHANGES"     # 人审要求修改（仅人可设置）
+    REJECTED = "REJECTED"                   # 人审拒绝（仅人可设置）
+    SUPERSEDED = "SUPERSEDED"               # 被新验证替代（M4b+ 自动过渡）
+
+
 # ═══════════════════════════════════════════════════════════
 # §3 Layer 1: QuestionIntent —— 用户要什么
 # ═══════════════════════════════════════════════════════════
@@ -646,8 +660,12 @@ class CodeDraft:
 
 @dataclass
 class DecisionRecord:
-    """人审决策记录，默认不得为批准"""
-    default_status: str = "REQUEST_CHANGES"
+    """人审决策记录——M4a 状态机核心。
+
+    current_state 为机读权威状态源（decision.yml）。
+    Agent 只能写入 PENDING_REVIEW；APPROVED/REQUEST_CHANGES/REJECTED 仅人可设置。
+    """
+    current_state: DecisionStatus = DecisionStatus.PENDING_REVIEW
     options: list[str] = field(default_factory=lambda: [
         "APPROVE",
         "REQUEST_CHANGES",
@@ -659,7 +677,7 @@ class DecisionRecord:
     def to_dict(self) -> dict[str, Any]:
         """序列化为字典"""
         return {
-            "default_status": self.default_status,
+            "current_state": self.current_state.value,
             "options": self.options,
             "human_review_required": self.human_review_required,
             "notes": self.notes,
@@ -672,7 +690,7 @@ class ReviewPackageManifest:
     request_id: str
     package_path: str
     files: list[str] = field(default_factory=list)
-    status: str = "pending_human_review"
+    status: DecisionStatus = DecisionStatus.PENDING_REVIEW
     pending_items: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
@@ -681,7 +699,7 @@ class ReviewPackageManifest:
             "request_id": self.request_id,
             "package_path": self.package_path,
             "files": self.files,
-            "status": self.status,
+            "status": self.status.value,
             "pending_items": self.pending_items,
         }
 
