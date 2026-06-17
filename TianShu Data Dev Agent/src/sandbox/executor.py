@@ -56,9 +56,21 @@ def execute_sql(
     if duckdb is None:
         raise ImportError("需要 duckdb 包: pip install duckdb")
 
-    # ── 安全关键字检查（防御纵深——即使绕过 execute_sql_sample 直接调用也拦截）──
+    # ── 安全前缀检查（防御纵深——与 execute_sql_sample 对齐，拦截非只读语句）──
     body = _strip_sql_comments(sql).strip().rstrip(";")
     upper = body.upper()
+
+    if not any(upper.startswith(prefix) for prefix in ALLOWED_PREFIXES):
+        return SQLResult(
+            sql=sql,
+            error=(
+                f"安全拦截：SQL 必须以 {' / '.join(ALLOWED_PREFIXES)} 开头，"
+                f"当前以 {upper.split()[0] if upper.split() else '(空)'} 开头"
+            ),
+            source_table=source_table,
+        )
+
+    # ── 安全关键字检查（防御纵深——即使绕过 execute_sql_sample 直接调用也拦截）──
     for keyword in FORBIDDEN_KEYWORDS:
         if re.search(rf"\b{keyword}\b", upper):
             return SQLResult(

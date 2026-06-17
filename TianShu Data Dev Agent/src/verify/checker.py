@@ -149,8 +149,10 @@ class Validator:
         sql_result: Optional[SQLResult] = None,
         spark_result: Optional[SQLResult] = None,
     ) -> ValidationReport:
-        """执行旧七项检查兼容路径。"""
-        checks: list[CheckResult] = []
+        """执行旧七项检查兼容路径（自动前置上下文检查）。"""
+        # 前置上下文检查——缺失关键上下文时自动写入报告
+        checks: list[CheckResult] = list(self.validate_context())
+
         shared = dict(self._context)
         shared["sql"] = sql
         shared["spark_code"] = spark_code

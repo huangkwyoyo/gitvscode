@@ -497,11 +497,40 @@ def check_sample_execution(
             severity="FAIL",
         )
 
+    # ── 安全前缀检查（防御纵深——拦截非只读语句绕过沙箱直接调用）──
+    body = sql.strip().rstrip(";")
+    body_upper = body.upper()
+    if not any(body_upper.startswith(prefix) for prefix in ALLOWED_PREFIXES):
+        return CheckResult(
+            check_id=5,
+            name="样本执行（SQL）",
+            status=ValidationStatus.FAILED,
+            detail=(
+                f"SQL sample 被拒绝：必须以 {' / '.join(ALLOWED_PREFIXES)} 开头，"
+                f"当前以 {body_upper.split()[0] if body_upper.split() else '(空)'} 开头"
+            ),
+            severity="FAIL",
+        )
+
+    # ── 禁止关键字检查（防御纵深——复用 checks.FORBIDDEN_KEYWORDS 单一事实源）──
+    cleaned = _clean_sql_for_keyword_scan(body)
+    for keyword in FORBIDDEN_KEYWORDS:
+        if re.search(rf"\b{keyword}\b", cleaned.upper()):
+            return CheckResult(
+                check_id=5,
+                name="样本执行（SQL）",
+                status=ValidationStatus.FAILED,
+                detail=(
+                    f"SQL sample 被拒绝：检测到禁止关键字 {keyword}"
+                    f"（{FORBIDDEN_KEYWORDS[keyword]}）"
+                ),
+                severity="FAIL",
+            )
+
     # 自动包装 LIMIT 1000——防止 LLM 生成的 SQL 全表扫描
-    wrapped_sql = sql.strip().rstrip(";")
-    sql_upper = wrapped_sql.upper()
-    if "LIMIT" not in sql_upper:
-        wrapped_sql = f"{wrapped_sql} LIMIT 1000"
+    wrapped_sql = body
+    if "LIMIT" not in body_upper:
+        wrapped_sql = f"{body} LIMIT 1000"
 
     try:
         conn.execute(wrapped_sql)

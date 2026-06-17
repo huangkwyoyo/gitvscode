@@ -189,6 +189,36 @@ class TestSandboxForbiddenKeywords:
         assert result.error is None
         assert result.row_count == 0
 
+    # ── G2 安全压实：execute_sql 前缀检查（与 execute_sql_sample 对齐）──
+
+    def test_raw_execute_insert_prefix_rejected(self, conn):
+        """INSERT 前缀被 execute_sql 拦截（不落入执行引擎）"""
+        from src.sandbox.executor import execute_sql
+        result = execute_sql(conn, "INSERT INTO t VALUES (1)")
+        assert result.error is not None
+        assert "INSERT" in result.error.upper() or "开头" in result.error
+
+    def test_raw_execute_alter_rejected(self, conn):
+        """ALTER 前缀被 execute_sql 拦截"""
+        from src.sandbox.executor import execute_sql
+        result = execute_sql(conn, "ALTER TABLE t RENAME TO t2")
+        assert result.error is not None
+        assert "ALTER" in result.error.upper() or "开头" in result.error
+
+    def test_raw_execute_drop_prefix_rejected(self, conn):
+        """DROP 前缀被 execute_sql 拦截"""
+        from src.sandbox.executor import execute_sql
+        result = execute_sql(conn, "DROP TABLE t")
+        assert result.error is not None
+        assert "DROP" in result.error.upper() or "开头" in result.error
+
+    def test_raw_execute_with_prefix_passes(self, conn):
+        """WITH 前缀可通过 execute_sql 前缀检查"""
+        from src.sandbox.executor import execute_sql
+        result = execute_sql(conn, "WITH c AS (SELECT 1 AS n) SELECT * FROM c")
+        assert result.error is None
+        assert result.row_count == 1
+
 
 @pytest.mark.skipif(not DUCKDB_AVAILABLE, reason="duckdb 未安装")
 class TestTimerRaceCondition:

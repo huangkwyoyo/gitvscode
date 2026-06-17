@@ -326,12 +326,16 @@ class TestValidator:
             plan=plan,
         )
         # 无 conn 时 #1 和 #5 返回 PENDING，#4 无 whitelist 返回 WARN
+        # validate() 自动前置 validate_context()，额外产生 2 条上下文告警（conn + join_whitelist）
         statuses = {c.check_id: c.status for c in report.checks}
         assert statuses[1] == ValidationStatus.PENDING  # 表存在性——缺少 conn
         assert statuses[5] == ValidationStatus.PENDING  # 样本执行——缺少 conn
+        # 上下文告警应出现
+        context_warnings = [c for c in report.checks if c.check_id == 0]
+        assert len(context_warnings) >= 2  # conn 和 join_whitelist 缺失
         # 整体状态：有 PENDING 项时不应为 PASSED
         assert report.overall_status != ValidationStatus.PASSED
-        assert len(report.checks) == 7
+        assert len(report.checks) == 9  # 2 上下文告警 + 7 项检查
 
     def test_forbidden_keyword_fails_overall(self):
         validator = Validator()
@@ -345,16 +349,22 @@ class TestValidator:
         report = validator.validate(
             sql="SELECT 1",
         )
-        assert len(report.checks) == 7
+        # validate() 自动前置 validate_context()——无上下文时额外产生 3 条上下文告警
+        # 总共 3 (上下文) + 7 (主检查) = 10 条
         check_ids = {c.check_id for c in report.checks}
-        assert check_ids == {1, 2, 3, 4, 5, 6, 7}
+        assert {1, 2, 3, 4, 5, 6, 7}.issubset(check_ids), \
+            f"7 项主检查应全部存在，实际: {check_ids}"
+        # 上下文告警应存在
+        assert 0 in check_ids, f"上下文检查（id=0）应自动出现，实际: {check_ids}"
+        assert len(report.checks) == 10
 
     def test_validation_report_to_dict(self):
         validator = Validator()
         report = validator.validate(sql="SELECT 1")
         d = report.to_dict()
         assert "overall_status" in d
-        assert len(d["checks"]) == 7
+        # validate() 自动前置 validate_context()——无上下文时 3 上下文 + 7 主检查 = 10
+        assert len(d["checks"]) == 10
 
 
 class TestCrossValidationEngine:
@@ -610,6 +620,64 @@ class TestValidateContext:
         )
 
 
+class TestValidateContextAutoCall:
+    """G3 安全压实：validate() 入口自动调用 validate_context()"""
+
+    def test_context_warnings_auto_included_in_validate(self):
+        """空上下文 validate() 时上下文告警自动出现在报告最前面"""
+        validator = Validator()  # 无任何 context
+        report = validator.validate(sql="SELECT 1")
+        # 前 3 条应为上下文告警（check_id=0）
+        first_three = report.checks[:3]
+        for check in first_three:
+            assert check.check_id == 0, f"前三条应为上下文检查，实际 check_id={check.check_id}"
+            assert check.status == ValidationStatus.WARN
+        assert any("conn" in c.detail.lower() for c in first_three)
+        assert any("available_tables" in c.detail.lower() for c in first_three)
+        assert any("join_whitelist" in c.detail.lower() for c in first_three)
+
+    def test_full_context_produces_no_extra_checks(self):
+        """完整上下文时 validate_context() 不产生额外条目"""
+        try:
+            import duckdb
+            conn = duckdb.connect(":memory:", read_only=False)
+            conn.execute("CREATE TABLE dws_daily_trip_summary (trip_date DATE, trip_count INTEGER)")
+        except ImportError:
+            pytest.skip("duckdb 未安装")
+
+        validator = Validator(context={
+            "available_tables": {"dws_daily_trip_summary"},
+            "join_whitelist": set(),
+            "conn": conn,
+        })
+        plan = SQLPlan(
+            strategy=Strategy.G3_DIRECT,
+            primary_table="dws_daily_trip_summary",
+        )
+        report = validator.validate(
+            sql="SELECT * FROM dws_daily_trip_summary LIMIT 10",
+            plan=plan,
+        )
+        # 上下文完整——无 check_id=0 的条目
+        context_checks = [c for c in report.checks if c.check_id == 0]
+        assert len(context_checks) == 0
+        # 仅有 7 项主检查
+        assert len(report.checks) == 7
+        conn.close()
+
+    def test_partial_context_correctly_reported(self):
+        """部分上下文时仅报告缺失项"""
+        validator = Validator(context={
+            "available_tables": {"gold.t1"},
+            "join_whitelist": {("gold.t1", "gold.t2")},
+        })
+        report = validator.validate(sql="SELECT * FROM gold.t1")
+        # 仅 conn 缺失——只产生 1 条上下文告警
+        context_checks = [c for c in report.checks if c.check_id == 0]
+        assert len(context_checks) == 1
+        assert "conn" in context_checks[0].detail.lower()
+
+
 @pytest.mark.skipif(not DUCKDB_AVAILABLE, reason="duckdb 未安装")
 class TestChecksWithDB:
     """需要 DuckDB 连接的检查项测试"""
@@ -648,3 +716,41 @@ class TestChecksWithDB:
             conn=conn,
         )
         assert result.status == ValidationStatus.FAILED
+
+    # ── G1 安全压实：check_sample_execution 防御纵深测试 ──
+
+    def test_sample_execution_reject_insert_prefix(self, conn):
+        """INSERT 前缀在 sample 执行前被拦截（不落入 conn.execute）"""
+        result = check_sample_execution(
+            sql="INSERT INTO test_t VALUES (1, 2.0)",
+            conn=conn,
+        )
+        assert result.status == ValidationStatus.FAILED
+        assert "INSERT" in result.detail.upper() or "开头" in result.detail
+
+    def test_sample_execution_reject_drop_keyword(self, conn):
+        """DROP 关键字在 sample 执行前被拦截（前缀通过但含禁止关键字）"""
+        result = check_sample_execution(
+            sql="SELECT * FROM test_t; DROP TABLE test_t",
+            conn=conn,
+        )
+        assert result.status == ValidationStatus.FAILED
+        assert "DROP" in result.detail.upper() or "禁止关键字" in result.detail
+
+    def test_sample_execution_accept_with_prefix(self, conn):
+        """WITH 前缀的 CTE 查询可以通过 sample 执行"""
+        result = check_sample_execution(
+            sql="WITH cte AS (SELECT id FROM test_t) SELECT * FROM cte",
+            conn=conn,
+        )
+        # 表 test_t 存在且 SELECT safe，应通过
+        assert result.status == ValidationStatus.PASSED
+
+    def test_sample_execution_reject_alter(self, conn):
+        """ALTER 前缀在 sample 执行前被拦截"""
+        result = check_sample_execution(
+            sql="ALTER TABLE test_t RENAME TO test_t2",
+            conn=conn,
+        )
+        assert result.status == ValidationStatus.FAILED
+        assert "ALTER" in result.detail.upper() or "开头" in result.detail
