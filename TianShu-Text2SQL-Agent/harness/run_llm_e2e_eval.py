@@ -76,6 +76,9 @@ class E2ECase:
     expected_strategy: str = ""  # 期望的策略（如 g2_fact），为空则不校验具体策略
     expected_downgrade_reason_contains: str = ""  # 降级原因应包含的关键词
     expected_failure_categories: list[str] = field(default_factory=list)
+    # 跨域/合并/融合安全边界专用字段
+    expected_answer_contains: str = ""  # 答案应包含的关键词
+    expected_answer_not_contains: str = ""  # 答案不应包含的关键词（如因果措辞）
 
 
 @dataclass
@@ -260,6 +263,8 @@ class E2ERunner:
                 expected_strategy=item.get("expected_strategy", ""),
                 expected_downgrade_reason_contains=item.get("expected_downgrade_reason_contains", ""),
                 expected_failure_categories=item.get("expected_failure_categories", []),
+                expected_answer_contains=item.get("expected_answer_contains", ""),
+                expected_answer_not_contains=item.get("expected_answer_not_contains", ""),
             ))
 
         return cases
@@ -528,6 +533,12 @@ class E2ERunner:
         # 7. 是否执行成功
         assertions.append(self._check_execution(response))
 
+        # 8. 答案内容检查（跨域安全边界：因果措辞/警告注入等）
+        if case.expected_answer_contains:
+            assertions.append(self._check_answer_contains(case, response))
+        if case.expected_answer_not_contains:
+            assertions.append(self._check_answer_not_contains(case, response))
+
         return assertions
 
     def _check_downgrade_case(
@@ -754,18 +765,31 @@ class E2ERunner:
 
     @staticmethod
     def _check_expected_tables(case: E2ECase, response: AgentResponse) -> E2EAssertion:
-        """检查是否命中期望表"""
+        """检查是否命中期望表（包括跨表多计划场景）"""
         if not case.expected_tables:
             return E2EAssertion("expected_table_hit", True, "无期望表约束")
-        if response.plan is None:
-            return E2EAssertion("expected_table_hit", False, "无 SQLPlan，无法检查表引用")
 
-        # 收集 plan 中引用的所有表
+        # 收集所有被引用的表
         referenced_tables: set[str] = set()
-        if response.plan.primary_table:
-            referenced_tables.add(response.plan.primary_table)
-        for join in response.plan.joins:
-            referenced_tables.add(join.table)
+
+        # 主 plan 中的表引用
+        if response.plan is not None:
+            if response.plan.primary_table:
+                referenced_tables.add(response.plan.primary_table)
+            for join in response.plan.joins:
+                referenced_tables.add(join.table)
+
+        # 跨表多计划场景：检查所有子计划引用的表
+        if getattr(response, "is_multi_plan", False) and response.plans:
+            for ur in response.plans:
+                if ur.plan is not None:
+                    if ur.plan.primary_table:
+                        referenced_tables.add(ur.plan.primary_table)
+                    for join in ur.plan.joins:
+                        referenced_tables.add(join.table)
+
+        if not referenced_tables:
+            return E2EAssertion("expected_table_hit", False, "无 SQLPlan，无法检查表引用")
 
         expected_set = {t.lower() for t in case.expected_tables}
         actual_lower = {t.lower() for t in referenced_tables}
@@ -777,6 +801,40 @@ class E2ERunner:
                 f"缺少表引用: {sorted(missing)}（实际: {sorted(actual_lower)}）",
             )
         return E2EAssertion("expected_table_hit", True, f"表命中: {sorted(actual_lower)}")
+
+    @staticmethod
+    def _check_answer_contains(case: E2ECase, response: AgentResponse) -> E2EAssertion:
+        """检查答案是否包含期望关键词（如跨域警告、合并说明等）"""
+        answer_text = (response.chinese_answer or "") + (
+            response.clarification_message or ""
+        )
+        keyword = case.expected_answer_contains
+        if keyword in answer_text:
+            return E2EAssertion(
+                "answer_contains", True,
+                f"答案包含期望关键词 '{keyword}'",
+            )
+        return E2EAssertion(
+            "answer_contains", False,
+            f"答案不包含期望关键词 '{keyword}'（实际: {answer_text[:120]}）",
+        )
+
+    @staticmethod
+    def _check_answer_not_contains(case: E2ECase, response: AgentResponse) -> E2EAssertion:
+        """检查答案不包含禁止关键词（如因果措辞、SQL 关键字等）"""
+        answer_text = (response.chinese_answer or "") + (
+            response.clarification_message or ""
+        )
+        keyword = case.expected_answer_not_contains
+        if keyword not in answer_text:
+            return E2EAssertion(
+                "answer_not_contains", True,
+                f"答案正确不包含禁止关键词 '{keyword}'",
+            )
+        return E2EAssertion(
+            "answer_not_contains", False,
+            f"答案包含禁止关键词 '{keyword}'（实际: {answer_text[:120]}）",
+        )
 
     @staticmethod
     def _check_sql_readonly(response: AgentResponse) -> E2EAssertion:
@@ -863,6 +921,9 @@ class E2ERunner:
             "expected_strategy_match": "downgrade_wrong_strategy",
             "downgrade_reason_content": "downgrade_reason_mismatch",
             "downgrade_sql_generated": "downgrade_sql_missing",
+            # 跨域/合并/融合安全边界专用分类
+            "answer_contains": "answer_content_mismatch",
+            "answer_not_contains": "answer_content_violation",
         }
 
         for a in assertions:

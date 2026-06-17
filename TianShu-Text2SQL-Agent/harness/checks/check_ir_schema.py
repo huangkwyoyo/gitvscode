@@ -40,6 +40,8 @@ def check_ir_dataclasses() -> dict[str, Any]:
             QuestionIntent, SQLPlan, SQLResult, AgentResponse,
             Domain, IntentType, TimeRangeType, Strategy,
             TimeRange, Filter, JoinPlan, Aggregation,
+            # Phase 2B/3/3B/3C 新增结构
+            SubIntent, ExecutionTrace, ResultSummary, MergedResult, UnifiedResponse,
         )
     except ImportError as e:
         return {
@@ -146,6 +148,162 @@ def check_ir_dataclasses() -> dict[str, Any]:
         "status": "PASS" if all(k in resp_dict for k in ["question", "intent", "plan", "result"]) else "FAIL",
         "detail": f"包含 keys={list(resp_dict.keys())}",
     })
+
+    # ── Phase 2B+ 数据结构检查 ──
+
+    # SubIntent（UnifiedResponse 的组成部件）
+    sub_intent = SubIntent(
+        metrics=["trip_count", "total_fare_amount"],
+        domain=Domain.TRAFFIC,
+        planning_table="gold.dws_daily_trip_summary",
+        time_range=TimeRange(type=TimeRangeType.ABSOLUTE, start="2026-01-01", end="2026-03-31"),
+        dimensions=["date"],
+    )
+    sub_dict = sub_intent.to_dict()
+    checks.append({
+        "name": "SubIntent 实例化 + 序列化（Phase 2B）",
+        "status": "PASS" if isinstance(sub_dict, dict) and "metrics" in sub_dict else "FAIL",
+        "detail": f"指标={sub_intent.metrics}, 域={sub_intent.domain.value}, 表={sub_intent.planning_table}",
+    })
+
+    # ExecutionTrace（PlanExecutor 执行追踪）
+    trace = ExecutionTrace(
+        plan_index=1,
+        strategy="g3_direct",
+        primary_table="gold.dws_daily_trip_summary",
+        generated_sql="SELECT trip_date, trip_count FROM gold.dws_daily_trip_summary",
+        safety_check_passed=True,
+        row_count=90,
+        error_message="",
+        execution_status="success",
+        execution_time_ms=12.5,
+    )
+    trace_dict = trace.to_dict()
+    checks.append({
+        "name": "ExecutionTrace 实例化 + 序列化（Phase 3）",
+        "status": "PASS" if isinstance(trace_dict, dict) and trace_dict.get("execution_status") == "success" else "FAIL",
+        "detail": f"plan_index={trace.plan_index}, safety={trace.safety_check_passed}, rows={trace.row_count}",
+    })
+
+    # UnifiedResponse（跨表多计划容器）
+    unified = UnifiedResponse(
+        sub_intent=sub_intent,
+        plan=plan,
+        result=result,
+        execution_trace=trace,
+    )
+    unified_dict = unified.to_dict()
+    checks.append({
+        "name": "UnifiedResponse 实例化 + 序列化（Phase 2B）",
+        "status": "PASS" if all(k in unified_dict for k in ["sub_intent", "plan", "result", "execution_trace"]) else "FAIL",
+        "detail": "sub_intent/plan/result/execution_trace 四字段齐全",
+    })
+
+    # ResultSummary（结构化摘要）
+    from src.ir import MergeStatus
+    summary = ResultSummary(
+        source_plan_index=1,
+        metrics=["trip_count"],
+        dimensions=["trip_date"],
+        primary_table="gold.dws_daily_trip_summary",
+        strategy="g3_direct",
+        columns=["trip_date", "trip_count"],
+        column_types=["DATE", "BIGINT"],
+        row_count=90,
+        sample_rows=[["2026-01-01", 300000], ["2026-01-02", 305000]],
+        has_date_column=True,
+        grain="daily",
+        date_min="2026-01-01",
+        date_max="2026-03-31",
+        warnings=[],
+    )
+    summary_dict = summary.to_dict()
+    checks.append({
+        "name": "ResultSummary 实例化 + 序列化（Phase 3B）",
+        "status": "PASS" if isinstance(summary_dict, dict) and summary_dict.get("grain") == "daily" else "FAIL",
+        "detail": f"指标={summary.metrics}, 行={summary.row_count}, grain={summary.grain}, has_date={summary.has_date_column}",
+    })
+
+    # MergedResult（多结果 merge 容器）
+    merged = MergedResult(
+        merge_status=MergeStatus.MERGED,
+        merge_key="date",
+        columns=["trip_date", "trip_count", "crash_count"],
+        rows=[["2026-01-01", 300000, 5], ["2026-01-02", 305000, 3]],
+        row_count=2,
+        source_plan_indexes=[1, 2],
+        source_summaries=[summary],
+        merge_warnings=["日期范围部分重叠"],
+        reason="按日期 FULL OUTER JOIN 合并",
+    )
+    merged_dict = merged.to_dict()
+    checks.append({
+        "name": "MergedResult 实例化 + 序列化（Phase 3C）",
+        "status": "PASS" if isinstance(merged_dict, dict) and merged_dict.get("merge_status") == "merged" else "FAIL",
+        "detail": f"状态={merged.merge_status.value}, 键={merged.merge_key}, 行={merged.row_count}, 来源数={len(merged.source_plan_indexes)}",
+    })
+
+    # ── Phase 3D: CrossDomainDecision ──
+    try:
+        from src.cross_domain_policy import CrossDomainDecision
+
+        cdd = CrossDomainDecision(
+            allow_display=True,
+            allow_result_merge=True,
+            allow_causal_language=False,
+            requires_clarification=False,
+            refusal=False,
+            warnings=["跨域组合 traffic+safety：禁止因果断言"],
+            reason="traffic 和 safety 的相关性不等于因果关系",
+        )
+        cdd_dict = cdd.to_dict()
+        checks.append({
+            "name": "CrossDomainDecision 实例化 + 序列化（Phase 3D）",
+            "status": "PASS" if isinstance(cdd_dict, dict) and cdd_dict.get("allow_causal_language") is False else "FAIL",
+            "detail": f"allow_display={cdd.allow_display}, allow_causal={cdd.allow_causal_language}, refusal={cdd.refusal}, warnings={len(cdd.warnings)}",
+        })
+    except ImportError as e:
+        checks.append({
+            "name": "CrossDomainDecision 导入（Phase 3D）",
+            "status": "FAIL",
+            "detail": f"无法导入 CrossDomainDecision: {e}",
+        })
+
+    # ── Phase 5: ChartSpec ──
+    try:
+        from src.chart_spec import ChartSpec
+
+        chart = ChartSpec(
+            chart_type="line",
+            title="每日行程数趋势",
+            x_field="trip_date",
+            y_fields=["trip_count"],
+            series=[{"name": "行程数", "values": [300000, 305000]}],
+            source="gold.dws_daily_trip_summary",
+            warnings=[],
+            data_preview=[["2026-01-01", 300000]],
+        )
+        chart_dict = chart.to_dict()
+        json_str = chart.to_json()
+        checks.append({
+            "name": "ChartSpec 实例化 + 序列化（Phase 5）",
+            "status": "PASS" if isinstance(chart_dict, dict) and isinstance(json_str, str) and len(json_str) > 0 else "FAIL",
+            "detail": f"类型={chart.chart_type}, 标题={chart.title}, x={chart.x_field}, y={chart.y_fields}",
+        })
+        # ChartSpec 硬约束：不生成 HTML/JS
+        json_lower = json_str.lower()
+        has_html = "<html" in json_lower or "<div" in json_lower or "<script" in json_lower
+        checks.append({
+            "name": "ChartSpec JSON 不含 HTML/JS（Phase 5 硬约束）",
+            "status": "FAIL" if has_html else "PASS",
+            "detail": "输出包含 HTML/JS" if has_html else "JSON 序列化输出不含 HTML/JS",
+        })
+    except ImportError as e:
+        checks.append({
+            "name": "ChartSpec 导入（Phase 5）",
+            "status": "FAIL",
+            "detail": f"无法导入 ChartSpec: {e}",
+        })
 
     pass_count = sum(1 for c in checks if c["status"] == "PASS")
     fail_count = sum(1 for c in checks if c["status"] == "FAIL")

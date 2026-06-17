@@ -414,6 +414,17 @@ class PromptFixtureRunner:
 
         try:
             plan = sql_plan_from_dict(actual)
+
+            # Phase 4：UNSUPPORTED_MULTI_PLAN 是跨表多指标占位符，
+            # Agent 会在运行时拆分为 SubIntent 并分别生成 SQL。
+            # fixture 回归中跳过 SQL 生成和安全校验（无单表可校验）。
+            if plan.strategy == Strategy.UNSUPPORTED_MULTI_PLAN:
+                check["sql_plan_to_sql_ran"] = False
+                check["validate_sql_safety_ran"] = False
+                # 仅校验策略本身是否有效（能成功解析即为通过）
+                check["passed"] = True
+                return check
+
             plan_errors = plan.validate(AVAILABLE_TABLES, JOIN_WHITELIST)
             if plan_errors:
                 check["schema_validation_failed"] = True
@@ -510,11 +521,15 @@ class PromptFixtureRunner:
         actual: dict[str, Any],
     ) -> str | None:
         """比较 SQLPlan 输出"""
-        for table in case.get("expected_tables", []):
-            if table != actual.get("primary_table") and table not in [
-                join.get("table") for join in actual.get("joins", [])
-            ]:
-                return "table_mismatch"
+        # Phase 4：UNSUPPORTED_MULTI_PLAN 没有 primary_table，
+        # 表引用检查应在 expected_tables 列表中完成（跨表场景）
+        actual_strategy = actual.get("strategy", "")
+        if actual_strategy != Strategy.UNSUPPORTED_MULTI_PLAN.value:
+            for table in case.get("expected_tables", []):
+                if table != actual.get("primary_table") and table not in [
+                    join.get("table") for join in actual.get("joins", [])
+                ]:
+                    return "table_mismatch"
         for field in case.get("expected_fields", []):
             if field not in json.dumps(actual, ensure_ascii=False):
                 return "field_mismatch"

@@ -239,6 +239,11 @@ class SQLPlan:
             errors.append("SQLPlan 策略为 NEED_CLARIFICATION，不应生成 SQL")
             return errors
 
+        # Phase 4：跨表多指标占位符，由 Agent 运行时拆分为 SubIntent，
+        # 不在此处校验表/JOIN（primary_table 为 null 是合法的）
+        if self.strategy == Strategy.UNSUPPORTED_MULTI_PLAN:
+            return errors
+
         # 降级必须说明原因
         if self.strategy not in (Strategy.G3_DIRECT, Strategy.G0_DIM_DIRECT):
             if not self.downgrade_reason:

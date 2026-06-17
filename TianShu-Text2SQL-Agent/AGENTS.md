@@ -162,6 +162,14 @@ Step 5: 解释（结果 → 中文回答）
 | 修改 `src/schema_validators.py`（Schema 校验器） | `src/ir.py`（校验规则需与数据结构一致）、`tests/test_ir.py`（测试期望同步） | 校验规则变更 → 数据结构兼容性确认 |
 | 新增/修改阶段规划文档 `docs/planning/*.md` | `docs/README.md`（文档索引同步）、`docs/memory/经验复盘.md`（如有新经验沉淀） | 规划文档新增 → 索引更新 + 经验条目同步（如适用）|
 | 修改 `docs/text2sql_current_pipeline.md` 或 `docs/text2sql_engineering_glossary.md` | `docs/README.md`（如有章节变更）、`docs/planning/`（如有对应设计文档需同步）| 工程文档变更 → 关联设计文档一致性检查 |
+| 修改 `src/plan_executor.py`（执行层边界） | `src/execution_strategy.py`（策略兼容）、`src/schema_validators.py`（安全链路）、`tests/test_plan_executor.py`、`docs/memory/经验复盘.md`、`docs/memory/风险清单.md` | SQL 生成/安全校验/SQLResult 回填/execution trace 变更 → 安全链路完整性确认 + 测试同步 |
+| 修改 `src/execution_strategy.py`（串行/并发执行策略） | `src/plan_executor.py`（执行器兼容）、`tests/test_execution_strategy.py`、`docs/memory/经验复盘.md`、`docs/memory/风险清单.md` | 并发策略/DuckDB read_only/多连接/线程安全变更 → 安全性确认 + 测试同步 |
+| 修改 `src/result_summary.py`（结构化结果摘要） | `src/result_fusion.py`（LLM 融合输入）、`src/result_merge.py`（merge 输入）、`src/chart_spec.py`（图表输入）、`tests/test_result_summary.py`、`docs/memory/经验复盘.md` | 摘要结构/字段变更 → 下游消费者兼容性确认 |
+| 修改 `src/result_merge.py`（结果层 date merge） | `src/result_summary.py`（摘要兼容）、`src/result_fusion.py`（融合输入）、`tests/test_result_merge.py`、`docs/memory/经验复盘.md`、`docs/memory/风险清单.md` | 合并逻辑/grain 一致性/非因果解释边界变更 → 风险评估 + 测试同步 |
+| 修改 `src/result_fusion.py`（LLM 结果融合） | `prompts/result_fusion.md`（Prompt 同步）、`src/cross_domain_policy.py`（跨域决策集成）、`tests/test_result_fusion.py`、`docs/memory/经验复盘.md`、`docs/memory/风险清单.md` | LLM 融合变更 → SQL 禁止/因果禁止/敏感 payload 禁止/fallback 完整性确认 |
+| 修改 `src/cross_domain_policy.py`（跨域展示/拒绝/因果边界） | `src/result_fusion.py`（融合集成）、`src/chart_spec.py`（图表警告注入）、`tests/test_cross_domain_policy.py`、`docs/memory/经验复盘.md`、`docs/memory/风险清单.md` | 跨域策略变更 → 误报/漏报风险评估 + 测试同步 |
+| 修改 `src/chart_spec.py`（图表规格生成） | `src/result_summary.py`（输入兼容）、`tests/test_chart_spec.py`、`docs/memory/经验复盘.md` | 图表规则变更 → 禁止 HTML/JS、禁止 LLM 直接生成代码、禁止访问 DuckDB、JSON 序列化完整性确认 |
+| 修改 `prompts/result_fusion.md`（LLM 融合 Prompt） | `src/result_fusion.py`（后校验规则同步）、`tests/test_result_fusion.py`、`docs/memory/经验复盘.md`、`docs/memory/风险清单.md` | 融合 Prompt 变更 → 禁止 SQL/禁止因果语言/只解释结构化结果/反例约束完整性确认 |
 
 ### 8.2 执行规则
 

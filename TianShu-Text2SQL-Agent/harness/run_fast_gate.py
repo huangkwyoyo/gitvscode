@@ -8,9 +8,19 @@
 检查顺序（fail-fast，第一项失败立即中断）：
     1. compileall  — 代码编译检查
     2. pytest      — 单元测试套件
-    3. harness     — 六项安全检查（含 Memory Gate）
+    3. harness     — 六项安全检查（含 Memory Gate）+ 五项观察期检查
     4. mock 回归   — Mock Prompt Regression
     5. mock E2E    — Mock E2E Eval
+
+观察期检查（warn-only）：
+    以下 5 个安全检查处于观察期，发现问题仅警告，不阻断 fast gate：
+    - check_plan_executor_safety.py       (PlanExecutor 安全链路)
+    - check_execution_strategy_safety.py  (执行策略串行/隔离)
+    - check_result_fusion_safety.py       (LLM 融合 SQL/因果/编造检测)
+    - check_cross_domain_policy.py        (隐私保护/因果禁止/跨域降级)
+    - check_chart_spec_safety.py          (HTML/JS/LLM/DuckDB 禁止)
+
+    观察期结束后，经连续稳定运行验证，可升级为 error 模式（阻断）。
 
 快速门禁硬性约束：
     - 所有步骤使用 --provider mock，不接受 CLI 覆盖
@@ -29,6 +39,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import subprocess
 import sys
 import time
@@ -39,6 +50,37 @@ from typing import Any
 
 # 项目根目录
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 观察期检查配置（warn-only）
+# ═══════════════════════════════════════════════════════════════════════════════
+# 这些检查处于观察期（observation mode），在 run_harness.py STEPS 中的索引（1-based）
+# 发现问题时打印 WARNING，不阻断 fast gate。
+# 仅基础设施错误（脚本不存在、Python 语法错误、超时）会导致失败。
+#
+# 索引对应关系（run_harness.py STEPS）：
+#   7 = check_execution_strategy_safety.py  (执行策略安全门禁)
+#   8 = check_result_fusion_safety.py       (LLM 融合安全门禁)
+#   9 = check_cross_domain_policy.py        (跨域策略安全门禁)
+#  10 = check_chart_spec_safety.py          (图表规格安全门禁)
+#  11 = check_plan_executor_safety.py       (PlanExecutor 安全门禁)
+#
+# 升级条件（全部满足后可将对应索引移出此列表）：
+#   1. 连续 30 天无规则误报
+#   2. 所有 warn 触达率 > 90%（该 warn 的规则确有对应业务代码变更）
+#   3. 团队确认接受该检查的阻断语义
+#   4. pre-commit 接入是最后一步，不在观察期内完成
+WARN_ONLY_CHECK_INDICES: list[int] = [7, 8, 9, 10, 11]
+
+# 观察期检查对应的脚本路径（文档用，与上方索引一一对应）
+WARN_ONLY_CHECKS: list[str] = [
+    "harness/checks/check_execution_strategy_safety.py",
+    "harness/checks/check_result_fusion_safety.py",
+    "harness/checks/check_cross_domain_policy.py",
+    "harness/checks/check_chart_spec_safety.py",
+    "harness/checks/check_plan_executor_safety.py",
+]
+# ═══════════════════════════════════════════════════════════════════════════════
 
 # 快速门禁步骤定义（按执行顺序）
 # 格式: (步骤名称, 命令列表, 预期耗时估计)
@@ -64,9 +106,15 @@ STEPS: list[dict[str, Any]] = [
     },
     {
         "name": "harness",
-        "display": "Harness 六项安全检查（含 Memory Gate）",
-        "command": [sys.executable, "harness/run_harness.py"],
-        "estimate": "< 10s",
+        "display": "Harness 安全检查（6 项阻断 + 5 项观察期）",
+        "command": [
+            sys.executable,
+            "harness/run_harness.py",
+            "--warn-steps",
+            ",".join(str(i) for i in WARN_ONLY_CHECK_INDICES),
+            "--json-summary",
+        ],
+        "estimate": "< 15s",
     },
     {
         "name": "mock_prompt_regression",
@@ -101,12 +149,14 @@ class StepResult:
 
     name: str
     display: str
-    status: str          # "PASS" | "FAIL" | "SKIPPED"
+    status: str          # "PASS" | "WARN" | "FAIL" | "SKIPPED"
     exit_code: int | None
     stdout: str
     stderr: str
     duration_seconds: float
     error_message: str | None = None
+    # 仅 harness 步骤携带的子检查统计
+    harness_summary: dict[str, int] | None = None
 
 
 @dataclass
@@ -121,9 +171,14 @@ class FastGateReport:
     passed: int
     failed: int
     skipped: int
-    overall: str          # "PASS" | "FAIL"
+    warned: int = 0
+    overall: str = ""     # "PASS" | "FAIL"
     steps: list[dict[str, Any]] = field(default_factory=list)
     duration_total_seconds: float = 0.0
+    # 观察期检查统计
+    warn_checks_passed: int = 0
+    warn_checks_warned: int = 0
+    warn_checks_infra_fail: int = 0
 
 
 def _now_utc() -> str:
@@ -171,6 +226,30 @@ def _sanitize_text(text: str, max_length: int = 5000) -> str:
     if len(text) <= max_length:
         return text
     return text[:max_length] + "\n...[输出过长已截断]"
+
+
+def _parse_harness_json_summary(stdout: str) -> dict[str, int] | None:
+    """从 harness stdout 中解析 JSON 摘要行。
+
+    格式: __HARNESS_JSON_SUMMARY__ {"blocking_pass": 6, ...}
+
+    Returns:
+        解析成功返回 dict，失败返回 None
+    """
+    match = re.search(r'__HARNESS_JSON_SUMMARY__\s*(\{.*\})', stdout)
+    if not match:
+        return None
+    try:
+        summary = json.loads(match.group(1))
+        # 确保所有期望的键都是整数
+        expected_keys = [
+            "blocking_pass", "blocking_fail",
+            "warn_pass", "warn_warn", "warn_infra_fail",
+            "total_pass", "total_warn", "total_fail", "total_steps",
+        ]
+        return {k: int(summary.get(k, 0)) for k in expected_keys}
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return None
 
 
 def run_step(step: dict[str, Any], cwd: Path, timeout_seconds: int = 120) -> StepResult:
@@ -248,28 +327,56 @@ def render_markdown(report: FastGateReport) -> str:
     lines.append("## 汇总")
     lines.append("")
     overall_icon = "✅" if report.overall == "PASS" else "❌"
-    lines.append(f"| 状态 | 总数 | 通过 | 失败 | 跳过 | 总耗时 |")
-    lines.append(f"|------|------|------|------|------|--------|")
+    lines.append(f"| 状态 | 总数 | 通过 | 失败 | 跳过 | 警告 | 总耗时 |")
+    lines.append(f"|------|------|------|------|------|------|--------|")
     lines.append(
         f"| {overall_icon} **{report.overall}** "
         f"| {report.total_steps} "
         f"| {report.passed} "
         f"| {report.failed} "
         f"| {report.skipped} "
+        f"| {report.warned} "
         f"| {report.duration_total_seconds:.1f}s |"
     )
     lines.append("")
 
+    # 观察期检查统计
+    if WARN_ONLY_CHECK_INDICES:
+        lines.append("### 观察期检查（warn-only）")
+        lines.append("")
+        lines.append(f"| 指标 | 数量 |")
+        lines.append(f"|------|------|")
+        lines.append(f"| 通过 | {report.warn_checks_passed} |")
+        lines.append(f"| 警告 | {report.warn_checks_warned} |")
+        lines.append(f"| 基础设施失败 | {report.warn_checks_infra_fail} |")
+        lines.append("")
+        lines.append("> ⚠️ 这些检查处于**观察期**，发现问题仅警告不阻断。")
+        lines.append("> 连续稳定运行后可升级为 error 模式。")
+        lines.append("")
+
     lines.append("## 逐步详情")
     lines.append("")
     for step in report.steps:
-        icon = "✅" if step["status"] == "PASS" else ("⏭️" if step["status"] == "SKIPPED" else "❌")
+        status = step["status"]
+        if status == "PASS":
+            icon = "✅"
+        elif status == "WARN":
+            icon = "⚠️"
+        elif status == "SKIPPED":
+            icon = "⏭️"
+        else:
+            icon = "❌"
         lines.append(f"### {icon} {step['display']} ({step['name']})")
         lines.append(f"- 状态: **{step['status']}**")
         lines.append(f"- 耗时: {step['duration_seconds']}s")
         lines.append(f"- 退出码: {step['exit_code']}")
         if step.get("error_message"):
             lines.append(f"- 错误: {step['error_message']}")
+        # 观察期子检查统计
+        hs = step.get("harness_summary")
+        if hs:
+            lines.append(f"- 阻断检查: {hs.get('blocking_pass', 0)} 通过 / {hs.get('blocking_fail', 0)} 失败")
+            lines.append(f"- 观察期检查: {hs.get('warn_pass', 0)} 通过 / {hs.get('warn_warn', 0)} 警告 / {hs.get('warn_infra_fail', 0)} 基础设施失败")
         lines.append("")
         if step.get("stdout"):
             lines.append("```text")
@@ -287,6 +394,8 @@ def render_markdown(report: FastGateReport) -> str:
     lines.append("- ✅ 判断依据仅来自 stdout / stderr / exit code")
     lines.append("- ✅ 未读取 `*_latest.*` 报告作为 truth source")
     lines.append("- ✅ 未修改任何源码或 Prompt 模板")
+    if WARN_ONLY_CHECK_INDICES:
+        lines.append(f"- ⚠️ {len(WARN_ONLY_CHECK_INDICES)} 项安全检查处于观察期（warn-only），不阻断")
     lines.append("")
     return "\n".join(lines)
 
@@ -325,13 +434,23 @@ def run_fast_gate(
 
     # 执行步骤（fail-fast 模式）
     step_results: list[StepResult] = []
+    harness_summary: dict[str, int] | None = None
     for i, step in enumerate(steps_to_run, 1):
         print(f"[{i}/{len(steps_to_run)}] {step['display']}...", end=" ", flush=True)
         result = run_step(step, cwd)
         step_results.append(result)
+
+        # 解析 harness 步骤的 JSON 摘要
+        if step["name"] == "harness":
+            parsed = _parse_harness_json_summary(result.stdout)
+            if parsed:
+                harness_summary = parsed
+                result.harness_summary = parsed
+
         print(f"{result.status} ({result.duration_seconds}s)")
 
         # fail-fast：任一步骤失败立即中断后续步骤
+        # WARN 状态不触发 fail-fast（仅 FAIL 触发）
         if result.status == "FAIL":
             remaining = steps_to_run[i:]  # 尚未执行的步骤
             for skipped in remaining:
@@ -353,9 +472,15 @@ def run_fast_gate(
 
     # 计算汇总
     passed = sum(1 for r in step_results if r.status == "PASS")
+    warned = sum(1 for r in step_results if r.status == "WARN")
     failed = sum(1 for r in step_results if r.status == "FAIL")
     skipped = sum(1 for r in step_results if r.status == "SKIPPED")
     overall = "PASS" if failed == 0 else "FAIL"
+
+    # 观察期检查统计
+    warn_checks_passed = harness_summary.get("warn_pass", 0) if harness_summary else 0
+    warn_checks_warned = harness_summary.get("warn_warn", 0) if harness_summary else 0
+    warn_checks_infra_fail = harness_summary.get("warn_infra_fail", 0) if harness_summary else 0
 
     report = FastGateReport(
         run_id=run_id,
@@ -366,9 +491,13 @@ def run_fast_gate(
         passed=passed,
         failed=failed,
         skipped=skipped,
+        warned=warned,
         overall=overall,
         steps=[asdict(r) for r in step_results],
         duration_total_seconds=total_duration,
+        warn_checks_passed=warn_checks_passed,
+        warn_checks_warned=warn_checks_warned,
+        warn_checks_infra_fail=warn_checks_infra_fail,
     )
 
     # 写入报告文件
@@ -446,9 +575,18 @@ def main(argv: list[str] | None = None) -> int:
     print(f"\n{'=' * 60}")
     overall_icon = "✅" if report.overall == "PASS" else "❌"
     print(f"{overall_icon} 快速门禁: {report.overall}")
-    print(f"   {report.passed} 通过 / {report.failed} 失败"
+    print(f"   阻断检查: {report.passed} 通过 / {report.failed} 失败"
           + (f" / {report.skipped} 跳过" if report.skipped else ""))
+    # 观察期检查统计
+    if WARN_ONLY_CHECK_INDICES:
+        print(f"   观察期检查: {report.warn_checks_passed} 通过 / {report.warn_checks_warned} 警告"
+              + (f" / {report.warn_checks_infra_fail} 基础设施失败" if report.warn_checks_infra_fail else ""))
+    if report.warned:
+        print(f"   {report.warned} 个顶级步骤存在警告")
     print(f"   总耗时: {report.duration_total_seconds:.1f}s")
+    if WARN_ONLY_CHECK_INDICES:
+        print(f"")
+        print(f"   ⚠️ {len(WARN_ONLY_CHECK_INDICES)} 项安全检查处于观察期（warn-only），不阻断")
     print(f"{'=' * 60}")
 
     if args.json:

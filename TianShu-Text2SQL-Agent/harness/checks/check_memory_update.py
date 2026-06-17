@@ -28,16 +28,31 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 # 关键路径定义 —— 修改这些文件时必须更新记忆
 CRITICAL_PATHS = [
+    # 核心 IR / 生成 / Agent 主循环
     "src/ir.py",
     "src/sql_gen.py",
     "src/agent.py",
     "src/ambiguity.py",
     "src/schema_validators.py",
     "src/executor.py",
+    # Phase 3: 执行层
+    "src/plan_executor.py",
+    "src/execution_strategy.py",
+    # Phase 3B/3C: 结果层
+    "src/result_summary.py",
+    "src/result_merge.py",
+    # Phase 3B/3D: LLM 融合 + 跨域策略
+    "src/result_fusion.py",
+    "src/cross_domain_policy.py",
+    # Phase 5: 图表规格
+    "src/chart_spec.py",
+    # Prompt 模板
     "prompts/intent_classifier.md",
     "prompts/sql_planner.md",
     "prompts/sql_generator.md",
     "prompts/explainer.md",
+    "prompts/result_fusion.md",
+    # Harness 基础设施
     "harness/checks/",
     "harness/baselines/",
     "evals/",
@@ -66,12 +81,62 @@ MIN_SOURCE_DESC_CHARS = 20
 
 # 变更类型 → 记忆覆盖提示
 CHANGE_MEMORY_HINTS = {
+    # 核心模块
     "src/ir.py": "IR 数据结构变更 → 需在经验复盘.md 中记录：变更原因、向下兼容性、对已有评测的影响",
     "src/sql_gen.py": "SQL 生成/安全规则变更 → 需在经验复盘.md 中记录：为什么改规则、阻止了什么风险",
     "src/agent.py": "主循环逻辑变更 → 需在经验复盘.md 中记录：对 Agent 行为边界的改变",
     "src/ambiguity.py": "歧义检测/反问策略变更 → 需在经验复盘.md 中记录：阈值调整原因、预期效果",
     "src/schema_validators.py": "Schema 校验规则变更 → 需在经验复盘.md 中记录：新增/修改的校验项及原因",
+    # Phase 3: 执行层
+    "src/plan_executor.py": (
+        "执行层边界变更 → 需在经验复盘.md 中记录：SQL 生成/安全校验/SQLResult 回填/execution trace 的改动；"
+        "同步检查：① sql_plan_to_sql() 是否仍是 SQL 唯一入口 ② validate_sql_safety() 是否每次执行前调用 "
+        "③ 离线模式是否仍阻断执行 ④ DuckDB read_only 是否未被破坏"
+    ),
+    "src/execution_strategy.py": (
+        "执行策略变更 → 需在经验复盘.md 中记录：串行/并发策略调整原因、线程安全措施；"
+        "同步检查：① 并发是否默认关闭 ② DuckDB connection 是否不跨线程共享 "
+        "③ 每个 plan 是否仍走 validate_sql_safety() ④ read_only 是否未被破坏"
+    ),
+    # Phase 3B/3C: 结果层
+    "src/result_summary.py": (
+        "结果摘要结构变更 → 需在经验复盘.md 中记录：字段增删原因、下游兼容性影响；"
+        "同步检查：① ResultSummary 字段是否与 result_fusion/result_merge/chart_spec 的输入预期一致 "
+        "② _detect_grain() 逻辑变更是否影响 merge 对齐"
+    ),
+    "src/result_merge.py": (
+        "结果 merge 逻辑变更 → 需在经验复盘.md 中记录：merge 条件/策略调整原因、日期对齐规则变更；"
+        "同步检查：① can_merge_on_date() 的条件是否仍然正确 ② grain 不一致时如何处理 "
+        "③ 非因果解释边界是否未被突破 ④ _check_range_consistency() 是否仍然有效"
+    ),
+    # Phase 3B/3D: LLM 融合 + 跨域策略
+    "src/result_fusion.py": (
+        "LLM 融合变更 → 需在经验复盘.md 和 风险清单.md 中记录：融合策略调整原因、安全约束变更；"
+        "同步检查：① LLM 是否仍不能生成 SQL ② payload 是否不包含 SQL/API key/env "
+        "③ 是否存在模板 fallback ④ 是否有因果词后校验（_check_causal_language） "
+        "⑤ 数值一致性后校验是否仍然执行 ⑥ validate_fusion_output() 4 层校验是否完整"
+    ),
+    "src/cross_domain_policy.py": (
+        "跨域策略变更 → 需在经验复盘.md 和 风险清单.md 中记录：新增/修改的跨域组合规则、决策优先级调整；"
+        "同步检查：① person-fields 隐私保护是否未被削弱 ② unknown domain 是否仍触发反问 "
+        "③ traffic+safety 因果禁止是否仍然生效 ④ standard_fine_total 警告是否仍然生效 "
+        "⑤ decision.reason 是否仍清晰可追溯"
+    ),
+    # Phase 5: 图表规格
+    "src/chart_spec.py": (
+        "图表规格变更 → 需在经验复盘.md 中记录：新增图表类型/规则调整原因、选择逻辑变更；"
+        "同步检查：① 是否不生成 HTML/JS ② 是否不调用 LLM ③ 是否不访问 DuckDB "
+        "④ ChartSpec.to_json() 是否可序列化 ⑤ 跨域警告注入是否仍然生效 ⑥ refusal → table 降级是否仍然生效"
+    ),
+    # Prompt 模板
     "prompts/": "Prompt 模板变更 → 需在经验复盘.md 中记录：改了什么、为什么改、需同步的回归用例",
+    "prompts/result_fusion.md": (
+        "LLM 融合 Prompt 变更 → 需在经验复盘.md 和 风险清单.md 中记录：Prompt 修改原因、新增/修改的反例约束；"
+        "同步检查：① 是否仍明确禁止生成 SQL ② 是否仍禁止使用因果语言 ③ 是否仍禁止编造指标 "
+        "④ 是否仍禁止修改数值 ⑤ 反例是否覆盖常见绕过模式 "
+        "⑥ src/result_fusion.py 的 validate_fusion_output() 后校验规则是否需要同步更新"
+    ),
+    # Harness 基础设施
     "harness/checks/": "门禁规则变更 → 需在经验复盘.md 中记录：为什么加/改/撤检查项",
     "harness/baselines/": "基线逻辑变更 → 需在经验复盘.md 中记录：对基线判定标准的影响",
     "evals/": "评测用例变更 → 需在风险清单.md 中评估：是否引入新的失败模式",

@@ -182,3 +182,63 @@ cases:
     expected_refusal:
       refusal: true
       refusal_reason: "当前 Agent 只允许只读问数，不能更新数据。"
+
+  # ── Phase 4 新增：跨表多指标场景 ──
+  - id: intent_multi_metric_cross_table
+    question: "2026年1月每天行程数和事故数分别是多少？"
+    expected_type: answer
+    expected_behavior: answer
+    confidence_min: 0.70
+    confidence_max: 1.00
+    expected_safety_status: pass
+    expected_tables:
+      - gold.dws_daily_trip_summary
+      - gold.dws_daily_crash_summary
+    expected_fields:
+      - trip_count
+      - crash_count
+    expected_intent:
+      domain: traffic
+      intent_type: trend
+      metrics:
+        - trip_count
+        - crash_count
+      time_range:
+        type: absolute
+        start: "2026-01-01"
+        end: "2026-01-31"
+        raw_expression: "2026年1月"
+      dimensions:
+        - date
+      filters: []
+      needs_clarification: false
+      clarification_reason: null
+      confidence: 0.90
+      raw_question: "2026年1月每天行程数和事故数分别是多少？"
+
+  # ── Phase 4 新增：未知领域反问场景 ──
+  - id: intent_unknown_domain_clarification
+    question: "列出所有医院的名称"
+    expected_type: clarification
+    expected_behavior: clarification
+    expected_clarification_contains: "医院"
+    confidence_min: 0.0
+    confidence_max: 0.3
+    expected_safety_status: pass
+    expected_tables: []
+    expected_fields: []
+    expected_intent:
+      domain: null
+      intent_type: null
+      metrics: []
+      time_range:
+        type: fuzzy
+        start: null
+        end: null
+        raw_expression: null
+      dimensions: []
+      filters: []
+      needs_clarification: true
+      clarification_reason: "您的查询涉及未支持的领域（医院），当前仅支持交通出行、停车罚单、安全事故等业务域的查询。"
+      confidence: 0.15
+      raw_question: "列出所有医院的名称"

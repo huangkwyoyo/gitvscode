@@ -971,3 +971,128 @@ cases:
       ORDER BY gold.dim_date.date
     # 边界场景：LLM 直接输出 SQL 而非 QuestionIntent JSON
     # 期望 eval runner 检测到 direct_sql_detected 安全违规
+
+
+  # ═══════════════════════════════════════════════════════════════
+  # 第六类：跨域与合并 (Cross-Domain & Merge) — 3 个用例
+  #
+  # Phase 4 新增：覆盖 result_merge、cross_domain_policy、
+  # 等模块的端到端行为回归。
+  # 此前这些模块在 evals 层为 0% 覆盖（最大盲区）。
+  # ═══════════════════════════════════════════════════════════════
+
+  # ── 6.1 跨表日度合并 (EVAL-MERGE-001) ──
+  # 验证 traffic + safety 跨表查询 → SubIntent 拆分 → date merge
+  - id: e2e_merge_traffic_safety_daily
+    question_zh: "2026年1月每天行程数和事故数分别是多少？"
+    expected_behavior: answer
+    expected_tables:
+      - gold.dws_daily_trip_summary
+      - gold.dws_daily_crash_summary
+      - gold.dim_date
+    expected_metrics:
+      - trip_count
+      - crash_count
+    expected_answer_contains: "合并"
+    mock_intent_response: |
+      {
+        "domain": "traffic",
+        "intent_type": "trend",
+        "metrics": ["trip_count", "crash_count"],
+        "time_range": {
+          "type": "absolute",
+          "start": "2026-01-01",
+          "end": "2026-01-31",
+          "raw_expression": "2026年1月"
+        },
+        "dimensions": ["date"],
+        "filters": [],
+        "needs_clarification": false,
+        "clarification_reason": null,
+        "confidence": 0.90,
+        "raw_question": "2026年1月每天行程数和事故数分别是多少？"
+      }
+    mock_plan_response: |
+      {
+        "strategy": "unsupported_multi_plan",
+        "primary_table": null,
+        "joins": [],
+        "where_clauses": [],
+        "group_by": [],
+        "order_by": [],
+        "aggregations": [],
+        "limit": null,
+        "downgrade_reason": "跨表多指标：trip_count（gold.dws_daily_trip_summary）+ crash_count（gold.dws_daily_crash_summary），分布在 2 张表",
+        "confidence": 0.90
+      }
+
+  # ── 6.2 跨域因果禁止 (EVAL-CROSS-001) ──
+  # 验证 traffic+safety 跨域策略：禁止因果语言，仅允许并列观察
+  - id: e2e_cross_traffic_safety_causal
+    question_zh: "2026年1月每天行程数和受伤人数分别是多少？行程减少是否引起了事故伤亡变化？"
+    expected_behavior: answer
+    expected_tables:
+      - gold.dws_daily_trip_summary
+      - gold.dws_daily_crash_summary
+      - gold.dim_date
+    expected_metrics:
+      - trip_count
+      - persons_injured
+    expected_answer_contains: "不能推断"
+    expected_answer_not_contains: "导致"
+    mock_intent_response: |
+      {
+        "domain": "traffic",
+        "intent_type": "trend",
+        "metrics": ["trip_count", "persons_injured"],
+        "time_range": {
+          "type": "absolute",
+          "start": "2026-01-01",
+          "end": "2026-01-31",
+          "raw_expression": "2026年1月"
+        },
+        "dimensions": ["date"],
+        "filters": [],
+        "needs_clarification": false,
+        "clarification_reason": null,
+        "confidence": 0.88,
+        "raw_question": "2026年1月每天行程数和受伤人数分别是多少？行程减少是否引起了事故伤亡变化？"
+      }
+    mock_plan_response: |
+      {
+        "strategy": "unsupported_multi_plan",
+        "primary_table": null,
+        "joins": [],
+        "where_clauses": [],
+        "group_by": [],
+        "order_by": [],
+        "aggregations": [],
+        "limit": null,
+        "downgrade_reason": "跨表多指标：trip_count（gold.dws_daily_trip_summary）+ persons_injured（gold.dws_daily_crash_summary），分布在 2 张表",
+        "confidence": 0.88
+      }
+
+  # ── 6.3 未知领域反问 (EVAL-CROSS-002) ──
+  # 验证 unknown domain 触发 clarification 而非静默回答
+  - id: e2e_cross_unknown_domain
+    question_zh: "列出所有医院的名称"
+    expected_behavior: clarification
+    expected_clarification_contains: "医院"
+    mock_intent_response: |
+      {
+        "domain": null,
+        "intent_type": null,
+        "metrics": [],
+        "time_range": {
+          "type": "fuzzy",
+          "start": null,
+          "end": null,
+          "raw_expression": null
+        },
+        "dimensions": [],
+        "filters": [],
+        "needs_clarification": true,
+        "clarification_reason": "您的查询涉及未支持的领域（医院），当前仅支持交通出行、停车罚单、安全事故等业务域的查询。请确认您想查询的具体业务类型。",
+        "confidence": 0.15,
+        "raw_question": "列出所有医院的名称"
+      }

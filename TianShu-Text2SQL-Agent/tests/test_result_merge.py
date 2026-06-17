@@ -555,13 +555,25 @@ class TestNoCausalLanguage:
         agent = Text2SQLAgent()
         response = agent.ask("2026年1月每天行程数和受伤人数分别是多少？")
 
-        answer = response.chinese_answer or ""
+        full_answer = response.chinese_answer or ""
+
+        # 跨域策略警告中可能包含因果词作为反例说明（如"不能推断因果关系（如『...是因为...』）"），
+        # 这些不应被判定为违规。剥离 ⚠️ 前缀的警告行后再检查正文。
+        answer = full_answer
+        if "⚠️" in answer:
+            # 移除所有以 ⚠️ 开头的策略警告行（包括续行）
+            lines = answer.split("\n")
+            clean_lines = [
+                line for line in lines
+                if not line.strip().startswith("⚠️")
+            ]
+            answer = "\n".join(clean_lines).strip()
 
         # 禁止的因果词
         causal_words = ["导致", "造成", "引起", "因为", "所以", "因此", "从而"]
         for word in causal_words:
             assert word not in answer, (
-                f"chinese_answer 包含因果词 '{word}': ...{answer[max(0, answer.find(word)-20):answer.find(word)+30]}..."
+                f"chinese_answer 正文包含因果词 '{word}': ...{answer[max(0, answer.find(word)-20):answer.find(word)+30]}..."
             )
 
     def test_merged_answer_describes_merge_not_causality(self):

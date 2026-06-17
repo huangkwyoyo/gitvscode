@@ -145,3 +145,48 @@ cases:
       limit: null
       downgrade_reason: null
       confidence: 0.95
+
+  # ── Phase 4 新增：跨表多指标 → unsupported_multi_plan ──
+  - id: plan_cross_table_multi_metric
+    question: "2026年1月每天行程数和事故数分别是多少？"
+    expected_type: answer
+    confidence_min: 0.70
+    confidence_max: 1.00
+    expected_safety_status: pass
+    expected_tables:
+      - gold.dws_daily_trip_summary
+      - gold.dws_daily_crash_summary
+    expected_fields:
+      - trip_count
+      - crash_count
+    input_intent:
+      domain: traffic
+      intent_type: trend
+      metrics:
+        - trip_count
+        - crash_count
+      time_range:
+        type: absolute
+        start: "2026-01-01"
+        end: "2026-01-31"
+        raw_expression: "2026年1月"
+      dimensions:
+        - date
+      filters: []
+      needs_clarification: false
+      clarification_reason: null
+      confidence: 0.90
+      raw_question: "2026年1月每天行程数和事故数分别是多少？"
+    # 跨表场景：SQL 规划器应返回 unsupported_multi_plan，
+    # 由 Agent 在运行时拆分为 SubIntent 并分别生成计划。
+    expected_plan:
+      strategy: unsupported_multi_plan
+      primary_table: null
+      joins: []
+      where_clauses: []
+      group_by: []
+      order_by: []
+      aggregations: []
+      limit: null
+      downgrade_reason: "跨表多指标：trip_count（gold.dws_daily_trip_summary）+ crash_count（gold.dws_daily_crash_summary），分布在 2 张表"
+      confidence: 0.90

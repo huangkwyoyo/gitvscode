@@ -1194,11 +1194,12 @@ class Text2SQLAgent:
 
     @staticmethod
     def _extract_plan_info_from_sqlplan(
-        metric_name: str, plan: SQLPlan,
+        metric_name: str, plan: SQLPlan, domain=None,
     ) -> dict[str, Any]:
         """从 SQLPlan 对象中提取 planning_info dict。
 
         用于 _determine_single_metric_plan() 统一 G2 降级路径的返回格式。
+        domain 参数（Phase 4 新增）：跨域策略需要知道每个指标的所属业务域。
         """
         return {
             "metric": metric_name,
@@ -1213,6 +1214,7 @@ class Text2SQLAgent:
             "where_clauses": plan.where_clauses,
             "joins": plan.joins,
             "downgrade_reason": plan.downgrade_reason,
+            "domain": domain,
         }
 
     def _determine_single_metric_plan(
@@ -1238,10 +1240,22 @@ class Text2SQLAgent:
         metric_info = self._get_metric_info(metric_name)
         dimensions = intent.dimensions if intent.dimensions else ["date"]
 
+        # Phase 4：解析指标所属业务域（跨域策略需要此信息）
+        _metric_domain = None
+        if metric_info is not None and metric_info.domain:
+            try:
+                _metric_domain = Domain(metric_info.domain)
+            except ValueError:
+                _metric_domain = intent.domain if intent.domain else None
+        if _metric_domain is None:
+            _metric_domain = intent.domain if intent.domain else None
+
         # ── 情况 0: G3 不可用 → 直接走 G2 ──
         if metric_info is not None and not metric_info.g3_available:
             g2_plan = self._build_g2_plan(metric_info, intent, dimensions)
-            return self._extract_plan_info_from_sqlplan(metric_name, g2_plan)
+            return self._extract_plan_info_from_sqlplan(
+                metric_name, g2_plan, domain=_metric_domain,
+            )
 
         config = self._resolve_metric_table_mapping(metric_name)
 
@@ -1249,7 +1263,9 @@ class Text2SQLAgent:
             # table mapping 失败但 metric_info 存在 → 尝试 G2
             if metric_info is not None:
                 g2_plan = self._build_g2_plan(metric_info, intent, dimensions)
-                return self._extract_plan_info_from_sqlplan(metric_name, g2_plan)
+                return self._extract_plan_info_from_sqlplan(
+                    metric_name, g2_plan, domain=_metric_domain,
+                )
             return {
                 "metric": metric_name,
                 "strategy": Strategy.NEED_CLARIFICATION,
@@ -1262,6 +1278,7 @@ class Text2SQLAgent:
                     f"指标 '{metric_name}' 暂未纳入规则模式，"
                     f"请明确或等待接入 LLM 规划器"
                 ),
+                "domain": _metric_domain,
             }
 
         # ── 情况 2: G3 可用，检查维度覆盖 ──
@@ -1278,6 +1295,7 @@ class Text2SQLAgent:
                     "planning_table": g3_table,
                     "aggregation": Aggregation(expr=aggregation_expr, alias=metric_name),
                     "group_by": ["gold.dim_date.date"],
+                    "domain": _metric_domain,
                     "where_clauses": [
                         (
                             f"gold.dim_date.date BETWEEN DATE '{intent.time_range.start}' "
@@ -1295,7 +1313,9 @@ class Text2SQLAgent:
             else:
                 # G3 不覆盖某些维度 → 降级 G2
                 g2_plan = self._build_g2_plan(metric_info, intent, missing)
-                return self._extract_plan_info_from_sqlplan(metric_name, g2_plan)
+                return self._extract_plan_info_from_sqlplan(
+                    metric_name, g2_plan, domain=_metric_domain,
+                )
 
         # ── 情况 3: metric_info 为空 → 使用配置走 G3_DIRECT（向后兼容）──
         table = config["table"]
@@ -1307,6 +1327,7 @@ class Text2SQLAgent:
             "planning_table": table,
             "aggregation": Aggregation(expr=aggregation_expr, alias=metric_name),
             "group_by": ["gold.dim_date.date"],
+            "domain": _metric_domain,
             "where_clauses": [
                 (
                     f"gold.dim_date.date BETWEEN DATE '{intent.time_range.start}' "

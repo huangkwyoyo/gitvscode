@@ -1,0 +1,290 @@
+# =============================================================================
+# Memory Rule Registry — Text2SQL-Agent 规则单一事实源
+# =============================================================================
+#
+# 本文件是项目中所有记忆规则的权威注册表。
+# 规则编号使用 TA-Rxxx 前缀，避免与其他仓库的 R001-R0XX 冲突。
+#
+# ═══════════════════════════════════════════════════════════════════════════════
+# 规则生命周期状态
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# proposed   : 候选规则，不阻断任何门禁，仅用于观察和提示
+# active     : 已生效规则，可用于门禁阻断（需满足晋升标准）
+# deprecated : 废弃规则，不阻断但保留历史记录
+# superseded : 被其他规则替代，通过 notes 字段标注替代规则编号
+#
+# ═══════════════════════════════════════════════════════════════════════════════
+# blocking 定义
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# blocking=false : 观察或提示模式，不阻断门禁
+# blocking=true  : 可作为门禁阻断依据
+#
+# ═══════════════════════════════════════════════════════════════════════════════
+# proposed → active 晋升标准
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# 规则从 proposed 晋升为 active 至少需要满足以下全部条件：
+#
+# 1. 对应 check 已接入 fast gate warn 模式并稳定运行（连续 ≥3 次 fast gate
+#    运行中该 check 未出现基础设施故障）。
+# 2. 对应 pytest 至少覆盖正例和负例（即至少 1 个"应通过"和 1 个"应失败"用例）。
+# 3. 对应 eval case 已存在并包含明确断言，或经团队评审确认不需要 eval（需在
+#    notes 字段中注明原因和评审结论）。
+# 4. 至少一次完整 fast gate 通过（所有步骤 PASS，warn checks 无 infra_fail）。
+# 5. 人工审查确认无明显假阳性（审查记录需在 notes 中注明审查人和日期）。
+#
+# 注意：本轮（Step 5）只记录晋升标准，不实现自动晋升逻辑。所有规则默认
+# proposed + blocking=false。
+#
+# ═══════════════════════════════════════════════════════════════════════════════
+# YAML Schema
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# 每条规则必须包含以下字段：
+#
+# rule_id            : string   - 规则编号，格式 TA-Rxxx（如 TA-R010）
+# title              : string   - 规则标题（简短摘要）
+# status             : enum     - proposed | active | deprecated | superseded
+# blocking           : bool     - 是否可作为阻断依据
+# severity           : enum     - high | medium | low
+# source_memory      : string   - 经验来源文档及编号引用
+# risk_ids           : list     - 关联风险编号（RISK-xxx）
+# applies_to         : list     - 适用的源代码/配置/Prompt 文件
+# required_checks    : list     - 对应的 harness 检查脚本
+# required_tests     : list     - 对应的 pytest 测试文件
+# required_evals     : list     - 对应的 eval 用例文件
+# notes              : string   - 补充说明（可选，默认空字符串）
+# =============================================================================
+
+rules:
+  # ═════════════════════════════════════════════════════════════════════════════
+  # TA-R010: 拒绝策略中英文覆盖
+  # 迁移自: 经验复盘.md R001
+  # ═════════════════════════════════════════════════════════════════════════════
+  - rule_id: TA-R010
+    title: "拒绝策略的关键词检测必须同时覆盖中英文危险操作词"
+    status: proposed
+    blocking: false
+    severity: high
+    source_memory: "docs/memory/经验复盘.md#R001"
+    risk_ids:
+      - RISK-004
+    applies_to:
+      - config/tianshu_target.yml
+      - contracts/question_policy.yml
+      - harness/checks/check_refusal_policy.py
+      - AGENTS.md
+    required_checks:
+      - harness/checks/check_refusal_policy.py
+    required_tests:
+      - tests/test_c1_safety_regression.py
+      - tests/test_c2_safety_regression.py
+    required_evals:
+      - evals/unsafe_questions.yml
+    notes: "越权意图检测应在 QuestionIntent 阶段完成，不能仅依赖 SQL 生成阶段的英文关键词检查。"
+
+  # ═════════════════════════════════════════════════════════════════════════════
+  # TA-R011: 歧义检测不能仅依赖置信度
+  # 迁移自: 经验复盘.md R002
+  # ═════════════════════════════════════════════════════════════════════════════
+  - rule_id: TA-R011
+    title: "歧义检测不应仅依赖置信度阈值，需检查候选指标集规模和语义距离"
+    status: proposed
+    blocking: false
+    severity: high
+    source_memory: "docs/memory/经验复盘.md#R002"
+    risk_ids:
+      - RISK-005
+    applies_to:
+      - src/ambiguity.py
+      - config/agent_config.yml
+    required_checks:
+      - harness/checks/check_refusal_policy.py
+    required_tests:
+      - tests/test_b5_validate_ambiguity_split.py
+    required_evals:
+      - evals/ambiguous_questions.yml
+    notes: "当存在多个语义相近的候选指标时，即使置信度超过阈值，也应触发反问确认。"
+
+  # ═════════════════════════════════════════════════════════════════════════════
+  # TA-R012: LLM 不得直接输出 SQL
+  # 迁移自: 经验复盘.md R003
+  # ═════════════════════════════════════════════════════════════════════════════
+  - rule_id: TA-R012
+    title: "LLM 不得在 JSON 字段中嵌入 SQL，sql_plan_to_sql() 是 SQL 生成唯一入口"
+    status: proposed
+    blocking: false
+    severity: high
+    source_memory: "docs/memory/经验复盘.md#R003"
+    risk_ids:
+      - RISK-001
+      - RISK-017
+    applies_to:
+      - prompts/intent_classifier.md
+      - prompts/sql_planner.md
+      - src/schema_validators.py
+      - src/llm_pipeline.py
+      - AGENTS.md
+    required_checks:
+      - harness/checks/check_ir_schema.py
+      - harness/checks/check_sql_readonly.py
+    required_tests:
+      - tests/test_prompt_fixtures.py
+      - tests/test_llm_pipeline.py
+    required_evals:
+      - evals/e2e_cases.yml
+    notes: "所有 LLM 输出必须经过 schema_validators 的结构化校验。Prompt 模板中必须加入反例说明。"
+
+  # ═════════════════════════════════════════════════════════════════════════════
+  # TA-R013: 指标按业务域分组展示
+  # 迁移自: 经验复盘.md R004
+  # ═════════════════════════════════════════════════════════════════════════════
+  - rule_id: TA-R013
+    title: "Prompt 中指标应按业务域分组展示，同域相近指标触发反问"
+    status: proposed
+    blocking: false
+    severity: medium
+    source_memory: "docs/memory/经验复盘.md#R004"
+    risk_ids:
+      - RISK-016
+    applies_to:
+      - prompts/intent_classifier.md
+      - config/tianshu_target.yml
+    required_checks:
+      - harness/checks/check_metric_registered.py
+    required_tests:
+      - tests/test_metric_resolver.py
+      - tests/test_metric_catalog.py
+    required_evals:
+      - evals/standard_questions.yml
+    notes: "待补自动化检查：Intent 分类器中指标分组展示的完整性检测。"
+
+  # ═════════════════════════════════════════════════════════════════════════════
+  # TA-R014: G3→G2 降级路由由规则代码处理
+  # 迁移自: 经验复盘.md R005
+  # ═════════════════════════════════════════════════════════════════════════════
+  - rule_id: TA-R014
+    title: "G3→G2 降级路由由规则代码统一处理，不依赖 LLM 判断"
+    status: proposed
+    blocking: false
+    severity: high
+    source_memory: "docs/memory/经验复盘.md#R005"
+    risk_ids:
+      - RISK-006
+    applies_to:
+      - src/sql_gen.py
+      - AGENTS.md
+    required_checks:
+      - harness/checks/check_layer_compliance.py
+    required_tests:
+      - tests/test_resolver.py
+    required_evals:
+      - evals/e2e_cases.yml
+    notes: "LLM 模式下的 SQLPlan 生成后，必须再经过一次层级合规检查。"
+
+  # ═════════════════════════════════════════════════════════════════════════════
+  # TA-R015: Prompt 修改后同步更新回归用例
+  # 迁移自: 经验复盘.md R006
+  # ═════════════════════════════════════════════════════════════════════════════
+  - rule_id: TA-R015
+    title: "修改 Prompt 后必须同步更新回归夹具和 regression_cases.yml"
+    status: proposed
+    blocking: false
+    severity: high
+    source_memory: "docs/memory/经验复盘.md#R006"
+    risk_ids:
+      - RISK-002
+    applies_to:
+      - prompts/
+      - tests/fixtures/prompts/
+      - evals/regression_cases.yml
+      - AGENTS.md
+    required_checks:
+      - harness/checks/check_memory_update.py
+    required_tests:
+      - tests/test_prompt_regression_harness.py
+      - tests/test_prompt_fixtures.py
+    required_evals:
+      - evals/regression_cases.yml
+    notes: "修改 prompts/ 目录下任何文件后，必须同步更新 fixtures、evals 和 经验复盘.md。"
+
+  # ═════════════════════════════════════════════════════════════════════════════
+  # TA-R016: Provider 不稳定处理
+  # 迁移自: 经验复盘.md R007
+  # ═════════════════════════════════════════════════════════════════════════════
+  - rule_id: TA-R016
+    title: "Runtime 基线 UNSTABLE 需附 provider 稳定性指标，连续 N 次后降级告警"
+    status: proposed
+    blocking: false
+    severity: medium
+    source_memory: "docs/memory/经验复盘.md#R007"
+    risk_ids:
+      - RISK-003
+    applies_to:
+      - harness/baselines/dual_baseline.py
+      - harness/run_slow_gate.py
+    required_checks: []
+    required_tests:
+      - tests/test_dual_baseline.py
+    required_evals: []
+    notes: "UNSTABLE 不触发任何阻断。Provider 稳定性指标待补自动化测试。"
+
+  # ═════════════════════════════════════════════════════════════════════════════
+  # TA-R017: IR 结构支持一对多映射
+  # 迁移自: 经验复盘.md R008
+  # ═════════════════════════════════════════════════════════════════════════════
+  - rule_id: TA-R017
+    title: "IR 结构应支持一对多映射——跨表多指标拆分为多 SubIntent + 多 SQLPlan"
+    status: proposed
+    blocking: false
+    severity: high
+    source_memory: "docs/memory/经验复盘.md#R008"
+    risk_ids:
+      - RISK-018
+      - RISK-019
+      - RISK-022
+    applies_to:
+      - src/ir.py
+      - src/agent.py
+    required_checks:
+      - harness/checks/check_ir_schema.py
+      - harness/checks/check_execution_strategy_safety.py
+      - harness/checks/check_plan_executor_safety.py
+    required_tests:
+      - tests/test_mvp_agent.py
+      - tests/test_execution_strategy.py
+      - tests/test_plan_executor.py
+    required_evals:
+      - evals/e2e_cases.yml
+    notes: "每个子计划独立走 plan.validate() + validate_sql_safety()，保持安全校验的完整性。"
+
+  # ═════════════════════════════════════════════════════════════════════════════
+  # TA-R018: LLM 融合结果需保留 fallback + 后校验
+  # 迁移自: 经验复盘.md R009
+  # ═════════════════════════════════════════════════════════════════════════════
+  - rule_id: TA-R018
+    title: "LLM 融合结果必须保留模板 fallback + 数值一致性后校验，禁止编造因果"
+    status: proposed
+    blocking: false
+    severity: high
+    source_memory: "docs/memory/经验复盘.md#R009"
+    risk_ids:
+      - RISK-020
+      - RISK-021
+      - RISK-024
+    applies_to:
+      - src/explainer.py
+      - src/result_fusion.py
+      - prompts/result_fusion.md
+    required_checks:
+      - harness/checks/check_result_fusion_safety.py
+      - harness/checks/check_cross_domain_policy.py
+    required_tests:
+      - tests/test_result_fusion.py
+      - tests/test_cross_domain_policy.py
+      - tests/test_result_merge.py
+    required_evals:
+      - evals/e2e_cases.yml
+    notes: "LLM 融合 Prompt 必须包含反例约束——只描述已提供的数据，不要推断因果关系，不要修改任何数值。"
