@@ -1729,3 +1729,249 @@ class TestStep8cCoverageGaps:
         assert "[OK] Memory Gate 通过。" in result.stdout, (
             "Memory Gate 应通过"
         )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Step 8d 测试：active+blocking 规则 closure_failures → exit 1
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestStep8dClosureFailureExitCode:
+    """验证 active+blocking=true 规则的闭缺口正确触发 exit 1"""
+
+    @staticmethod
+    def _make_rule(rule_id, status, blocking, checks=None, tests=None, evals=None):
+        """构造一条最小规则"""
+        return {
+            "rule_id": rule_id,
+            "title": f"测试规则 {rule_id}",
+            "status": status,
+            "blocking": blocking,
+            "severity": "high",
+            "source_memory": "test",
+            "risk_ids": [],
+            "applies_to": ["src/test.py"],
+            "required_checks": checks or [],
+            "required_tests": tests or [],
+            "required_evals": evals or [],
+            "notes": "",
+        }
+
+    @staticmethod
+    def _make_reverse_index(rules, file_path, covering_ids):
+        """构造反向索引：file_path 被指定规则覆盖"""
+        ri = {}
+        ri[file_path] = list(covering_ids)
+        return ri
+
+    def test_active_blocking_check_mismatch_triggers_closure_failure(self):
+        """active+blocking 规则的 check 文件变更但不在 required_checks → closure failure"""
+        from harness.checks.check_memory_update import check_registry_closure
+
+        rule = self._make_rule("TA-R999", "active", True,
+                               checks=["harness/checks/other_check.py"])
+        result = check_registry_closure(
+            changed_files=["harness/checks/changed_check.py"],
+            rules=[rule],
+            reverse_index=self._make_reverse_index(
+                [rule], "harness/checks/changed_check.py", ["TA-R999"]
+            ),
+        )
+        assert result["active_blocking_closure_failures"] >= 1, (
+            f"active+blocking 规则 check 闭缺口应为 FAIL:\n{result}"
+        )
+        assert result["proposed_closure_warnings"] == 0, (
+            f"不应有 proposed warnings: {result}"
+        )
+
+    def test_active_blocking_eval_mismatch_triggers_closure_failure(self):
+        """active+blocking 规则的 eval 文件变更但不在 required_evals → closure failure"""
+        from harness.checks.check_memory_update import check_registry_closure
+
+        rule = self._make_rule("TA-R999", "active", True,
+                               evals=["evals/other.yml"])
+        result = check_registry_closure(
+            changed_files=["evals/changed_eval.yml"],
+            rules=[rule],
+            reverse_index=self._make_reverse_index(
+                [rule], "evals/changed_eval.yml", ["TA-R999"]
+            ),
+        )
+        assert result["active_blocking_closure_failures"] >= 1, (
+            f"active+blocking 规则 eval 闭缺口应为 FAIL:\n{result}"
+        )
+
+    def test_proposed_check_mismatch_only_warns(self):
+        """proposed + blocking=false 规则的 check 闭缺口 → WARN，不 FAIL"""
+        from harness.checks.check_memory_update import check_registry_closure
+
+        rule = self._make_rule("TA-R888", "proposed", False,
+                               checks=["harness/checks/other_check.py"])
+        result = check_registry_closure(
+            changed_files=["harness/checks/changed_check.py"],
+            rules=[rule],
+            reverse_index=self._make_reverse_index(
+                [rule], "harness/checks/changed_check.py", ["TA-R888"]
+            ),
+        )
+        assert result["active_blocking_closure_failures"] == 0, (
+            f"proposed 规则不应有 closure failure: {result}"
+        )
+        assert result["proposed_closure_warnings"] >= 1, (
+            f"proposed 规则应有 WARN:\n{result}"
+        )
+
+    def test_active_blocking_all_matched_no_failure(self):
+        """active+blocking 规则所有文件均在 required_* → 0 closure failure"""
+        from harness.checks.check_memory_update import check_registry_closure
+
+        rule = self._make_rule("TA-R999", "active", True,
+                               checks=["harness/checks/matched_check.py"],
+                               tests=["tests/matched_test.py"],
+                               evals=["evals/matched_eval.yml"])
+        result = check_registry_closure(
+            changed_files=[
+                "harness/checks/matched_check.py",
+                "tests/matched_test.py",
+                "evals/matched_eval.yml",
+            ],
+            rules=[rule],
+            reverse_index={
+                "harness/checks/matched_check.py": ["TA-R999"],
+                "tests/matched_test.py": ["TA-R999"],
+                "evals/matched_eval.yml": ["TA-R999"],
+            },
+        )
+        assert result["active_blocking_closure_failures"] == 0, (
+            f"全部匹配时不应有 closure failure:\n{result}"
+        )
+        assert result["proposed_closure_warnings"] == 0, (
+            f"全部匹配时不应有 WARN:\n{result}"
+        )
+        assert result["fail_count"] == 0, (
+            f"fail_count 应为 0:\n{result}"
+        )
+
+    def test_real_tar018_all_paths_covered_no_failure(self):
+        """真实 TA-R018 规则——所有 required_* 路径存在且匹配 → 0 failure"""
+        from harness.checks.check_memory_update import (
+            load_memory_rules_registry,
+            build_registry_reverse_index,
+            check_registry_closure,
+        )
+
+        registry = load_memory_rules_registry()
+        if registry.get("load_error"):
+            pytest.skip(f"注册表加载失败: {registry['load_error']}")
+
+        rules = registry["rules"]
+        ri = build_registry_reverse_index(rules)
+
+        # 模拟变更 TA-R018 的所有 required_checks 文件
+        tar018 = [r for r in rules if r["rule_id"] == "TA-R018"][0]
+        changed = (
+            tar018["required_checks"] +
+            tar018["required_tests"] +
+            tar018["required_evals"]
+        )
+
+        result = check_registry_closure(changed, rules, ri)
+        assert result["active_blocking_closure_failures"] == 0, (
+            f"真实 TA-R018 全部匹配应有 0 closure failure:\n"
+            f"  active_blocking_closure_failures={result['active_blocking_closure_failures']}\n"
+            f"  proposed_closure_warnings={result['proposed_closure_warnings']}"
+        )
+
+    def test_cli_exit_1_when_active_blocking_closure_fails(self, monkeypatch):
+        """CLI 层面：active+blocking 闭缺口 → exit 1（直接调用 main）"""
+        import copy
+        from harness.checks.check_memory_update import main
+
+        # 构造一条 active+blocking 规则，applies_to 包含变更文件，
+        # 但 required_evals 不包含它 → closure failure
+        synthetic_rule = {
+            "rule_id": "TA-R999",
+            "title": "Step 8d 测试规则",
+            "status": "active",
+            "blocking": True,
+            "severity": "high",
+            "source_memory": "test",
+            "risk_ids": [],
+            "applies_to": [
+                "evals/changed_by_test.yml",   # ← 覆盖该文件
+                "src/test.py",
+            ],
+            "required_checks": [],
+            "required_tests": [],
+            "required_evals": ["evals/other.yml"],  # ← 但 required_evals 不含它
+            "notes": "",
+        }
+
+        def mock_load():
+            return {
+                "rules": [synthetic_rule],
+                "path": Path("dummy"),
+                "load_error": None,
+            }
+
+        def mock_get_changed():
+            return ["evals/changed_by_test.yml"]
+
+        import harness.checks.check_memory_update as cm
+        monkeypatch.setattr(cm, "load_memory_rules_registry", mock_load)
+        monkeypatch.setattr(cm, "get_all_changed_files", mock_get_changed)
+        monkeypatch.setattr(sys, "argv", [
+            "check_memory_update.py", "--registry",
+            "--config", "config/tianshu_target.yml",
+        ])
+
+        exit_code = main()
+        assert exit_code == 1, (
+            f"active+blocking closure failure 应 exit 1，实际: {exit_code}"
+        )
+
+    def test_cli_exit_0_when_only_proposed_warnings(self, monkeypatch):
+        """CLI 层面：仅 proposed 规则 WARN → exit 0（直接调用 main）"""
+        from harness.checks.check_memory_update import main
+
+        # 构造一条 proposed 规则，applies_to 包含变更文件但 required_evals 不含
+        synthetic_rule = {
+            "rule_id": "TA-R888",
+            "title": "Step 8d proposed 测试",
+            "status": "proposed",
+            "blocking": False,
+            "severity": "medium",
+            "source_memory": "test",
+            "risk_ids": [],
+            "applies_to": [
+                "evals/changed_by_test.yml",
+                "src/test.py",
+            ],
+            "required_checks": [],
+            "required_tests": [],
+            "required_evals": ["evals/other.yml"],  # 不含变更文件
+            "notes": "",
+        }
+
+        def mock_load():
+            return {
+                "rules": [synthetic_rule],
+                "path": Path("dummy"),
+                "load_error": None,
+            }
+
+        def mock_get_changed():
+            return ["evals/changed_by_test.yml"]
+
+        import harness.checks.check_memory_update as cm
+        monkeypatch.setattr(cm, "load_memory_rules_registry", mock_load)
+        monkeypatch.setattr(cm, "get_all_changed_files", mock_get_changed)
+        monkeypatch.setattr(sys, "argv", [
+            "check_memory_update.py", "--registry",
+            "--config", "config/tianshu_target.yml",
+        ])
+
+        exit_code = main()
+        assert exit_code == 0, (
+            f"仅 proposed WARN 应 exit 0，实际: {exit_code}"
+        )
