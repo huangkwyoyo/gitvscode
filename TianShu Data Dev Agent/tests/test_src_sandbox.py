@@ -94,3 +94,97 @@ class TestSparkExecutor:
         result = execute_spark_dsl("spark.table('t')", spark_session=object())
         assert result.error is not None
         assert "尚未实现" in result.error
+
+
+@pytest.mark.skipif(not DUCKDB_AVAILABLE, reason="duckdb 未安装")
+class TestSandboxForbiddenKeywords:
+    """统一禁止关键字来源——确保沙箱拦截所有 19 个危险关键字"""
+
+    @pytest.fixture
+    def conn(self):
+        con = duckdb.connect(":memory:", read_only=False)
+        con.execute("CREATE TABLE t (id INTEGER)")
+        yield con
+        con.close()
+
+    # ── execute_sql_sample（安全入口）测试 ──
+
+    def test_sample_replace_rejected(self, conn):
+        """REPLACE 被沙箱 sample run 拦截"""
+        from src.sandbox.executor import execute_sql_sample
+        result = execute_sql_sample(conn, "REPLACE INTO t VALUES (1)")
+        assert result.error is not None
+        assert "REPLACE" in result.error
+
+    def test_sample_rename_rejected(self, conn):
+        """RENAME 被沙箱 sample run 拦截（前缀或关键字检查任一命中即拦截）"""
+        from src.sandbox.executor import execute_sql_sample
+        result = execute_sql_sample(conn, "ALTER TABLE t RENAME TO t2")
+        assert result.error is not None
+        # ALTER 被 ALLOWED_PREFIXES 拦截在前，或 RENAME 被 FORBIDDEN_KEYWORDS 拦截在后
+        assert "RENAME" in result.error or "ALTER" in result.error
+
+    def test_sample_grant_rejected(self, conn):
+        """GRANT 被沙箱 sample run 拦截"""
+        from src.sandbox.executor import execute_sql_sample
+        result = execute_sql_sample(conn, "GRANT SELECT ON t TO user1")
+        assert result.error is not None
+        assert "GRANT" in result.error
+
+    def test_sample_revoke_rejected(self, conn):
+        """REVOKE 被沙箱 sample run 拦截"""
+        from src.sandbox.executor import execute_sql_sample
+        result = execute_sql_sample(conn, "REVOKE SELECT ON t FROM user1")
+        assert result.error is not None
+        assert "REVOKE" in result.error
+
+    def test_sample_detach_rejected(self, conn):
+        """DETACH 被沙箱 sample run 拦截"""
+        from src.sandbox.executor import execute_sql_sample
+        result = execute_sql_sample(conn, "DETACH DATABASE mydb")
+        assert result.error is not None
+        assert "DETACH" in result.error
+
+    def test_sample_import_rejected(self, conn):
+        """IMPORT 被沙箱 sample run 拦截"""
+        from src.sandbox.executor import execute_sql_sample
+        result = execute_sql_sample(conn, "IMPORT DATABASE 'backup'")
+        assert result.error is not None
+        assert "IMPORT" in result.error
+
+    def test_sample_valid_select_passes(self, conn):
+        """正常 SELECT 仍可执行"""
+        from src.sandbox.executor import execute_sql_sample
+        result = execute_sql_sample(conn, "SELECT * FROM t")
+        assert result.error is None
+        assert result.row_count == 0
+
+    # ── execute_sql（防御纵深）测试 ──
+
+    def test_raw_execute_replace_rejected(self, conn):
+        """直接调用 execute_sql 也拦截 REPLACE（防御纵深）"""
+        from src.sandbox.executor import execute_sql
+        result = execute_sql(conn, "REPLACE INTO t VALUES (1)")
+        assert result.error is not None
+        assert "REPLACE" in result.error
+
+    def test_raw_execute_grant_rejected(self, conn):
+        """直接调用 execute_sql 也拦截 GRANT（防御纵深）"""
+        from src.sandbox.executor import execute_sql
+        result = execute_sql(conn, "GRANT SELECT ON t TO user1")
+        assert result.error is not None
+        assert "GRANT" in result.error
+
+    def test_raw_execute_detach_rejected(self, conn):
+        """直接调用 execute_sql 也拦截 DETACH（防御纵深）"""
+        from src.sandbox.executor import execute_sql
+        result = execute_sql(conn, "DETACH DATABASE mydb")
+        assert result.error is not None
+        assert "DETACH" in result.error
+
+    def test_raw_execute_select_passes(self, conn):
+        """直接调用 execute_sql 正常 SELECT 仍可执行"""
+        from src.sandbox.executor import execute_sql
+        result = execute_sql(conn, "SELECT * FROM t")
+        assert result.error is None
+        assert result.row_count == 0

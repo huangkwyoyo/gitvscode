@@ -16,6 +16,7 @@ from typing import Any, Callable, Optional
 from src.ir.types import CheckResult, SQLPlan, SQLResult, ValidationReport, ValidationStatus
 
 from .checks import (
+    ALLOWED_PREFIXES,
     FORBIDDEN_KEYWORDS,
     _clean_sql_for_keyword_scan,
     _extract_table_references,
@@ -67,6 +68,60 @@ class Validator:
             (6, "结果质量", "WARN", check_result_quality),
             (7, "交叉验证（SQL vs Spark DSL）", "WARN", check_cross_validation),
         ]
+
+    def validate_context(self) -> list[CheckResult]:
+        """
+        前置检查：验证上下文完整性，报告缺失的关键上下文。
+
+        检查项：
+          - 数据库连接（conn）：表存在性 #1、样本执行 #5 依赖
+          - 可用表列表（available_tables）：表权限 #3 依赖
+          - JOIN 白名单（join_whitelist）：JOIN 合规 #4 依赖
+
+        Returns:
+            CheckResult 列表，每一项描述缺失的上下文及其影响（空列表 = 上下文完整）
+        """
+        issues: list[CheckResult] = []
+        ctx = self._context
+
+        if ctx.get("conn") is None:
+            issues.append(CheckResult(
+                check_id=0,
+                name="上下文检查",
+                status=ValidationStatus.WARN,
+                detail=(
+                    "SKIPPED 原因：缺少数据库连接（conn）——"
+                    "表存在性检查（#1）和样本执行检查（#5）将无法执行，"
+                    "返回 PENDING 状态"
+                ),
+                severity="WARN",
+            ))
+
+        if ctx.get("available_tables") is None:
+            issues.append(CheckResult(
+                check_id=0,
+                name="上下文检查",
+                status=ValidationStatus.WARN,
+                detail=(
+                    "SKIPPED 原因：缺少可用表列表（available_tables）——"
+                    "表访问权限检查（#3）将跳过白名单验证，仅检查禁止表模式"
+                ),
+                severity="WARN",
+            ))
+
+        if ctx.get("join_whitelist") is None:
+            issues.append(CheckResult(
+                check_id=0,
+                name="上下文检查",
+                status=ValidationStatus.WARN,
+                detail=(
+                    "SKIPPED 原因：缺少 JOIN 白名单（join_whitelist）——"
+                    "JOIN 白名单合规检查（#4）将跳过，多表 JOIN 无法验证"
+                ),
+                severity="WARN",
+            ))
+
+        return issues
 
     def validate_static(
         self,
@@ -126,13 +181,25 @@ class Validator:
         return ValidationReport(overall_status=self._aggregate(checks), checks=checks)
 
     def _check_sql_select_only(self, sql: str) -> CheckResult:
-        """确认 SQL 草案只以 SELECT 开始。"""
+        """确认 SQL 草案以只读语句开头（SELECT / WITH / EXPLAIN / DESCRIBE / SHOW）。"""
         cleaned = _clean_sql_for_keyword_scan(sql).strip().lstrip("(")
         if not cleaned:
-            return CheckResult(101, "SQL 只读语句", ValidationStatus.WARN, "SQL 为空，需要人工审查", "WARN")
-        if not cleaned.upper().startswith("SELECT"):
-            return CheckResult(101, "SQL 只读语句", ValidationStatus.FAILED, "SQL 草案必须是 SELECT 查询", "FAIL")
-        return CheckResult(101, "SQL 只读语句", ValidationStatus.PASSED, "SQL 以 SELECT 开始", "FAIL")
+            return CheckResult(
+                101, "SQL 只读语句", ValidationStatus.WARN,
+                "SQL 为空，需要人工审查", "WARN",
+            )
+        upper = cleaned.upper()
+        for prefix in ALLOWED_PREFIXES:
+            if upper.startswith(prefix):
+                return CheckResult(
+                    101, "SQL 只读语句", ValidationStatus.PASSED,
+                    f"SQL 以 {prefix} 开始（只读安全前缀）", "FAIL",
+                )
+        return CheckResult(
+            101, "SQL 只读语句", ValidationStatus.FAILED,
+            f"SQL 草案必须以 {' / '.join(ALLOWED_PREFIXES)} 开头，当前以 {upper.split()[0] if upper.split() else '(空)'} 开头",
+            "FAIL",
+        )
 
     def _check_sql_forbidden_keywords(self, sql: str) -> CheckResult:
         """拦截 DDL/DML 与 DuckDB 危险操作。"""

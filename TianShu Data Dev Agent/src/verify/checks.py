@@ -72,18 +72,47 @@ def _extract_table_references(sql: str) -> list[str]:
     """
     从 SQL 中提取 FROM 和 JOIN 子句引用的所有表名。
 
-    支持：FROM table, FROM schema.table, JOIN table, INNER/LEFT/RIGHT/FULL/CROSS JOIN table
+    支持：FROM table, FROM schema.table, JOIN table,
+          FROM t1, t2（逗号分隔多表）,
+          A JOIN B JOIN C（多跳 JOIN）,
+          INNER/LEFT/RIGHT/FULL/CROSS JOIN table
     """
-    pattern = r'(?:FROM|JOIN)\s+([a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)?)'
-    matches = re.findall(pattern, sql, re.IGNORECASE)
-
     seen: set[str] = set()
     refs: list[str] = []
-    for m in matches:
-        key = m.lower()
+
+    # 标准化空白字符
+    normalized = re.sub(r'\s+', ' ', sql)
+
+    # ── 方法 1：匹配 FROM/JOIN 后紧跟的表名 ──
+    pattern = r'(?:FROM|JOIN)\s+([a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)?)'
+    for m in re.finditer(pattern, normalized, re.IGNORECASE):
+        key = m.group(1).lower()
         if key not in seen:
             seen.add(key)
-            refs.append(m)
+            refs.append(m.group(1))
+
+    # ── 方法 2：处理逗号分隔的表名（FROM t1, t2, t3）──
+    # 提取 FROM 子句中逗号分隔的额外表名
+    # 匹配 FROM 之后到下一个主要关键字之前的内容
+    from_section = re.search(
+        r'\bFROM\s+(.+?)\s*\b(?:WHERE|GROUP|ORDER|LIMIT|HAVING|UNION|INNER|LEFT|RIGHT|FULL|CROSS|JOIN|;|$)',
+        normalized, re.IGNORECASE,
+    )
+    if from_section:
+        section = from_section.group(1)
+        # 按逗号分割，提取每段的第一个标识符（表名或 schema.table）
+        parts = section.split(',')
+        for part in parts:
+            m = re.match(
+                r'\s*([a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)?)',
+                part.strip(),
+            )
+            if m:
+                key = m.group(1).lower()
+                if key not in seen:
+                    seen.add(key)
+                    refs.append(m.group(1))
+
     return refs
 
 
@@ -147,8 +176,8 @@ def check_table_existence(
         return CheckResult(
             check_id=1,
             name="表/字段存在性",
-            status=ValidationStatus.PASSED,
-            detail="跳过——无数据库连接（离线模式）",
+            status=ValidationStatus.PENDING,
+            detail="SKIPPED——无数据库连接（离线模式），无法执行 DESCRIBE 验证",
             severity="FAIL",
         )
 
@@ -158,8 +187,8 @@ def check_table_existence(
         return CheckResult(
             check_id=1,
             name="表/字段存在性",
-            status=ValidationStatus.PASSED,
-            detail="未提取到表引用，跳过检查",
+            status=ValidationStatus.PENDING,
+            detail="SKIPPED——未提取到表引用，无法执行表存在性检查",
             severity="FAIL",
         )
 
@@ -255,8 +284,8 @@ def check_table_permissions(
         return CheckResult(
             check_id=3,
             name="表访问权限",
-            status=ValidationStatus.PASSED,
-            detail="未提取到表引用，跳过检查",
+            status=ValidationStatus.PENDING,
+            detail="SKIPPED——未提取到表引用，无法执行表权限检查",
             severity="FAIL",
         )
 
@@ -324,14 +353,69 @@ def check_join_whitelist(
     Returns:
         CheckResult
     """
+    # ── 路径 B：从 SQL 文本提取 JOIN 关系（plan=None 时的兜底防线）──
     if plan is None:
+        if not sql or not sql.strip():
+            return CheckResult(
+                check_id=4,
+                name="JOIN 白名单合规",
+                status=ValidationStatus.PENDING,
+                detail="无 SQLPlan 且无 SQL 文本——JOIN 白名单检查无法执行",
+                severity="FAIL",
+            )
+
+        table_refs = _extract_table_references(sql)
+        if len(table_refs) < 2:
+            return CheckResult(
+                check_id=4,
+                name="JOIN 白名单合规",
+                status=ValidationStatus.PASSED,
+                detail="SQL 中仅引用单表，无 JOIN 需检查",
+                severity="FAIL",
+            )
+
+        if join_whitelist is None:
+            return CheckResult(
+                check_id=4,
+                name="JOIN 白名单合规",
+                status=ValidationStatus.WARN,
+                detail=(
+                    f"缺少 JOIN 白名单，但 SQL 引用了 {len(table_refs)} 个表"
+                    f"（{', '.join(table_refs)}）——无法验证 JOIN 合规性"
+                ),
+                severity="FAIL",
+            )
+
+        # 对所有表对做白名单检查
+        whitelist_lower = {(a.lower().strip(), b.lower().strip()) for a, b in join_whitelist}
+        violations: list[str] = []
+        for i in range(len(table_refs)):
+            for j in range(i + 1, len(table_refs)):
+                pair = (table_refs[i].lower().strip(), table_refs[j].lower().strip())
+                reverse_pair = (table_refs[j].lower().strip(), table_refs[i].lower().strip())
+                if pair not in whitelist_lower and reverse_pair not in whitelist_lower:
+                    violations.append(
+                        f"JOIN {table_refs[i]} ↔ {table_refs[j]} 不在核准白名单中"
+                    )
+
+        if violations:
+            return CheckResult(
+                check_id=4,
+                name="JOIN 白名单合规",
+                status=ValidationStatus.FAILED,
+                detail="; ".join(violations),
+                severity="FAIL",
+            )
+
         return CheckResult(
             check_id=4,
             name="JOIN 白名单合规",
             status=ValidationStatus.PASSED,
-            detail="无 SQLPlan——跳过 JOIN 白名单检查（由 SQL 侧检查兜底）",
+            detail=f"所有表对在白名单中（{len(table_refs)} 个表，{len(violations)} 条违规）",
             severity="FAIL",
         )
+
+    # ── 路径 A：IR 级检查（主防线，plan 存在时）──
 
     # 无 JOIN 的单表查询
     if not plan.joins:
@@ -348,13 +432,13 @@ def check_join_whitelist(
         return CheckResult(
             check_id=4,
             name="JOIN 白名单合规",
-            status=ValidationStatus.PASSED,
+            status=ValidationStatus.WARN,
             detail="未提供 JOIN 白名单——跳过检查",
             severity="FAIL",
         )
 
     # ── 路径 A：IR 级检查（主防线）──
-    violations: list[str] = []
+    violations = []
     primary = plan.primary_table or ""
     whitelist_lower = {(a.lower().strip(), b.lower().strip()) for a, b in join_whitelist}
 
@@ -408,8 +492,8 @@ def check_sample_execution(
         return CheckResult(
             check_id=5,
             name="样本执行（SQL）",
-            status=ValidationStatus.PASSED,
-            detail="跳过——无数据库连接（离线模式）",
+            status=ValidationStatus.PENDING,
+            detail="SKIPPED——无数据库连接（离线模式），无法执行 SQL 样本",
             severity="FAIL",
         )
 

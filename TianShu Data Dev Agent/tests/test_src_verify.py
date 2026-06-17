@@ -186,8 +186,9 @@ class TestCheckJoinWhitelist:
         assert result.status == ValidationStatus.PASSED
 
     def test_no_plan_skips(self):
+        """无 plan 且无 sql 时，返回 PENDING 而非静默 PASS"""
         result = check_join_whitelist()
-        assert result.status == ValidationStatus.PASSED  # 允许通过，由 SQL 侧兜底
+        assert result.status == ValidationStatus.PENDING  # 缺少上下文，不应静默通过
 
     def test_join_in_whitelist_passes(self):
         plan = SQLPlan(
@@ -284,8 +285,35 @@ class TestCheckCrossValidation:
 class TestValidator:
     """验证器编排测试"""
 
-    def test_all_checks_pass(self):
-        # 提供 available_tables 确保检查 #3（表访问权限）通过
+    def test_all_checks_pass_with_full_context(self):
+        """完整上下文（conn + available_tables + join_whitelist）时全部通过"""
+        try:
+            import duckdb
+            conn = duckdb.connect(":memory:", read_only=False)
+            conn.execute("CREATE TABLE dws_daily_trip_summary (trip_date DATE, trip_count INTEGER)")
+        except ImportError:
+            pytest.skip("duckdb 未安装")
+
+        validator = Validator(context={
+            "available_tables": {"dws_daily_trip_summary"},
+            "join_whitelist": set(),
+            "conn": conn,
+        })
+        plan = SQLPlan(
+            strategy=Strategy.G3_DIRECT,
+            primary_table="dws_daily_trip_summary",
+        )
+        report = validator.validate(
+            sql="SELECT * FROM dws_daily_trip_summary LIMIT 10",
+            plan=plan,
+        )
+        # 有完整上下文时，所有检查应能执行并通过
+        assert report.overall_status == ValidationStatus.PASSED
+        assert len(report.checks) == 7
+        conn.close()
+
+    def test_missing_context_produces_pending(self):
+        """缺少数据库连接时，表存在性和样本执行检查返回 PENDING，不静默 PASS"""
         validator = Validator(context={
             "available_tables": {"gold.dws_daily_trip_summary"},
         })
@@ -297,9 +325,12 @@ class TestValidator:
             sql="SELECT * FROM gold.dws_daily_trip_summary LIMIT 10",
             plan=plan,
         )
-        # 无数据库连接时检查 #1 和 #5 会跳过（返回 PASSED）
-        # 无白名单时检查 #4 跳过
-        assert report.overall_status == ValidationStatus.PASSED
+        # 无 conn 时 #1 和 #5 返回 PENDING，#4 无 whitelist 返回 WARN
+        statuses = {c.check_id: c.status for c in report.checks}
+        assert statuses[1] == ValidationStatus.PENDING  # 表存在性——缺少 conn
+        assert statuses[5] == ValidationStatus.PENDING  # 样本执行——缺少 conn
+        # 整体状态：有 PENDING 项时不应为 PASSED
+        assert report.overall_status != ValidationStatus.PASSED
         assert len(report.checks) == 7
 
     def test_forbidden_keyword_fails_overall(self):
@@ -362,6 +393,221 @@ class TestReportFactories:
     def test_make_pending(self):
         report = make_pending_report()
         assert report.overall_status == ValidationStatus.PENDING
+
+
+class TestWithQuerySupport:
+    """M3 静态检查允许 WITH ... SELECT ... CTE 查询"""
+
+    def test_with_select_passes_select_only_check(self):
+        """CTE 查询 WITH cte AS (...) SELECT ... 通过 SELECT-only 检查"""
+        validator = Validator()
+        report = validator.validate_static(
+            sql="WITH cte AS (SELECT id FROM gold.t1) SELECT * FROM cte",
+        )
+        # 找到 SQL 只读语句检查（check_id=101）
+        sql_check = [c for c in report.checks if c.check_id == 101][0]
+        assert sql_check.status == ValidationStatus.PASSED, \
+            f"WITH...SELECT 应通过只读检查，实际: {sql_check.detail}"
+
+    def test_with_select_passes_in_validate(self):
+        """七项检查中也应接受 WITH 前缀的 SQL"""
+        validator = Validator()
+        report = validator.validate(
+            sql="WITH cte AS (SELECT id FROM gold.t1) SELECT * FROM cte",
+        )
+        # 检查 #2（安全关键字）应通过——WITH 不是禁止关键字
+        check2 = [c for c in report.checks if c.check_id == 2][0]
+        assert check2.status == ValidationStatus.PASSED, \
+            f"WITH 不应触发禁止关键字，实际: {check2.detail}"
+
+    def test_explain_passes_select_only_check(self):
+        """EXPLAIN 前缀应被接受"""
+        validator = Validator()
+        report = validator.validate_static(
+            sql="EXPLAIN SELECT * FROM gold.t1",
+        )
+        sql_check = [c for c in report.checks if c.check_id == 101][0]
+        assert sql_check.status == ValidationStatus.PASSED
+
+    def test_insert_still_fails_static_check(self):
+        """非只读前缀（INSERT）仍应被拦截"""
+        validator = Validator()
+        report = validator.validate_static(
+            sql="INSERT INTO gold.t1 VALUES (1)",
+        )
+        sql_check = [c for c in report.checks if c.check_id == 101][0]
+        assert sql_check.status == ValidationStatus.FAILED
+
+    def test_describe_passes_select_only_check(self):
+        """DESCRIBE 前缀也应被接受"""
+        validator = Validator()
+        report = validator.validate_static(
+            sql="DESCRIBE gold.t1",
+        )
+        sql_check = [c for c in report.checks if c.check_id == 101][0]
+        assert sql_check.status == ValidationStatus.PASSED
+
+
+class TestTableExtractionEnhanced:
+    """增强的表名提取——逗号分隔、多跳 JOIN"""
+
+    def test_comma_separated_from(self):
+        """FROM t1, t2, t3 的逗号分隔表全部被识别"""
+        refs = _extract_table_references(
+            "SELECT * FROM gold.table_a, gold.table_b, gold.table_c WHERE id > 0"
+        )
+        assert "gold.table_a" in refs
+        assert "gold.table_b" in refs
+        assert "gold.table_c" in refs
+        assert len(refs) == 3
+
+    def test_multi_hop_join(self):
+        """A JOIN B JOIN C 的多跳 JOIN 全部被识别"""
+        refs = _extract_table_references(
+            "SELECT * FROM gold.t1 "
+            "INNER JOIN gold.t2 ON t1.id = t2.id "
+            "LEFT JOIN gold.t3 ON t2.id = t3.id"
+        )
+        assert "gold.t1" in refs
+        assert "gold.t2" in refs
+        assert "gold.t3" in refs
+        assert len(refs) == 3
+
+    def test_comma_with_join_mixed(self):
+        """逗号分隔与 JOIN 混合使用"""
+        refs = _extract_table_references(
+            "SELECT * FROM gold.t1, gold.t2 "
+            "INNER JOIN gold.t3 ON t1.id = t3.id"
+        )
+        assert "gold.t1" in refs
+        assert "gold.t2" in refs
+        assert "gold.t3" in refs
+        assert len(refs) == 3
+
+    def test_cross_join(self):
+        """CROSS JOIN 的表也被识别"""
+        refs = _extract_table_references(
+            "SELECT * FROM gold.t1 CROSS JOIN gold.t2"
+        )
+        assert len(refs) == 2
+        assert "gold.t1" in refs
+        assert "gold.t2" in refs
+
+    def test_full_outer_join(self):
+        """FULL OUTER JOIN 的表也被识别"""
+        refs = _extract_table_references(
+            "SELECT * FROM gold.t1 FULL OUTER JOIN gold.t2 ON t1.id = t2.id"
+        )
+        assert len(refs) == 2
+        assert "gold.t1" in refs
+        assert "gold.t2" in refs
+
+
+class TestJoinWhitelistNoPlan:
+    """plan=None 时 JOIN 白名单 SQL 文本兜底检查"""
+
+    def test_no_plan_no_sql_returns_pending(self):
+        """无 plan 且无 sql 时返回 PENDING"""
+        result = check_join_whitelist()
+        assert result.status == ValidationStatus.PENDING
+
+    def test_no_plan_single_table_passes(self):
+        """无 plan 但 SQL 仅引用单表——通过"""
+        result = check_join_whitelist(
+            sql="SELECT * FROM gold.table_a WHERE id = 1",
+        )
+        assert result.status == ValidationStatus.PASSED
+
+    def test_no_plan_multi_table_no_whitelist_warns(self):
+        """无 plan 多表但无 whitelist——WARN，不静默 PASS"""
+        result = check_join_whitelist(
+            sql="SELECT * FROM gold.table_a INNER JOIN gold.table_b ON a.id = b.id",
+        )
+        assert result.status == ValidationStatus.WARN
+        assert "缺少 JOIN 白名单" in result.detail
+
+    def test_no_plan_illegal_join_fails(self):
+        """无 plan，SQL 中有非法 JOIN 对——FAIL，不静默通过"""
+        result = check_join_whitelist(
+            sql="SELECT * FROM gold.table_a INNER JOIN gold.table_c ON a.id = c.id",
+            join_whitelist={("gold.table_a", "gold.table_b")},
+        )
+        assert result.status == ValidationStatus.FAILED
+        assert "不在核准白名单" in result.detail
+
+    def test_no_plan_legal_join_passes(self):
+        """无 plan，SQL 中 JOIN 对在白名单——PASS"""
+        result = check_join_whitelist(
+            sql="SELECT * FROM gold.table_a INNER JOIN gold.table_b ON a.id = b.id",
+            join_whitelist={("gold.table_a", "gold.table_b")},
+        )
+        assert result.status == ValidationStatus.PASSED
+
+    def test_no_plan_three_table_illegal_pair_fails(self):
+        """无 plan，三表中有一对不在白名单——FAIL"""
+        result = check_join_whitelist(
+            sql="SELECT * FROM gold.t1, gold.t2, gold.t3",
+            join_whitelist={("gold.t1", "gold.t2")},  # t3 不在白名单中
+        )
+        assert result.status == ValidationStatus.FAILED
+        assert "gold.t3" in result.detail or "t3" in result.detail
+
+
+class TestValidateContext:
+    """前置上下文检查——缺失时明确报告"""
+
+    def test_context_complete_when_all_provided(self):
+        """完整上下文时不报告缺失"""
+        try:
+            import duckdb
+            conn = duckdb.connect(":memory:", read_only=False)
+        except ImportError:
+            pytest.skip("duckdb 未安装")
+        validator = Validator(context={
+            "conn": conn,
+            "available_tables": {"gold.t1"},
+            "join_whitelist": {("gold.t1", "gold.t2")},
+        })
+        issues = validator.validate_context()
+        assert len(issues) == 0  # 上下文完整
+        conn.close()
+
+    def test_context_missing_conn_reported(self):
+        """缺少 conn 时报告"""
+        validator = Validator(context={})
+        issues = validator.validate_context()
+        assert len(issues) >= 1
+        assert any("conn" in issue.detail.lower() for issue in issues)
+
+    def test_context_missing_available_tables_reported(self):
+        """缺少 available_tables 时报告"""
+        validator = Validator(context={})
+        issues = validator.validate_context()
+        assert any("available_tables" in issue.detail.lower() for issue in issues)
+
+    def test_context_missing_join_whitelist_reported(self):
+        """缺少 join_whitelist 时报告"""
+        validator = Validator(context={})
+        issues = validator.validate_context()
+        assert any("join_whitelist" in issue.detail.lower() for issue in issues)
+
+    def test_context_partial_reports_only_missing(self):
+        """部分上下文时只报告缺失项"""
+        validator = Validator(context={
+            "available_tables": {"gold.t1"},
+        })
+        issues = validator.validate_context()
+        # 只有 conn 和 join_whitelist 缺失被报告
+        assert len(issues) == 2
+        missing_refs = {issue.detail for issue in issues}
+        assert any("conn" in d.lower() for d in missing_refs)
+        assert any("join_whitelist" in d.lower() for d in missing_refs)
+        # available_tables 不应被报告（已提供）
+        assert not any(
+            "available_tables" in d.lower()
+            for d in missing_refs
+            if "缺少可用表" in d  # 仅检查"缺少"类报告
+        )
 
 
 @pytest.mark.skipif(not DUCKDB_AVAILABLE, reason="duckdb 未安装")

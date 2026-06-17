@@ -21,6 +21,7 @@ import time
 from typing import Any, Optional
 
 from src.ir.types import SQLResult
+from src.verify.checks import FORBIDDEN_KEYWORDS, ALLOWED_PREFIXES
 
 try:
     import duckdb
@@ -54,6 +55,17 @@ def execute_sql(
     """
     if duckdb is None:
         raise ImportError("需要 duckdb 包: pip install duckdb")
+
+    # ── 安全关键字检查（防御纵深——即使绕过 execute_sql_sample 直接调用也拦截）──
+    body = _strip_sql_comments(sql).strip().rstrip(";")
+    upper = body.upper()
+    for keyword in FORBIDDEN_KEYWORDS:
+        if re.search(rf"\b{keyword}\b", upper):
+            return SQLResult(
+                sql=sql,
+                error=f"安全拦截：检测到禁止关键字 {keyword}（{FORBIDDEN_KEYWORDS[keyword]}）。",
+                source_table=source_table,
+            )
 
     start_time = time.perf_counter()
 
@@ -124,23 +136,25 @@ def execute_sql_sample(
         )
 
     body = _strip_sql_comments(sql).strip().rstrip(";")
-    if not body.upper().startswith("SELECT"):
+    upper = body.upper()
+
+    # 使用统一的只读前缀列表（与 checker.py / checks.py 一致）
+    if not any(upper.startswith(prefix) for prefix in ALLOWED_PREFIXES):
         return SQLResult(
             sql=sql,
-            error="SQL sample run 被拒绝：只允许 SELECT 查询。",
+            error=(
+                f"SQL sample run 被拒绝：必须以 {' / '.join(ALLOWED_PREFIXES)} 开头，"
+                f"当前以 {upper.split()[0] if upper.split() else '(空)'} 开头"
+            ),
             source_table=source_table,
         )
 
-    forbidden = [
-        "CREATE", "INSERT", "UPDATE", "DELETE", "DROP", "ALTER",
-        "TRUNCATE", "MERGE", "COPY", "EXPORT", "ATTACH", "INSTALL", "LOAD",
-    ]
-    upper = body.upper()
-    for keyword in forbidden:
+    # 使用统一的禁止关键字列表（单一事实源 checks.FORBIDDEN_KEYWORDS）
+    for keyword in FORBIDDEN_KEYWORDS:
         if re.search(rf"\b{keyword}\b", upper):
             return SQLResult(
                 sql=sql,
-                error=f"SQL sample run 被拒绝：检测到禁止关键字 {keyword}。",
+                error=f"SQL sample run 被拒绝：检测到禁止关键字 {keyword}（{FORBIDDEN_KEYWORDS[keyword]}）。",
                 source_table=source_table,
             )
 
