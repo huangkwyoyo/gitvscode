@@ -171,7 +171,7 @@ class PlanExecutor:
                 source_table=plan.primary_table or "",
             )
 
-        timeout_seconds = self._config.get("safety", {}).get("query_timeout", 30)
+        timeout_seconds = (self._config.get("safety") or {}).get("query_timeout", 30)
         result = self._resolver.execute_sql(
             sql,
             timeout_seconds=timeout_seconds,

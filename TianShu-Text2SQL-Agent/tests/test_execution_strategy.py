@@ -717,3 +717,61 @@ class TestExecutionStrategyIntegration:
             assert ur.result.row_count > 0
             assert ur.execution_trace is not None
             assert ur.execution_trace.execution_status == "success"
+
+    def test_test_executor_closed_after_validation(self):
+        """factory 返回的测试 executor 在验证后被清理——close 被调用"""
+        close_called = []
+        _factory_calls = []
+
+        class FakeExecutor:
+            def __init__(self):
+                _factory_calls.append(1)
+            def close(self):
+                close_called.append(1)
+            def execute_one(self, plan, plan_index=1):
+                return SQLResult(sql="mock", row_count=5,
+                                 columns=["c"], column_types=["INT"],
+                                 rows=[(1,)])
+
+        def fake_factory():
+            return FakeExecutor()
+
+        plan = _make_g3_trip_plan()
+        responses = [
+            UnifiedResponse(
+                sub_intent=SubIntent(metrics=["a"], planning_table="gold.t_a"),
+                plan=plan,
+            ),
+        ]
+
+        strategy = ThreadPoolExecutionStrategy(max_workers=1)
+        strategy.execute(responses, fake_factory)
+
+        # 验证：1 个 worker + 1 个测试 executor 共 2 次 factory 调用
+        assert len(_factory_calls) >= 2
+        # 测试 executor 的 close 被调用
+        assert len(close_called) >= 1, "测试 executor 的 close() 应在验证后被调用"
+
+    def test_test_executor_no_close_method_does_not_crash(self):
+        """factory 返回无 close 方法的对象时，验证后不崩溃"""
+        class FakeExecutorNoClose:
+            def execute_one(self, plan, plan_index=1):
+                return SQLResult(sql="mock", row_count=5,
+                                 columns=["c"], column_types=["INT"],
+                                 rows=[(1,)])
+
+        def fake_factory():
+            return FakeExecutorNoClose()
+
+        plan = _make_g3_trip_plan()
+        responses = [
+            UnifiedResponse(
+                sub_intent=SubIntent(metrics=["a"], planning_table="gold.t_a"),
+                plan=plan,
+            ),
+        ]
+
+        strategy = ThreadPoolExecutionStrategy(max_workers=1)
+        # 不应抛出异常
+        result = strategy.execute(responses, fake_factory)
+        assert len(result) == 1

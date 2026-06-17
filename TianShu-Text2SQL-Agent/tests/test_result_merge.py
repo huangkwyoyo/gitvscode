@@ -616,3 +616,43 @@ class TestNoCausalLanguage:
         # reason 也不应含因果词
         for word in causal_words:
             assert word not in merged.reason
+
+    def test_make_skipped_row_count_consistent(self):
+        """_make_skipped: rows=[] 时必须 row_count=0"""
+        from src.result_merge import _make_skipped
+        from src.result_summary import summarize_sql_result
+
+        ur = _make_ur(["trip_count"], "gold.t1", _daily_rows(1, 7))
+        summary = summarize_sql_result(ur, plan_index=1)
+        # 原始 summary 的 row_count > 0
+        assert summary.row_count > 0
+
+        skipped = _make_skipped([summary], "测试跳过")
+        assert skipped.merge_status == MergeStatus.SKIPPED
+        assert skipped.rows == []
+        assert skipped.row_count == 0, (
+            f"rows=[] 时 row_count 必须为 0，实际={skipped.row_count}"
+        )
+
+    def test_irregular_row_no_index_error(self):
+        """行长度不足 date_idx 时跳过，不触发 IndexError"""
+        # 构造列数与行数据不匹配的 SQLResult
+        ur = UnifiedResponse(
+            sub_intent=SubIntent(metrics=["trip_count"], planning_table="gold.t1"),
+            plan=SQLPlan(strategy=Strategy.G3_DIRECT, primary_table="gold.t1"),
+            result=SQLResult(
+                sql="mock",
+                columns=["trip_date", "trip_count"],
+                column_types=["DATE", "INTEGER"],
+                rows=[
+                    (_dt.datetime(2026, 1, 1), 100),   # 正常行
+                    (_dt.datetime(2026, 1, 2),),       # 不足 2 列——不崩溃
+                    (_dt.datetime(2026, 1, 3), 300),   # 正常行
+                ],
+                row_count=3,
+            ),
+        )
+        # 不应抛出 IndexError
+        merged = merge_results_on_date([ur])
+        assert merged.merge_status == MergeStatus.SKIPPED  # 单结果无法合并
+        # 关键在于调用过程中未崩溃

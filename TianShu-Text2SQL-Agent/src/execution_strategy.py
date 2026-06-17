@@ -173,10 +173,11 @@ class ThreadPoolExecutionStrategy(ExecutionStrategy):
         if not to_execute:
             return responses
 
-        # ── 验证 factory 可用性 ──
+        # ── 验证 factory 可用性（创建测试 executor 后立即清理，防止连接泄漏）──
+        _test_executor = None
         try:
-            test_executor = executor_factory()
-            if test_executor is None:
+            _test_executor = executor_factory()
+            if _test_executor is None:
                 raise RuntimeError(
                     "executor_factory 返回 None，"
                     "无法创建独立 DuckDB 连接，并发模式不可用"
@@ -192,6 +193,15 @@ class ThreadPoolExecutionStrategy(ExecutionStrategy):
             raise RuntimeError(
                 f"无法创建独立 DuckDB 连接，并发模式不可用: {exc}"
             ) from exc
+        finally:
+            # 防御式清理：验证完成后立即释放测试 executor 持有的资源
+            if _test_executor is not None:
+                if hasattr(_test_executor, "close"):
+                    try:
+                        _test_executor.close()
+                    except Exception:
+                        pass
+                del _test_executor
 
         # ── 提交到线程池 ──
         with concurrent.futures.ThreadPoolExecutor(

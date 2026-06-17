@@ -704,3 +704,31 @@ class TestExecuteManyStrategy:
         assert responses[0].execution_trace.execution_status == "success"
         assert responses[1].execution_trace.execution_status == "failed"
         assert "需要确认" in responses[1].execution_trace.error_message
+
+    def test_config_safety_none_does_not_crash(self):
+        """config["safety"]=None 时不触发 AttributeError，默认 timeout 生效"""
+        resolver = _make_mock_resolver()
+        context = _make_mock_context()
+        config = {"safety": None}  # 显式 None——旧代码会崩溃
+
+        executor = PlanExecutor(resolver, context, agent_config=config)
+        plan = _make_g3_trip_plan()
+
+        result = executor.execute_one(plan, plan_index=1)
+        # 不应崩溃，使用默认 timeout=30 正常执行
+        assert result is not None
+        assert result.row_count > 0
+        assert executor.last_trace.execution_status == "success"
+
+    def test_config_safety_missing_uses_default(self):
+        """config 无 safety 键时使用默认值"""
+        resolver = _make_mock_resolver()
+        context = _make_mock_context()
+        config = {}  # 无 safety 键
+
+        executor = PlanExecutor(resolver, context, agent_config=config)
+        plan = _make_g3_trip_plan()
+
+        result = executor.execute_one(plan, plan_index=1)
+        assert result is not None
+        assert executor.last_trace.execution_status == "success"

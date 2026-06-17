@@ -199,6 +199,9 @@ def _check_duplicate_dates(
 
         date_counts: dict[_dt.date, int] = {}
         for row in result.rows:
+            # 防御：行长度不足时跳过，避免 IndexError
+            if date_idx is None or date_idx >= len(row):
+                continue
             d = _coerce_to_date(row[date_idx])
             if d is not None:
                 date_counts[d] = date_counts.get(d, 0) + 1
@@ -252,6 +255,9 @@ def _do_merge(
 
         date_map: dict[_dt.date, dict[str, Any]] = {}
         for row in result.rows:
+            # 防御：行长度不足时跳过，避免 IndexError（与 result_summary.py 风格一致）
+            if date_idx is None or date_idx >= len(row):
+                continue
             d = _coerce_to_date(row[date_idx])
             if d is None:
                 continue
@@ -394,13 +400,17 @@ def _check_range_consistency(
 
 
 def _make_skipped(summaries: list[ResultSummary], reason: str) -> MergedResult:
-    """构造 merge_status=skipped 的 MergedResult"""
+    """构造 merge_status=skipped 的 MergedResult。
+
+    注意：rows=[] 时 row_count 必须为 0，保持数据契约一致。
+    下游消费者检查 row_count > 0 不应得到空 rows。
+    """
     return MergedResult(
         merge_status=MergeStatus.SKIPPED,
         merge_key="",
         columns=[],
         rows=[],
-        row_count=sum(s.row_count for s in summaries),
+        row_count=0,  # 跳过合并时无有效行，与 rows=[] 保持一致
         source_plan_indexes=[s.source_plan_index for s in summaries],
         source_summaries=summaries,
         merge_warnings=[],
