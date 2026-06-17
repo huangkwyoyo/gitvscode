@@ -183,7 +183,7 @@ class Validator:
         return ValidationReport(overall_status=self._aggregate(checks), checks=checks)
 
     def _check_sql_select_only(self, sql: str) -> CheckResult:
-        """确认 SQL 草案以只读语句开头（SELECT / WITH / EXPLAIN / DESCRIBE / SHOW）。"""
+        """确认 SQL 草案以只读业务查询开头（SELECT / WITH）。"""
         cleaned = _clean_sql_for_keyword_scan(sql).strip().lstrip("(")
         if not cleaned:
             return CheckResult(

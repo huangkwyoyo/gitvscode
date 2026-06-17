@@ -159,6 +159,27 @@ class TestSandboxForbiddenKeywords:
         assert result.error is None
         assert result.row_count == 0
 
+    def test_sample_explain_rejected(self, conn):
+        """EXPLAIN 被沙箱 sample run 拦截——方案 A 口径收窄"""
+        from src.sandbox.executor import execute_sql_sample
+        result = execute_sql_sample(conn, "EXPLAIN SELECT * FROM t")
+        assert result.error is not None
+        assert "开头" in result.error
+
+    def test_sample_describe_rejected(self, conn):
+        """DESCRIBE 被沙箱 sample run 拦截——方案 A 口径收窄"""
+        from src.sandbox.executor import execute_sql_sample
+        result = execute_sql_sample(conn, "DESCRIBE t")
+        assert result.error is not None
+        assert "开头" in result.error
+
+    def test_sample_show_rejected(self, conn):
+        """SHOW 被沙箱 sample run 拦截——方案 A 口径收窄"""
+        from src.sandbox.executor import execute_sql_sample
+        result = execute_sql_sample(conn, "SHOW TABLES")
+        assert result.error is not None
+        assert "开头" in result.error
+
     # ── execute_sql（防御纵深）测试 ──
 
     def test_raw_execute_replace_rejected(self, conn):
@@ -218,6 +239,27 @@ class TestSandboxForbiddenKeywords:
         result = execute_sql(conn, "WITH c AS (SELECT 1 AS n) SELECT * FROM c")
         assert result.error is None
         assert result.row_count == 1
+
+    def test_raw_execute_explain_rejected(self, conn):
+        """EXPLAIN 被 execute_sql 拦截——方案 A 口径收窄"""
+        from src.sandbox.executor import execute_sql
+        result = execute_sql(conn, "EXPLAIN SELECT * FROM t")
+        assert result.error is not None
+        assert "开头" in result.error
+
+    def test_raw_execute_describe_rejected(self, conn):
+        """DESCRIBE 被 execute_sql 拦截——方案 A 口径收窄"""
+        from src.sandbox.executor import execute_sql
+        result = execute_sql(conn, "DESCRIBE t")
+        assert result.error is not None
+        assert "开头" in result.error
+
+    def test_raw_execute_show_rejected(self, conn):
+        """SHOW 被 execute_sql 拦截——方案 A 口径收窄"""
+        from src.sandbox.executor import execute_sql
+        result = execute_sql(conn, "SHOW TABLES")
+        assert result.error is not None
+        assert "开头" in result.error
 
 
 @pytest.mark.skipif(not DUCKDB_AVAILABLE, reason="duckdb 未安装")

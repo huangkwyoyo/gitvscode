@@ -56,8 +56,10 @@ FORBIDDEN_KEYWORDS: dict[str, str] = {
     "LOAD": "禁止扩展加载操作",
 }
 
-# 允许的 SQL 前缀（只读操作）
-ALLOWED_PREFIXES = ["SELECT", "WITH", "EXPLAIN", "DESCRIBE", "SHOW"]
+# 允许的 SQL 前缀（只读业务查询——SELECT 和 WITH/CTE）
+# EXPLAIN/DESCRIBE/SHOW 虽为只读但不产生业务数据，已从业务执行链移除
+# 详见：docs/superpowers/specs/架构方向变更记录_20260616_2230.md
+ALLOWED_PREFIXES = ["SELECT", "WITH"]
 
 # 禁止的表模式（bronze/silver 原始数据层）
 FORBIDDEN_TABLE_PATTERNS = ["bronze.", "silver.", ".raw_"]

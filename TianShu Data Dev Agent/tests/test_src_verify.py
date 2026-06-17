@@ -406,7 +406,7 @@ class TestReportFactories:
 
 
 class TestWithQuerySupport:
-    """M3 静态检查允许 WITH ... SELECT ... CTE 查询"""
+    """M3 静态检查——只读业务查询前缀校验（SELECT / WITH）"""
 
     def test_with_select_passes_select_only_check(self):
         """CTE 查询 WITH cte AS (...) SELECT ... 通过 SELECT-only 检查"""
@@ -430,14 +430,15 @@ class TestWithQuerySupport:
         assert check2.status == ValidationStatus.PASSED, \
             f"WITH 不应触发禁止关键字，实际: {check2.detail}"
 
-    def test_explain_passes_select_only_check(self):
-        """EXPLAIN 前缀应被接受"""
+    def test_explain_rejected_by_static_check(self):
+        """EXPLAIN 不再通过——方案 A 口径收窄，只允许 SELECT/WITH"""
         validator = Validator()
         report = validator.validate_static(
             sql="EXPLAIN SELECT * FROM gold.t1",
         )
         sql_check = [c for c in report.checks if c.check_id == 101][0]
-        assert sql_check.status == ValidationStatus.PASSED
+        assert sql_check.status == ValidationStatus.FAILED, \
+            "EXPLAIN 不应再通过业务查询前缀检查（方案 A 口径收窄）"
 
     def test_insert_still_fails_static_check(self):
         """非只读前缀（INSERT）仍应被拦截"""
@@ -448,14 +449,25 @@ class TestWithQuerySupport:
         sql_check = [c for c in report.checks if c.check_id == 101][0]
         assert sql_check.status == ValidationStatus.FAILED
 
-    def test_describe_passes_select_only_check(self):
-        """DESCRIBE 前缀也应被接受"""
+    def test_describe_rejected_by_static_check(self):
+        """DESCRIBE 不再通过——方案 A 口径收窄，只允许 SELECT/WITH"""
         validator = Validator()
         report = validator.validate_static(
             sql="DESCRIBE gold.t1",
         )
         sql_check = [c for c in report.checks if c.check_id == 101][0]
-        assert sql_check.status == ValidationStatus.PASSED
+        assert sql_check.status == ValidationStatus.FAILED, \
+            "DESCRIBE 不应再通过业务查询前缀检查（方案 A 口径收窄）"
+
+    def test_show_rejected_by_static_check(self):
+        """SHOW 从未有测试覆盖——方案 A 口径收窄后确认被拒绝"""
+        validator = Validator()
+        report = validator.validate_static(
+            sql="SHOW TABLES",
+        )
+        sql_check = [c for c in report.checks if c.check_id == 101][0]
+        assert sql_check.status == ValidationStatus.FAILED, \
+            "SHOW 不应通过业务查询前缀检查（方案 A 口径收窄）"
 
 
 class TestTableExtractionEnhanced:
