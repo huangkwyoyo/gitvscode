@@ -285,6 +285,8 @@ generated/review_packages/{request_id}/
 
 ## 5. Failure Policy（失败策略）
 
+> **CRCS 分类标准**：参见 `../TianShu/contracts/crcs_policy.yml`（代码审查分类系统唯一权威源）。本节的 FAIL/WARN/UNCERTAIN 分级与 CRCS 的 A/B/C 分类标准保持一致。
+
 | 等级 | 含义 | 处理 |
 |------|------|------|
 | **FAIL** | 硬约束违反，确定性错误 | 阻止进入人审，Agent 需修复后重新提交 |
