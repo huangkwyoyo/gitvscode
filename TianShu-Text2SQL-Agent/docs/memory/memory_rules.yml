@@ -37,6 +37,7 @@
 #
 # 注意：本轮（Step 5）只记录晋升标准，不实现自动晋升逻辑。所有规则默认
 # proposed + blocking=false。
+# 2026-06-17: TA-R018 已通过 Step 8b 人工审查，晋升为 active + blocking=true。
 #
 # ═══════════════════════════════════════════════════════════════════════════════
 # YAML Schema
@@ -265,8 +266,8 @@ rules:
   # ═════════════════════════════════════════════════════════════════════════════
   - rule_id: TA-R018
     title: "LLM 融合结果必须保留模板 fallback + 数值一致性后校验，禁止编造因果"
-    status: proposed
-    blocking: false
+    status: active
+    blocking: true
     severity: high
     source_memory: "docs/memory/经验复盘.md#R009"
     risk_ids:
@@ -286,7 +287,7 @@ rules:
       - tests/test_result_merge.py
     required_evals:
       - evals/e2e_cases.yml
-    notes: "LLM 融合 Prompt 必须包含反例约束——只描述已提供的数据，不要推断因果关系，不要修改任何数值。"
+    notes: "2026-06-17 晋升 active+blocking=true，审查人: huangkwyoyo。check_result_fusion_safety.py 含 5 维度验证（SQL 检测/因果语言/编造指标/4 层校验/模板 fallback），3 个测试文件正负例齐全，fast gate warn 模式稳定运行。LLM 融合 Prompt 必须包含反例约束——只描述已提供的数据，不要推断因果关系，不要修改任何数值。"
 
   # ═════════════════════════════════════════════════════════════════════════════
   # TA-R019: PlanExecutor 安全链路不可绕过
@@ -307,8 +308,9 @@ rules:
       - harness/checks/check_plan_executor_safety.py
     required_tests:
       - tests/test_plan_executor.py
-    required_evals: []
-    notes: "新功能必须走 PlanExecutor，不可绕过安全链路。TODO: add eval coverage in Step 8/9。"
+    required_evals:
+      - evals/e2e_cases.yml
+    notes: "新功能必须走 PlanExecutor，不可绕过安全链路。"
 
   # ═════════════════════════════════════════════════════════════════════════════
   # TA-R020: ExecutionStrategy 并发安全边界
@@ -329,8 +331,9 @@ rules:
       - harness/checks/check_execution_strategy_safety.py
     required_tests:
       - tests/test_execution_strategy.py
-    required_evals: []
-    notes: "并发默认关闭，DuckDB connection 不可跨线程共享，每个 plan 必须独立走 validate_sql_safety()。TODO: add eval coverage in Step 8/9。"
+    required_evals:
+      - evals/e2e_cases.yml
+    notes: "并发默认关闭，DuckDB connection 不可跨线程共享，每个 plan 必须独立走 validate_sql_safety()。"
 
   # ═════════════════════════════════════════════════════════════════════════════
   # TA-R021: ResultSummary 是下游的结构化输入
@@ -346,10 +349,12 @@ rules:
       - RISK-020
     applies_to:
       - src/result_summary.py
-    required_checks: []
-    required_tests: []
+    required_checks:
+      - harness/checks/check_result_summary_safety.py
+    required_tests:
+      - tests/test_result_summary.py
     required_evals: []
-    notes: "ResultSummary 字段变更需评估对 result_fusion/result_merge/chart_spec 的下游影响。_detect_grain() 逻辑变更影响 merge 对齐。TODO: add check/test/eval coverage in Step 8/9。"
+    notes: "ResultSummary 字段变更需评估对 result_fusion/result_merge/chart_spec 的下游影响。_detect_grain() 逻辑变更影响 merge 对齐。TODO: add eval coverage in Step 9。"
 
   # ═════════════════════════════════════════════════════════════════════════════
   # TA-R022: ResultMerge 只允许严格 date/grain 对齐
@@ -365,11 +370,12 @@ rules:
       - RISK-022
     applies_to:
       - src/result_merge.py
-    required_checks: []
+    required_checks:
+      - harness/checks/check_cross_domain_policy.py
     required_tests:
       - tests/test_result_merge.py
     required_evals: []
-    notes: "merge 条件仅限于 date 列对齐 + grain 一致，禁止非因果解释。TODO: add harness check and eval coverage in Step 8/9。"
+    notes: "merge 条件仅限于 date 列对齐 + grain 一致，禁止非因果解释。TODO: add eval coverage in Step 9。"
 
   # ═════════════════════════════════════════════════════════════════════════════
   # TA-R023: CrossDomainPolicy 不得削弱跨域拒绝和因果边界
@@ -390,8 +396,9 @@ rules:
       - harness/checks/check_cross_domain_policy.py
     required_tests:
       - tests/test_cross_domain_policy.py
-    required_evals: []
-    notes: "跨域隐私保护、因果禁止、unknown 反问不可削弱。decision.reason 必须清晰可追溯。TODO: add eval coverage in Step 8/9。"
+    required_evals:
+      - evals/e2e_cases.yml
+    notes: "跨域隐私保护、因果禁止、unknown 反问不可削弱。decision.reason 必须清晰可追溯。"
 
   # ═════════════════════════════════════════════════════════════════════════════
   # TA-R024: ChartSpec 不生成前端代码
@@ -409,9 +416,10 @@ rules:
       - src/chart_spec.py
     required_checks:
       - harness/checks/check_chart_spec_safety.py
-    required_tests: []
+    required_tests:
+      - tests/test_chart_spec.py
     required_evals: []
-    notes: "ChartSpec 仅生成 JSON 可序列化的规则图表规格，不可执行前端代码。TODO: add test and eval coverage in Step 8/9。"
+    notes: "ChartSpec 仅生成 JSON 可序列化的规则图表规格，不可执行前端代码。TODO: add eval coverage in Step 9。"
 
   # ═════════════════════════════════════════════════════════════════════════════
   # TA-R025: Legacy executor 不应承载新执行能力
@@ -427,10 +435,11 @@ rules:
       - RISK-018
     applies_to:
       - src/executor.py
-    required_checks: []
+    required_checks:
+      - harness/checks/check_plan_executor_safety.py
     required_tests: []
     required_evals: []
-    notes: "旧版 executor.py 仅用于兼容历史路径，新功能必须走 PlanExecutor 全链路。TODO: add check/test/eval coverage in Step 8/9。"
+    notes: "旧版 executor.py 仅用于兼容历史路径，新功能必须走 PlanExecutor 全链路。TODO: add test/eval coverage in Step 9。"
 
   # ═════════════════════════════════════════════════════════════════════════════
   # TA-R026: Harness checks 变更必须同步 registry
@@ -470,7 +479,7 @@ rules:
     required_tests:
       - tests/test_dual_baseline.py
     required_evals: []
-    notes: "基线变更需评估对 UNSTABLE 与 FAIL 判定边界的影响。TODO: add harness check and eval coverage in Step 8/9。"
+    notes: "基线变更需评估对 UNSTABLE 与 FAIL 判定边界的影响。Meta 规则留到 Step 9 补齐 check/eval。"
 
   # ═════════════════════════════════════════════════════════════════════════════
   # TA-R028: evals 变更必须同步 required_evals
@@ -509,8 +518,9 @@ rules:
       - harness/checks/check_memory_update.py
     required_tests:
       - tests/test_memory_rule_registry.py
-    required_evals: []
-    notes: "修改 memory_rules.yml 后必须运行 python scripts/generate_rule_index.py 重新生成 规则来源索引.md。TODO: add eval coverage in Step 8/9。"
+    required_evals:
+      - evals/e2e_cases.yml
+    notes: "修改 memory_rules.yml 后必须运行 python scripts/generate_rule_index.py 重新生成 规则来源索引.md。"
 
   # ═════════════════════════════════════════════════════════════════════════════
   # TA-R030: generate_rule_index.py 变更必须验证输出不退化
@@ -526,8 +536,9 @@ rules:
       - RISK-006
     applies_to:
       - scripts/generate_rule_index.py
-    required_checks: []
+    required_checks:
+      - harness/checks/check_memory_update.py
     required_tests:
       - tests/test_memory_rule_registry.py
     required_evals: []
-    notes: "修改生成脚本后必须验证输出 Markdown 结构不退化、rule_id 唯一性、TA-R 前缀规范。TODO: add harness check and eval coverage in Step 8/9。"
+    notes: "修改生成脚本后必须验证输出 Markdown 结构不退化、rule_id 唯一性、TA-R 前缀规范。TODO: add eval coverage in Step 9。"

@@ -297,22 +297,34 @@ class TestProposedNotBlocking:
     """验证 proposed/active/blocking 语义正确"""
 
     def test_all_rules_are_proposed_not_active(self):
-        """Step 5 所有规则必须是 proposed，不能有 active"""
+        """除已晋升的 TA-R018 外，其余规则必须为 proposed"""
         rules = load_rules(RULES_YAML_PATH)
+        active_rules = {"TA-R018"}  # Step 8b 已晋升为 active
         for rule in rules:
             rid = rule["rule_id"]
-            assert rule["status"] == "proposed", (
-                f"{rid}: Step 5 所有规则应为 proposed，实际: {rule['status']}"
-            )
+            if rid in active_rules:
+                assert rule["status"] == "active", (
+                    f"{rid}: 已晋升规则应为 active，实际: {rule['status']}"
+                )
+            else:
+                assert rule["status"] == "proposed", (
+                    f"{rid}: 未晋升规则应为 proposed，实际: {rule['status']}"
+                )
 
     def test_no_rule_is_blocking(self):
-        """Step 5 所有规则 blocking 必须为 false"""
+        """除已晋升的 TA-R018 外，其余规则 blocking 必须为 false"""
         rules = load_rules(RULES_YAML_PATH)
+        blocking_rules = {"TA-R018"}  # Step 8b 已晋升为 blocking=true
         for rule in rules:
             rid = rule["rule_id"]
-            assert rule["blocking"] is False, (
-                f"{rid}: Step 5 所有规则 blocking 应为 false，实际: {rule['blocking']}"
-            )
+            if rid in blocking_rules:
+                assert rule["blocking"] is True, (
+                    f"{rid}: 已晋升规则 blocking 应为 true，实际: {rule['blocking']}"
+                )
+            else:
+                assert rule["blocking"] is False, (
+                    f"{rid}: 未晋升规则 blocking 应为 false，实际: {rule['blocking']}"
+                )
 
     def test_proposed_with_blocking_true_warns(self, tmp_path):
         """proposed + blocking=true 应产生警告"""

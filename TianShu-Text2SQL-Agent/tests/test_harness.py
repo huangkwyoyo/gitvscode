@@ -1022,18 +1022,27 @@ class TestStep7FullCoverage:
         )
 
     def test_all_new_rules_are_proposed_not_blocking(self):
-        """所有 21 条规则必须保持 proposed + blocking=false（本轮不升级）"""
+        """除 Step 8b 已晋升的 TA-R018 外，其余规则保持 proposed + blocking=false"""
         from harness.checks.check_memory_update import load_memory_rules_registry
 
+        active_rules = {"TA-R018"}  # Step 8b 已晋升
         registry = load_memory_rules_registry()
         for rule in registry["rules"]:
             rid = rule["rule_id"]
-            assert rule["status"] == "proposed", (
-                f"{rid}: 本轮所有规则必须为 proposed，实际: {rule['status']}"
-            )
-            assert rule["blocking"] is False, (
-                f"{rid}: 本轮所有规则 blocking 必须为 false，实际: {rule['blocking']}"
-            )
+            if rid in active_rules:
+                assert rule["status"] == "active", (
+                    f"{rid}: 已晋升规则应为 active，实际: {rule['status']}"
+                )
+                assert rule["blocking"] is True, (
+                    f"{rid}: 已晋升规则 blocking 应为 true，实际: {rule['blocking']}"
+                )
+            else:
+                assert rule["status"] == "proposed", (
+                    f"{rid}: 本轮所有规则必须为 proposed，实际: {rule['status']}"
+                )
+                assert rule["blocking"] is False, (
+                    f"{rid}: 本轮所有规则 blocking 必须为 false，实际: {rule['blocking']}"
+                )
 
     def test_generated_md_contains_21_rules(self):
         """生成的 Markdown 应包含 21 条规则——统计详情章节标题"""
@@ -1573,3 +1582,150 @@ class TestStep8aBackwardCompatibility:
             f"--registry --content-only 应正常退出:\n{result.stderr}"
         )
         assert "Registry" in result.stdout
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Step 8c 测试：B 类规则覆盖缺口补齐验证
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestStep8cCoverageGaps:
+    """验证 Step 8c 补齐的 required_* 引用有效"""
+
+    @staticmethod
+    def _load_rules():
+        """加载真实规则注册表"""
+        from harness.checks.check_memory_update import load_memory_rules_registry
+        registry = load_memory_rules_registry()
+        if registry.get("load_error"):
+            pytest.skip(f"注册表加载失败: {registry['load_error']}")
+        return {r["rule_id"]: r for r in registry["rules"]}
+
+    def test_tar019_has_eval_coverage(self):
+        """TA-R019 required_evals 非空"""
+        rules = self._load_rules()
+        assert "TA-R019" in rules, "TA-R019 应存在"
+        assert len(rules["TA-R019"]["required_evals"]) > 0, (
+            f"TA-R019 required_evals 应为非空: {rules['TA-R019']['required_evals']}"
+        )
+
+    def test_tar020_has_eval_coverage(self):
+        """TA-R020 required_evals 非空"""
+        rules = self._load_rules()
+        assert "TA-R020" in rules
+        assert len(rules["TA-R020"]["required_evals"]) > 0, (
+            f"TA-R020 required_evals 应为非空: {rules['TA-R020']['required_evals']}"
+        )
+
+    def test_tar021_has_check_and_test_coverage(self):
+        """TA-R021 required_checks 和 required_tests 非空"""
+        rules = self._load_rules()
+        assert "TA-R021" in rules
+        assert len(rules["TA-R021"]["required_checks"]) > 0, (
+            f"TA-R021 required_checks 应为非空"
+        )
+        assert len(rules["TA-R021"]["required_tests"]) > 0, (
+            f"TA-R021 required_tests 应为非空"
+        )
+
+    def test_tar022_has_check_coverage(self):
+        """TA-R022 required_checks 非空"""
+        rules = self._load_rules()
+        assert "TA-R022" in rules
+        assert len(rules["TA-R022"]["required_checks"]) > 0, (
+            f"TA-R022 required_checks 应为非空"
+        )
+
+    def test_tar023_has_eval_coverage(self):
+        """TA-R023 required_evals 非空"""
+        rules = self._load_rules()
+        assert "TA-R023" in rules
+        assert len(rules["TA-R023"]["required_evals"]) > 0, (
+            f"TA-R023 required_evals 应为非空: {rules['TA-R023']['required_evals']}"
+        )
+
+    def test_tar024_has_test_coverage(self):
+        """TA-R024 required_tests 非空"""
+        rules = self._load_rules()
+        assert "TA-R024" in rules
+        assert len(rules["TA-R024"]["required_tests"]) > 0, (
+            f"TA-R024 required_tests 应为非空"
+        )
+
+    def test_tar025_has_check_coverage(self):
+        """TA-R025 required_checks 非空"""
+        rules = self._load_rules()
+        assert "TA-R025" in rules
+        assert len(rules["TA-R025"]["required_checks"]) > 0, (
+            f"TA-R025 required_checks 应为非空"
+        )
+
+    def test_tar029_has_eval_coverage(self):
+        """TA-R029 required_evals 非空"""
+        rules = self._load_rules()
+        assert "TA-R029" in rules
+        assert len(rules["TA-R029"]["required_evals"]) > 0, (
+            f"TA-R029 required_evals 应为非空: {rules['TA-R029']['required_evals']}"
+        )
+
+    def test_tar030_has_check_coverage(self):
+        """TA-R030 required_checks 非空"""
+        rules = self._load_rules()
+        assert "TA-R030" in rules
+        assert len(rules["TA-R030"]["required_checks"]) > 0, (
+            f"TA-R030 required_checks 应为非空"
+        )
+
+    def test_new_check_result_summary_safety_exists(self):
+        """新 check 脚本文件存在"""
+        project_root = Path(__file__).resolve().parents[1]
+        check_path = project_root / "harness" / "checks" / "check_result_summary_safety.py"
+        assert check_path.exists(), (
+            f"check_result_summary_safety.py 不存在: {check_path}"
+        )
+
+    def test_new_check_runs_and_exits_zero(self):
+        """新 check 在当前代码上运行 PASS（exit 0）"""
+        import subprocess
+        import os
+
+        project_root = Path(__file__).resolve().parents[1]
+        result = subprocess.run(
+            [sys.executable, "harness/checks/check_result_summary_safety.py"],
+            cwd=project_root,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=30,
+            env={**os.environ, "PYTHONIOENCODING": "utf-8"},
+        )
+        assert result.returncode == 0, (
+            f"新 check 应 exit 0:\nstdout:\n{result.stdout[:1000]}\nstderr:\n{result.stderr[:500]}"
+        )
+        assert "通过: 10, 失败: 0" in result.stdout or "pass_count" in result.stdout.lower(), (
+            f"应全部通过:\n{result.stdout[:1000]}"
+        )
+
+    def test_registry_infra_still_zero_failures(self):
+        """Step 8c 变更后 registry 基础设施 0 失败"""
+        import subprocess
+        import os
+
+        project_root = Path(__file__).resolve().parents[1]
+        result = subprocess.run(
+            [sys.executable, "harness/checks/check_memory_update.py", "--registry"],
+            cwd=project_root,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=30,
+            env={**os.environ, "PYTHONIOENCODING": "utf-8"},
+        )
+        assert "infrastructure failures: 0" in result.stdout, (
+            f"基础设施应为 0 失败:\n{result.stdout[:1500]}"
+        )
+        assert "[OK] Memory Gate 通过。" in result.stdout, (
+            "Memory Gate 应通过"
+        )
