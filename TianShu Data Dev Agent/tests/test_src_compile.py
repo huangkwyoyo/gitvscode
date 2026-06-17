@@ -115,3 +115,102 @@ class TestCompileFallback:
         except Exception:
             # 抛出异常也可接受（取决于 v1.x 编译器实现）
             pass
+
+
+class TestCompileSysPath:
+    """sys.path 副作用隔离——异常时路径应恢复"""
+
+    def test_sys_path_restored_after_import_error(self):
+        """v1 模块导入失败时 sys.path 应恢复原状"""
+        import sys
+        from src.compile.engine import _temporary_sys_path
+
+        before = list(sys.path)
+        fake_path = "/nonexistent/path/12345"
+
+        with _temporary_sys_path(fake_path):
+            assert fake_path in sys.path, "上下文内路径应被添加"
+
+        # 退出上下文后 fake_path 应被移除
+        assert fake_path not in sys.path, "退出上下文后路径应恢复"
+        assert sys.path == before, "sys.path 应完全恢复原状"
+
+    def test_sys_path_restored_after_exception(self):
+        """异常发生时 sys.path 也应恢复"""
+        import sys
+        from src.compile.engine import _temporary_sys_path
+
+        before = list(sys.path)
+        fake_path = "/another/nonexistent/path"
+
+        try:
+            with _temporary_sys_path(fake_path):
+                assert fake_path in sys.path
+                raise ValueError("模拟异常")
+        except ValueError:
+            pass  # 预期异常
+
+        assert fake_path not in sys.path, "异常时路径也应恢复"
+        assert sys.path == before, "异常时 sys.path 应完全恢复"
+
+    def test_duplicate_insert_not_removed(self):
+        """路径已存在时不应被错误移除"""
+        import sys
+        from src.compile.engine import _temporary_sys_path
+
+        before = list(sys.path)
+        # 使用已在 sys.path 中的路径
+        existing_path = sys.path[0]
+
+        with _temporary_sys_path(existing_path):
+            assert existing_path in sys.path  # 仍然在
+
+        # 退出后不应移除了原本就存在的路径
+        assert existing_path in sys.path
+
+
+class TestCompileV1Incompatible:
+    """v1 模块结构不兼容时的行为"""
+
+    def test_v1_module_import_error_propagates(self):
+        """v1.x 编译器模块不存在时抛出明确的 ImportError"""
+        import pytest
+        from unittest.mock import patch, MagicMock
+        from src.compile.engine import _do_compile
+        from src.ir.types import SQLPlan, Strategy
+
+        plan = SQLPlan(strategy=Strategy.G3_DIRECT, primary_table="gold.t1")
+
+        # 模拟 scripts.pipeline.layer4_generate 导入失败
+        def _fake_import(name, *args, **kwargs):
+            if "scripts.pipeline" in name:
+                raise ImportError(f"No module named '{name}' (模拟)")
+            return __import__(name, *args, **kwargs)
+
+        with patch("builtins.__import__", side_effect=_fake_import):
+            with pytest.raises(ImportError, match="v1.x 编译器"):
+                _do_compile(plan)
+
+    def test_v1_sqlplan_construct_incompatible_raises_runtime_error(self):
+        """v1.x SQLPlan 构造不兼容时抛出 RuntimeError 而非穿透"""
+        import pytest
+        from unittest.mock import patch, MagicMock
+        from src.compile.engine import _do_compile
+        from src.ir.types import SQLPlan, Strategy
+
+        plan = SQLPlan(strategy=Strategy.G3_DIRECT, primary_table="gold.t1")
+
+        # 模拟 v1 模块存在但 V1SQLPlan 构造抛出 TypeError
+        mock_v1_plan = MagicMock()
+        mock_v1_plan.side_effect = TypeError("__init__() got an unexpected keyword argument")
+
+        mock_compile = MagicMock()
+        mock_compile.__name__ = "compile_sql"
+
+        with patch(
+            "scripts.pipeline.layer4_generate.compile_sql", mock_compile, create=True
+        ), patch(
+            "scripts.pipeline.layer3_ir.SQLPlan", mock_v1_plan, create=True
+        ):
+            with pytest.raises(RuntimeError, match="v1/v2 IR 结构不兼容"):
+                _do_compile(plan)

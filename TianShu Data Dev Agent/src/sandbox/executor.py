@@ -69,13 +69,20 @@ def execute_sql(
 
     start_time = time.perf_counter()
 
-    # ── 超时中断定时器 ──
-    # 守护线程在查询完成后自动取消，超时未完成则中断 DuckDB 查询
+    # ── 超时中断定时器（使用 threading.Event 消除竞态）──
+    # 问题：Timer 可能在查询刚完成时触发 conn.interrupt()，导致：
+    #   - 中断已完成查询后的连接状态
+    #   - 误中断下一个复用同一连接的查询
+    # 解决：query_done Event 标记——Timer 回调先检查 Event，避免误中断
     interrupt_timer: Optional[threading.Timer] = None
+    query_done = threading.Event()  # 标记查询是否已完成
+
     if timeout_seconds > 0:
 
         def _interrupt():
-            """超时回调：中断 DuckDB 当前查询"""
+            """超时回调：仅在查询未完成时中断 DuckDB 当前查询"""
+            if query_done.is_set():
+                return  # 查询已完成，跳过中断
             try:
                 conn.interrupt()
             except Exception:
@@ -102,7 +109,8 @@ def execute_sql(
         error = str(exc)
 
     finally:
-        # ── 取消超时定时器（查询已完成，不需要中断）──
+        # ── 先标记完成，再取消 Timer——消除竞态窗口 ──
+        query_done.set()
         if interrupt_timer is not None:
             interrupt_timer.cancel()
 

@@ -282,18 +282,29 @@ class SQLPlan:
         # 主表必须指定
         if not self.primary_table:
             errors.append("primary_table 不能为空")
-        elif available_tables is not None and self.primary_table not in available_tables:
-            errors.append(
-                f"表 {self.primary_table} 不在可用表列表中，"
-                f"请检查表名或契约定义"
-            )
+        elif available_tables is not None:
+            # 规范化比较：lower().strip() 避免大小写/空白导致误判
+            pt_normalized = self.primary_table.lower().strip()
+            available_normalized = {t.lower().strip() for t in available_tables}
+            if pt_normalized not in available_normalized:
+                errors.append(
+                    f"表 {self.primary_table} 不在可用表列表中，"
+                    f"请检查表名或契约定义"
+                )
 
         # JOIN 白名单校验（主防线——IR 级）
         if self.joins and join_whitelist is not None and self.primary_table:
+            # 规范化 JOIN 白名单比较（与 checks.py 保持一致）
+            pt_normalized = self.primary_table.lower().strip()
+            whitelist_normalized = {
+                (a.lower().strip(), b.lower().strip())
+                for a, b in join_whitelist
+            }
             for join in self.joins:
-                join_pair = (self.primary_table, join.table)
-                reverse_pair = (join.table, self.primary_table)
-                if join_pair not in join_whitelist and reverse_pair not in join_whitelist:
+                join_normalized = join.table.lower().strip()
+                join_pair = (pt_normalized, join_normalized)
+                reverse_pair = (join_normalized, pt_normalized)
+                if join_pair not in whitelist_normalized and reverse_pair not in whitelist_normalized:
                     errors.append(
                         f"[IR 主防线] JOIN {self.primary_table} ↔ {join.table} "
                         f"不在核准白名单中"

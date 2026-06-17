@@ -17,9 +17,12 @@ Phase 1 实现最小映射——仅映射 compile_fallback() 需要的字段。
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from .types import SQLPlan, JoinPlan, Aggregation, Strategy
+
+_logger = logging.getLogger(__name__)
 
 
 def to_v1_plan(plan: SQLPlan) -> dict[str, Any]:
@@ -92,25 +95,47 @@ def from_v1_plan(v1_plan: Any) -> SQLPlan:
 
     Phase 1 最小实现——从 v1.x 对象的 dict 表示中提取关键字段。
 
+    告警策略：
+      - 正常缺失字段（getattr 返回默认值）：不告警
+      - 对象结构不兼容（AttributeError/TypeError 穿透深层访问）：记录告警
+      - 转换异常（个别 JOIN 节点无法解析）：记录告警，继续处理其余 JOIN
+
+    告警会写入 Python logging 并附到返回的 SQLPlan._bridge_warnings 属性上，
+    供调用方检测桥接质量。
+
     Args:
         v1_plan: v1.x 的 SQLPlan 对象（来自 scripts/pipeline/layer3_ir.py）
 
     Returns:
-        v2.0 SQLPlan
+        v2.0 SQLPlan（可通过 ._bridge_warnings 访问转换告警列表）
     """
-    # 尝试从 v1.x 对象获取属性，失败时尝试 dict 访问
+    bridge_warnings: list[str] = []
+
+    # ── 提取 primary_table ──
+    primary_table = None
     try:
         primary_table = getattr(v1_plan, "primary_table", None)
         if primary_table is None and hasattr(v1_plan, "join_graph"):
             jg = v1_plan.join_graph
             if jg is not None:
-                primary_table = getattr(jg.primary, "table", None)
-    except Exception:
-        primary_table = None
+                try:
+                    primary_table = getattr(jg.primary, "table", None)
+                except (AttributeError, TypeError) as e:
+                    msg = f"无法从 join_graph.primary 提取表名: {e}"
+                    bridge_warnings.append(msg)
+                    _logger.warning("v1_bridge: %s", msg)
+    except (AttributeError, TypeError) as e:
+        msg = f"提取 primary_table 时 v1 对象结构不兼容: {e}"
+        bridge_warnings.append(msg)
+        _logger.warning("v1_bridge: %s", msg)
 
+    # ── 提取 source_layer ──
     try:
         source_layer = getattr(v1_plan, "source_layer", "g3")
-    except Exception:
+    except (AttributeError, TypeError) as e:
+        msg = f"提取 source_layer 失败，使用默认值 g3: {e}"
+        bridge_warnings.append(msg)
+        _logger.warning("v1_bridge: %s", msg)
         source_layer = "g3"
 
     # 映射策略
@@ -122,18 +147,35 @@ def from_v1_plan(v1_plan: Any) -> SQLPlan:
         group_by=list(getattr(v1_plan, "group_by", []) or []),
     )
 
-    # 提取 JOIN 信息
+    # ── 提取 JOIN 信息 ──
     try:
         if hasattr(v1_plan, "join_graph") and v1_plan.join_graph is not None:
             jg = v1_plan.join_graph
-            for jn in getattr(jg, "joins", []) or []:
-                plan.joins.append(JoinPlan(
-                    table=getattr(jn, "table", ""),
-                    on=f"{getattr(jn.condition, 'left', '')} = {getattr(jn.condition, 'right', '')}",
-                    type=getattr(jn, "type", "INNER"),
-                ))
-    except Exception:
-        pass
+            joins = getattr(jg, "joins", []) or []
+            for idx, jn in enumerate(joins):
+                try:
+                    plan.joins.append(JoinPlan(
+                        table=getattr(jn, "table", ""),
+                        on=f"{getattr(jn.condition, 'left', '')} = {getattr(jn.condition, 'right', '')}",
+                        type=getattr(jn, "type", "INNER"),
+                    ))
+                except (AttributeError, TypeError) as e:
+                    msg = f"转换 JOIN 节点 #{idx} 失败（跳过该节点）: {e}"
+                    bridge_warnings.append(msg)
+                    _logger.warning("v1_bridge: %s", msg)
+    except (AttributeError, TypeError) as e:
+        msg = f"提取 JOIN 信息时 v1 对象结构不兼容: {e}"
+        bridge_warnings.append(msg)
+        _logger.warning("v1_bridge: %s", msg)
+
+    # ── 完整性检查 ──
+    if primary_table is None and plan.joins:
+        msg = "primary_table 为空但存在 JOIN——桥接结果可能不完整"
+        bridge_warnings.append(msg)
+        _logger.warning("v1_bridge: %s", msg)
+
+    # ── 附告警到 plan 对象供调用方检测 ──
+    plan._bridge_warnings = bridge_warnings  # type: ignore[attr-defined]
 
     return plan
 

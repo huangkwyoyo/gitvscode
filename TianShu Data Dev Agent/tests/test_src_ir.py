@@ -436,3 +436,187 @@ class TestContracts:
         req = parse_requirement(str(yaml_file))
         assert req.is_valid is False
         assert any("metrics" in e for e in req.validation_errors)
+
+
+class TestV1BridgeWarnings:
+    """v1_bridge 异常不应被静默吞没，应可通过 _bridge_warnings 检测"""
+
+    def test_normal_v1_plan_no_warnings(self):
+        """正常 v1 对象桥接不产生告警"""
+        from src.ir.v1_bridge import from_v1_plan
+
+        class MockV1Plan:
+            primary_table = "gold.t1"
+            source_layer = "g3"
+            group_by = []
+            join_graph = None
+
+        plan = from_v1_plan(MockV1Plan())
+        assert hasattr(plan, "_bridge_warnings"), "应始终存在 _bridge_warnings 属性"
+        assert len(plan._bridge_warnings) == 0, "正常对象不应有告警"
+
+    def test_corrupt_primary_table_access_warns(self):
+        """v1 对象 primary 访问异常不应静默吞掉"""
+        from src.ir.v1_bridge import from_v1_plan
+
+        class CorruptV1Plan:
+            """join_graph.primary 抛出 AttributeError"""
+            source_layer = "g3"
+            group_by = []
+
+            @property
+            def primary_table(self):
+                return None
+
+            @property
+            def join_graph(self):
+                class BadGraph:
+                    @property
+                    def primary(self):
+                        raise AttributeError("结构不兼容：缺少 primary 字段")
+                return BadGraph()
+
+        plan = from_v1_plan(CorruptV1Plan())
+        assert len(plan._bridge_warnings) >= 1, "异常应被记录为告警而非静默吞掉"
+        assert any("primary" in w.lower() for w in plan._bridge_warnings), \
+            f"告警应提及 primary，实际: {plan._bridge_warnings}"
+
+    def test_corrupt_join_extraction_warns(self):
+        """v1 对象 JOIN 提取异常不应静默吞掉"""
+        from src.ir.v1_bridge import from_v1_plan
+
+        class CorruptJoinPlan:
+            primary_table = "gold.t1"
+            source_layer = "g3"
+            group_by = []
+
+            @property
+            def join_graph(self):
+                class BadJoinGraph:
+                    primary = type("P", (), {"table": "gold.t1"})()
+
+                    @property
+                    def joins(self):
+                        return [
+                            type("BadJoin", (), {
+                                "table": "gold.t2",
+                                # condition 不存在——会触发 AttributeError
+                            })(),
+                        ]
+                return BadJoinGraph()
+
+        plan = from_v1_plan(CorruptJoinPlan())
+        assert len(plan._bridge_warnings) >= 1, "JOIN 提取异常应被记录为告警"
+        assert any("JOIN" in w or "join" in w.lower() for w in plan._bridge_warnings), \
+            f"告警应提及 JOIN，实际: {plan._bridge_warnings}"
+
+    def test_missing_primary_table_with_joins_warns(self):
+        """primary_table 为空但存在 JOIN 时产生完整性告警"""
+        from src.ir.v1_bridge import from_v1_plan
+
+        class JoinOnlyPlan:
+            """有 JOIN 但无 primary_table"""
+            source_layer = "g3"
+            group_by = []
+            primary_table = None
+
+            @property
+            def join_graph(self):
+                class HasJoin:
+                    primary = type("P", (), {"table": None})()
+                    joins = [
+                        type("J", (), {
+                            "table": "gold.t2",
+                            "condition": type("C", (), {"left": "a", "right": "b"})(),
+                            "type": "INNER",
+                        })(),
+                    ]
+                return HasJoin()
+
+        plan = from_v1_plan(JoinOnlyPlan())
+        assert len(plan._bridge_warnings) >= 1, "应产生完整性告警"
+        assert any("primary_table" in w.lower() or "不完整" in w
+                   for w in plan._bridge_warnings), \
+            f"应报告不完整，实际: {plan._bridge_warnings}"
+
+
+class TestSQLPlanCaseNormalization:
+    """SQLPlan.validate() 表名大小写规范化比较"""
+
+    def test_primary_table_case_insensitive(self):
+        """primary_table='Gold.Table' vs available_tables=['gold.table'] 不应错误失败"""
+        plan = SQLPlan(
+            strategy=Strategy.G3_DIRECT,
+            primary_table="Gold.Table",
+        )
+        errors = plan.validate(
+            available_tables={"gold.table"}
+        )
+        assert len(errors) == 0, \
+            f"大小写不同应通过规范化比较，实际错误: {errors}"
+
+    def test_primary_table_whitespace_normalized(self):
+        """primary_table=' gold.table ' 带空白应与 'gold.table' 匹配"""
+        plan = SQLPlan(
+            strategy=Strategy.G3_DIRECT,
+            primary_table=" gold.table ",
+        )
+        errors = plan.validate(
+            available_tables={"gold.table"}
+        )
+        assert len(errors) == 0, \
+            f"空白应被规范化，实际错误: {errors}"
+
+    def test_primary_table_not_in_list_still_fails(self):
+        """规范后确实不在列表中的表仍应报错"""
+        plan = SQLPlan(
+            strategy=Strategy.G3_DIRECT,
+            primary_table="gold.unknown",
+        )
+        errors = plan.validate(
+            available_tables={"gold.known_table"}
+        )
+        assert len(errors) >= 1
+        assert any("gold.unknown" in e for e in errors)
+
+    def test_join_whitelist_case_insensitive(self):
+        """JOIN 白名单比较大小写不敏感"""
+        plan = SQLPlan(
+            strategy=Strategy.G3_CROSS,
+            primary_table="Gold.TableA",
+            joins=[JoinPlan(table="gold.TABLEB", on="a.id = b.id")],
+            downgrade_reason="跨表JOIN是唯一可行的查询路径",
+        )
+        errors = plan.validate(
+            join_whitelist={("gold.tablea", "gold.tableb")}
+        )
+        assert len(errors) == 0, \
+            f"JOIN 白名单应大小写不敏感，实际错误: {errors}"
+
+    def test_join_whitelist_reverse_case_insensitive(self):
+        """反向 JOIN 对比较也应大小写不敏感"""
+        plan = SQLPlan(
+            strategy=Strategy.G3_CROSS,
+            primary_table="Gold.TableA",
+            joins=[JoinPlan(table="gold.TABLEB", on="a.id = b.id")],
+            downgrade_reason="跨表JOIN是唯一可行的查询路径",
+        )
+        errors = plan.validate(
+            join_whitelist={("GOLD.TABLEB", "gold.tablea")}  # 反序 + 大写
+        )
+        assert len(errors) == 0, \
+            f"反向 JOIN 对应大小写不敏感，实际错误: {errors}"
+
+    def test_join_not_in_whitelist_still_fails(self):
+        """规范后确实不在白名单的 JOIN 仍应报错"""
+        plan = SQLPlan(
+            strategy=Strategy.G3_CROSS,
+            primary_table="gold.table_a",
+            joins=[JoinPlan(table="gold.table_c", on="a.id = c.id")],
+            downgrade_reason="跨表JOIN是唯一可行的查询路径",
+        )
+        errors = plan.validate(
+            join_whitelist={("gold.table_a", "gold.table_b")}
+        )
+        assert len(errors) >= 1
+        assert any("table_c" in e for e in errors)
