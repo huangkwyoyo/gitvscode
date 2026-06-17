@@ -135,7 +135,8 @@ Obsidian/
 | M3 静态检查（5 项） | ✅ | `Validator.validate_static()` —— SQL/Spark 前缀 + 关键字 + lineage |
 | M3 SQL 样本执行 | ✅ | `sandbox/executor.py`，只读 + LIMIT 1000 + 超时保护 |
 | M3 安全压实（3 缺口闭合） | ✅ | `check_sample_execution` / `execute_sql` / `validate_context` 防御纵深 |
-| 测试 | ✅ | 326 passed，零回归 |
+| 测试 | ✅ | 475 passed，零回归 |
+| `src/agent/` 模块直接测试 | ✅ | 6 文件、142 测试覆盖 6 个 M2/M3 核心模块 |
 
 ### ⚠️ PARTIAL（部分完成）
 
@@ -145,8 +146,6 @@ Obsidian/
 | `decision.md` | ⚠️ | 已生成人审模板（APPROVE/REQUEST/REJECT 选项），**不是程序化状态机** |
 | Spark 只读样本执行 | ⚠️ | `spark_executor.py` 始终返回 SKIPPED/PENDING |
 | SQL/Spark 双结果交叉验证 | ⚠️ | `cross_validation.py` 逻辑完整，输入缺失→始终 SKIPPED |
-| `src/agent/` 模块直接测试 | ⚠️ | 集成测试间接覆盖，直接单元测试不足 |
-
 ### ❌ TODO（待完成）
 
 | 模块 | 阻塞原因 |

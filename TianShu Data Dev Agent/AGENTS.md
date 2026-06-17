@@ -206,7 +206,7 @@ LLM 生成代码草案
 | 绕过 Executor 直接查 DuckDB | 所有数据库访问必须走统一入口 | 架构约束——无其他 DB 连接路径 |
 | 编造不存在的表或字段 | 数据完整性不可妥协 | 防线 2 检查项 #1：表/字段存在性 |
 | 直接操作生产库 | Agent 不能拥有生产执行权 | 环境隔离——Agent 只能连开发库 |
-| 生成非只读 SQL（INSERT/UPDATE/DELETE/DROP 等） | 数据安全底线 | 防线 2 检查项 #2：安全黑名单 16 关键字 |
+| 生成 SELECT/WITH 以外的 SQL（INSERT/UPDATE/DELETE/DROP/EXPLAIN/DESCRIBE/SHOW 等） | 业务草案执行链只允许 SELECT 和 WITH SELECT | 防线 2 检查项 #2：安全黑名单 + 只读前缀 |
 | 绕过人的审查直接上线 | 人是最終决策者 | Agent 没有部署权限 |
 | 修改 `meta.metric_definitions` 或 schema | 元数据变更必须走审批 | 数据库写权限限制 |
 | 访问 `bronze.*` / `silver.*` 表 | 原始和中间数据不可直接暴露 | 防线 2 检查项 #3：表访问权限 |
@@ -216,7 +216,7 @@ LLM 生成代码草案
 ```
 SQL/Spark DSL 草案（LLM 生成、模板编译器生成或人工提供）
          ↓
-    Validator（安全、权限、表字段、JOIN、来源追溯）
+    Validator（只读前缀、安全黑名单、表字段存在性、权限、JOIN、来源追溯）
          ↓ 通过
     Executor（开发环境只读，限行，限时）
          ↓
@@ -451,7 +451,13 @@ src/
 - `*.raw_*`（原始数据表）
 - 未经数据库设计文档注册的任何表
 
-### 8.2 禁止的 SQL 操作
+### 8.2 允许与禁止的 SQL 操作
+
+**业务草案执行链只允许**：`SELECT` 和 `WITH ... SELECT ...`（CTE 查询）。
+
+> EXPLAIN / DESCRIBE / SHOW 虽为只读诊断语句，但不产生业务数据，已从业务执行链移除（2026-06-17 安全口径收窄）。未来可通过独立 diagnostic mode 使用。
+
+**禁止**：
 - INSERT、UPDATE、DELETE、MERGE、REPLACE、TRUNCATE
 - DROP、ALTER、RENAME
 - GRANT、REVOKE
@@ -525,7 +531,7 @@ scripts/dev_agent/                 ← v2 CLI 入口
 | M3 表访问权限 | ✅ | bronze/silver 禁止 + 可用表白名单 |
 | M3 JOIN 白名单合规 | ✅ | IR 路径 A + SQL 文本路径 B 双路径 |
 | M3 SQL 样本执行 | ✅ | `sandbox/executor.py`，只读 + LIMIT 1000 + 超时保护 |
-| M3 安全压实（3 缺口） | ✅ | G1/G2/G3 修复，326 测试零回归 |
+| M3 安全压实（3 缺口） | ✅ | G1/G2/G3 修复，475 测试零回归 |
 | v1 pipeline 保留 | ✅ | `scripts/pipeline/` 完整保留，143 测试通过 |
 
 ### 10.3 部分完成（PARTIAL）
@@ -535,7 +541,7 @@ scripts/dev_agent/                 ← v2 CLI 入口
 | Spark 只读样本执行 | ⚠️ | `sandbox/spark_executor.py` 是桩，始终返回 SKIPPED/PENDING |
 | SQL/Spark 交叉验证 | ⚠️ | `verify/cross_validation.py` 逻辑完整，但输入缺失→始终 SKIPPED |
 | `decision.md` | ⚠️ | 已生成人审模板，但**不是程序化人审状态机** |
-| `src/agent/` 模块直接测试 | ⚠️ | 集成测试间接覆盖，直接单元测试不足 |
+| `src/agent/` 模块直接测试 | ✅ | 6 文件、142 测试覆盖 6 个 M2/M3 核心模块 |
 
 ### 10.4 待完成（TODO）
 
