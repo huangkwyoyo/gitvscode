@@ -59,20 +59,16 @@ def compile_fallback(plan: SQLPlan) -> tuple[str, list[Any]]:
         from scripts.pipeline.layer3_ir import SQLPlan as V1SQLPlan
 
         # 尝试构造 v1.x SQLPlan 对象
-        v1_plan = V1SQLPlan(
-            plan_id=v1_dict.get("plan_id", "fallback"),
-            plan_name=v1_dict.get("plan_name", "unnamed"),
-            source_layer=v1_dict.get("source_layer", "g3"),
-            domain=v1_dict.get("domain", "traffic"),
-            target_dialect=v1_dict.get("target_dialect", "duckdb"),
-            group_by=v1_dict.get("group_by", []),
-            order_by=v1_dict.get("order_by", []),
-            limit=v1_dict.get("limit"),
-            output_format=v1_dict.get("output_format", "parquet"),
-            is_valid=v1_dict.get("is_valid", True),
-            block_reason=v1_dict.get("block_reason", ""),
-            warnings=v1_dict.get("warnings", []),
-        )
+        # 注意：v1_dict 可能包含 where_clauses/aggregations 等 Phase 1 保留字段，
+        # 但 V1SQLPlan 使用 filter_bindings/column_bindings 机制（Phase 4 转换）。
+        # 此处仅提取 V1SQLPlan 支持的字段，额外字段不传入以避免 TypeError。
+        _v1_supported = {
+            "plan_id", "plan_name", "source_layer", "domain",
+            "target_dialect", "group_by", "order_by", "limit",
+            "output_format", "is_valid", "block_reason", "warnings",
+        }
+        v1_kwargs = {k: v for k, v in v1_dict.items() if k in _v1_supported}
+        v1_plan = V1SQLPlan(**v1_kwargs)
 
         return v1_compile_sql(v1_plan)
 

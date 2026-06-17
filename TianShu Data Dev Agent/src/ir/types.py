@@ -354,7 +354,7 @@ class SQLResult:
         用于结果稳定性检测——签名变化意味着数据结构发生了变更。
         """
         content = f"{self.row_count}|{','.join(self.columns)}|{','.join(self.column_types)}"
-        return hashlib.md5(content.encode()).hexdigest()
+        return hashlib.md5(content.encode("utf-8")).hexdigest()
 
     def validate(self) -> list[str]:
         """

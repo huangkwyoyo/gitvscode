@@ -209,6 +209,20 @@ class TestSQLResult:
         )
         assert r1.result_signature != r2.result_signature
 
+    def test_signature_explicit_utf8_encoding(self):
+        """签名生成使用显式 UTF-8 编码，不依赖平台默认编码"""
+        r1 = SQLResult(
+            sql="SELECT 1",
+            columns=["日期", "指标"],  # 中文字段名——测试 UTF-8 编码
+            column_types=["DATE", "INTEGER"],
+            row_count=42,
+        )
+        # 不应抛出异常，签名应稳定生成
+        sig = r1.result_signature
+        assert len(sig) == 32  # MD5 十六进制长度为 32
+        # 重复调用返回相同的签名（确定性）
+        assert r1.result_signature == sig
+
     def test_validate_error(self):
         result = SQLResult(sql="SELECT 1", error="connection refused")
         warnings = result.validate()
@@ -334,6 +348,54 @@ class TestV1Bridge:
         assert _strategy_to_layer(Strategy.G3_DIRECT) == "g3"
         assert _strategy_to_layer(Strategy.G2_FACT) == "g2"
         assert _strategy_to_layer(Strategy.NEED_CLARIFICATION) == "g3"  # 默认
+
+    def test_to_v1_plan_preserves_aggregations(self):
+        """v2 SQLPlan 经 to_v1_plan() 转换后聚合表达式不丢失"""
+        from src.ir.v1_bridge import to_v1_plan
+        from src.ir.types import Aggregation
+
+        plan = SQLPlan(
+            strategy=Strategy.G3_DIRECT,
+            primary_table="gold.dws_daily_trip_summary",
+            aggregations=[
+                Aggregation(expr="COUNT(*)", alias="trip_count"),
+                Aggregation(expr="SUM(trip_distance)", alias="total_distance"),
+            ],
+        )
+        v1_dict = to_v1_plan(plan)
+        assert "aggregations" in v1_dict
+        assert len(v1_dict["aggregations"]) == 2
+        assert v1_dict["aggregations"][0]["expr"] == "COUNT(*)"
+        assert v1_dict["aggregations"][0]["alias"] == "trip_count"
+        assert v1_dict["aggregations"][1]["expr"] == "SUM(trip_distance)"
+
+    def test_to_v1_plan_preserves_where_clauses(self):
+        """v2 SQLPlan 经 to_v1_plan() 转换后 WHERE 条件不丢失"""
+        from src.ir.v1_bridge import to_v1_plan
+
+        plan = SQLPlan(
+            strategy=Strategy.G3_DIRECT,
+            primary_table="gold.dws_daily_trip_summary",
+            where_clauses=["trip_date >= '2026-01-01'", "trip_count > 0"],
+        )
+        v1_dict = to_v1_plan(plan)
+        assert "where_clauses" in v1_dict
+        assert len(v1_dict["where_clauses"]) == 2
+        assert "trip_date" in v1_dict["where_clauses"][0]
+        assert "trip_count > 0" in v1_dict["where_clauses"][1]
+
+    def test_to_v1_plan_no_aggregations_or_where_clauses(self):
+        """空聚合和空过滤条件时不添加对应字段（保持最小输出）"""
+        from src.ir.v1_bridge import to_v1_plan
+
+        plan = SQLPlan(
+            strategy=Strategy.G3_DIRECT,
+            primary_table="gold.dws_daily_trip_summary",
+        )
+        v1_dict = to_v1_plan(plan)
+        # 未设置时字段不应存在
+        assert "aggregations" not in v1_dict
+        assert "where_clauses" not in v1_dict
 
 
 class TestContracts:

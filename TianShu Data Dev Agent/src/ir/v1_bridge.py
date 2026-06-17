@@ -64,6 +64,16 @@ def to_v1_plan(plan: SQLPlan) -> dict[str, Any]:
         "warnings": [],
     }
 
+    # 映射 WHERE 条件——Phase 1 保留，Phase 4 转换为 v1.x filter_bindings
+    if plan.where_clauses:
+        v1_dict["where_clauses"] = plan.where_clauses
+
+    # 映射聚合表达式——Phase 1 保留，Phase 4 转换为 v1.x column_bindings/expression_refs
+    if plan.aggregations:
+        v1_dict["aggregations"] = [
+            {"expr": a.expr, "alias": a.alias} for a in plan.aggregations
+        ]
+
     # 映射 JOIN 信息（如果存在）
     if plan.primary_table:
         v1_dict["primary_table"] = plan.primary_table
