@@ -4,6 +4,7 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+from unittest.mock import patch
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -71,6 +72,48 @@ def test_missing_required_fields_are_reported_as_missing_coverage(tmp_path):
     assert item["missing_evals"] == ["required_evals 为空"]
 
 
+def test_missing_required_checks_is_reported_as_missing_coverage(tmp_path):
+    from harness.memory_promotion import analyze_promotion_candidates
+
+    rule = _rule(tmp_path, checks=[])
+    report = analyze_promotion_candidates([rule], project_root=tmp_path)
+
+    item = report["missing_coverage"][0]
+    assert item["candidate_status"] == "missing_coverage"
+    assert item["missing_checks"] == ["required_checks 为空"]
+    assert item["missing_tests"] == []
+    assert item["missing_evals"] == []
+    assert item["coverage_score"]["checks"] == "missing"
+
+
+def test_missing_required_tests_is_reported_as_missing_coverage(tmp_path):
+    from harness.memory_promotion import analyze_promotion_candidates
+
+    rule = _rule(tmp_path, tests=[])
+    report = analyze_promotion_candidates([rule], project_root=tmp_path)
+
+    item = report["missing_coverage"][0]
+    assert item["candidate_status"] == "missing_coverage"
+    assert item["missing_checks"] == []
+    assert item["missing_tests"] == ["required_tests 为空"]
+    assert item["missing_evals"] == []
+    assert item["coverage_score"]["tests"] == "missing"
+
+
+def test_missing_required_evals_is_reported_as_missing_coverage(tmp_path):
+    from harness.memory_promotion import analyze_promotion_candidates
+
+    rule = _rule(tmp_path, evals=[])
+    report = analyze_promotion_candidates([rule], project_root=tmp_path)
+
+    item = report["missing_coverage"][0]
+    assert item["candidate_status"] == "missing_coverage"
+    assert item["missing_checks"] == []
+    assert item["missing_tests"] == []
+    assert item["missing_evals"] == ["required_evals 为空"]
+    assert item["coverage_score"]["evals"] == "missing"
+
+
 def test_nonexistent_required_paths_are_reported_as_invalid_references(tmp_path):
     from harness.memory_promotion import analyze_promotion_candidates
 
@@ -127,6 +170,18 @@ def test_report_renderers_include_required_sections(tmp_path):
     md_payload = render_memory_promotion_markdown(report)
 
     json.dumps(json_payload, ensure_ascii=False)
+    assert {
+        "run_id",
+        "timestamp",
+        "source_registry",
+        "summary",
+        "rules",
+        "ready_for_human_review",
+        "missing_coverage",
+        "invalid_references",
+        "not_recommended",
+        "manual_review_required",
+    }.issubset(json_payload)
     assert json_payload["summary"]["total_rules"] == 1
     assert json_payload["source_registry"] == "docs/memory/memory_rules.yml"
     assert "manual_review_required" in json_payload
@@ -138,6 +193,27 @@ def test_report_renderers_include_required_sections(tmp_path):
     assert "Not Recommended" in md_payload
     assert "Blocking Semantics Review" in md_payload
     assert "Suggested Next Actions" in md_payload
+
+
+def test_analysis_and_rendering_do_not_read_latest_reports(tmp_path):
+    from harness.memory_promotion import (
+        analyze_promotion_candidates,
+        build_memory_promotion_json,
+        render_memory_promotion_markdown,
+    )
+
+    original_read_text = Path.read_text
+
+    def guarded_read_text(path: Path, *args, **kwargs):
+        path_text = str(path).replace("\\", "/")
+        if "harness/reports/" in path_text and "latest" in path.name:
+            raise AssertionError(f"不应读取 latest 报告: {path}")
+        return original_read_text(path, *args, **kwargs)
+
+    with patch.object(Path, "read_text", guarded_read_text):
+        report = analyze_promotion_candidates([_rule(tmp_path)], project_root=tmp_path)
+        build_memory_promotion_json(report)
+        render_memory_promotion_markdown(report)
 
 
 def test_cli_writes_timestamped_snapshot_reports_without_latest(tmp_path):
