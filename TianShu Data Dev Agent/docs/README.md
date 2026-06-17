@@ -120,6 +120,60 @@ Obsidian/
 
 ---
 
+## 当前实现状态 / Implementation Status
+
+> 2026-06-17 更新。本节对齐代码真实状态，详见项目根目录 `README.md` "当前实现状态"。
+
+### ✅ DONE（已完成）
+
+| 模块 | 状态 | 说明 |
+|------|------|------|
+| M2 Review Package 完整生成 | ✅ | `src/agent/workflow.py` → `build_review_package()` 输出 7 文件审查材料包 |
+| `generated/review_packages/{request_id}/` 结构 | ✅ | 完整 7 文件目录骨架 |
+| SQL + Spark DSL 双份草案 | ✅ | `dual_code_generator.py` 确定性生成（不接 LLM） |
+| `reports/verification.md` 真实验证报告 | ✅ | M3 运行后覆盖 M2 占位桩，含静态检查 + WARN/FAIL 明细 |
+| M3 静态检查（5 项） | ✅ | `Validator.validate_static()` —— SQL/Spark 前缀 + 关键字 + lineage |
+| M3 SQL 样本执行 | ✅ | `sandbox/executor.py`，只读 + LIMIT 1000 + 超时保护 |
+| M3 安全压实（3 缺口闭合） | ✅ | `check_sample_execution` / `execute_sql` / `validate_context` 防御纵深 |
+| 测试 | ✅ | 326 passed，零回归 |
+
+### ⚠️ PARTIAL（部分完成）
+
+| 模块 | 状态 | 说明 |
+|------|------|------|
+| `reports/cross_validation.md` | ⚠️ | 逻辑完整，但始终 SKIPPED（Spark executor 是桩） |
+| `decision.md` | ⚠️ | 已生成人审模板（APPROVE/REQUEST/REJECT 选项），**不是程序化状态机** |
+| Spark 只读样本执行 | ⚠️ | `spark_executor.py` 始终返回 SKIPPED/PENDING |
+| SQL/Spark 双结果交叉验证 | ⚠️ | `cross_validation.py` 逻辑完整，输入缺失→始终 SKIPPED |
+| `src/agent/` 模块直接测试 | ⚠️ | 集成测试间接覆盖，直接单元测试不足 |
+
+### ❌ TODO（待完成）
+
+| 模块 | 阻塞原因 |
+|------|---------|
+| 人审状态机 | 尚未设计 |
+| LLM 接入代码生成 | 项目边界：当前不接真实 LLM API |
+| 真实 SQL/Spark 交叉验证 | 需 Spark 环境就绪 |
+| Prompt 回归系统 | 需 LLM API |
+
+### Legacy boundary（v1 / v2 边界）
+
+| 组件 | 定位 |
+|------|------|
+| `scripts/pipeline/run_pipeline.py` | v1 legacy：8 层确定性管道，保留为验证底座 + fallback 编译器 |
+| `scripts/dev_agent/build_review_package.py` | v2 主入口：M2 Review Package 生成 |
+| `scripts/dev_agent/verify_review_package.py` | v2 主入口：M3 验证引擎 |
+
+### Known limitations（已知局限）
+
+- **不接真实 LLM API**——M2 代码生成使用确定性模板
+- **不自动上线、不写生产库**——Agent 只连开发库，只读、限行、限时
+- **Spark 不可用时为 SKIPPED/PENDING**——不能说 Spark 已完整验证
+- **`decision.md` 是人审模板**，不是正式审批系统
+- **交叉验证始终 SKIPPED**——因 Spark executor 是桩
+
+---
+
 ## 旧架构参考
 
 以下内容属于 v1.x，保留供参考：

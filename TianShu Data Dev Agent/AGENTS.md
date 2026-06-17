@@ -491,3 +491,69 @@ src/
 - **决策**：LLM 对同一需求独立生成 SQL（DuckDB）和 Spark DSL（PySpark）两份实现，分别执行后对比结果集
 - **原因**：两份代码使用不同的表达方式、执行引擎和类型系统，很难犯完全相同的逻辑错误。结果一致 → 置信度大幅提高；结果不一致 → 至少一份代码有错，人审时定位。这是一种"双重记账"式校验——不是检查代码写得对不对，而是检查两份独立代码是否算出了相同答案
 - **影响**：阶段 3 代码生成采用双轨输出；防线 2 新增检查项 #7（交叉验证）；人审材料增加交叉验证报告。如果 Spark 环境暂时不可用，Spark DSL 仍生成和审查，交叉验证标记为"待 Spark 环境执行"
+
+---
+
+## 10. 当前实现状态（Implementation Status）
+
+> 本节对齐代码真实状态，2026-06-17 更新。详情见 README.md "当前实现状态"。
+
+### 10.1 v1 / v2 边界
+
+```
+scripts/pipeline/run_pipeline.py   ← v1 LEGACY：8 层确定性数据生产管道
+                                       保留为验证底座 + fallback 编译器
+                                       不是 v2 主工作流入口
+
+src/agent/workflow.py              ← v2 主工作流：M2 Review Package 生成
+src/agent/verification_engine.py   ← v2 主工作流：M3 验证引擎
+scripts/dev_agent/                 ← v2 CLI 入口
+```
+
+**规则**：v1 pipeline 保留、不删除、不重构。v2 workflow 是当前开发主线。
+
+### 10.2 已完成（DONE）
+
+| 模块 | 状态 | 说明 |
+|------|------|------|
+| M2 Review Package 生成 | ✅ | `build_review_package()` → 7 文件审查材料包 |
+| M2 双份代码草案 | ✅ | `dual_code_generator.py` 确定性生成 SQL + Spark DSL |
+| M2 审查材料包结构 | ✅ | `generated/review_packages/{request_id}/` 完整目录 |
+| M3 静态检查 | ✅ | `Validator.validate_static()` 5 项检查 |
+| M3 安全关键字黑名单 | ✅ | 19 个关键字，统一来源 `checks.FORBIDDEN_KEYWORDS` |
+| M3 表/字段存在性 | ✅ | DuckDB DESCRIBE 验证 |
+| M3 表访问权限 | ✅ | bronze/silver 禁止 + 可用表白名单 |
+| M3 JOIN 白名单合规 | ✅ | IR 路径 A + SQL 文本路径 B 双路径 |
+| M3 SQL 样本执行 | ✅ | `sandbox/executor.py`，只读 + LIMIT 1000 + 超时保护 |
+| M3 安全压实（3 缺口） | ✅ | G1/G2/G3 修复，326 测试零回归 |
+| v1 pipeline 保留 | ✅ | `scripts/pipeline/` 完整保留，143 测试通过 |
+
+### 10.3 部分完成（PARTIAL）
+
+| 模块 | 状态 | 说明 |
+|------|------|------|
+| Spark 只读样本执行 | ⚠️ | `sandbox/spark_executor.py` 是桩，始终返回 SKIPPED/PENDING |
+| SQL/Spark 交叉验证 | ⚠️ | `verify/cross_validation.py` 逻辑完整，但输入缺失→始终 SKIPPED |
+| `decision.md` | ⚠️ | 已生成人审模板，但**不是程序化人审状态机** |
+| `src/agent/` 模块直接测试 | ⚠️ | 集成测试间接覆盖，直接单元测试不足 |
+
+### 10.4 待完成（TODO）
+
+| 模块 | 状态 | 阻塞原因 |
+|------|------|---------|
+| 人审状态机 | ❌ | 尚未设计 |
+| 真实 SQL/Spark 交叉验证 | ❌ | 需 Spark 环境就绪 |
+| LLM 接入代码生成 | ❌ | 项目边界：当前不接真实 LLM API |
+| Prompt 回归系统 | ❌ | 需 LLM API |
+| ColumnBindingTable 动态加载增强 | ❌ | 当前 fallback 可用 |
+| 完整 DAG 端到端测试 | ❌ | 待规划 |
+| KEY_MERGE 增量策略 | ❌ | 未来里程碑 |
+
+### 10.5 关键约束（不得违反）
+
+- LLM 产物即使未来接入，也只能是**不可信草案**，必须经过 Validator + sample run + 人审
+- 所有 SQL/Spark 草案**必须经过 Validator、sample run、人审**才能上线
+- **不能自动 APPROVE**——最终决策始终在人
+- **不能把 PENDING/SKIPPED 写成 PASS**——未执行就是未执行
+- **不能夸大当前能力**——Spark 未完整验证、decision.md 不是正式审批系统
+- **v1 pipeline 不删除、不重构**——保留为确定性验证底座
