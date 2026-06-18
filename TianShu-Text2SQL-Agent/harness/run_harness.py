@@ -57,7 +57,8 @@ STEPS: list[tuple[str, list[str]]] = [
 ]
 
 
-def run_step(name: str, cmd: list[str], warn_mode: bool = False) -> dict[str, Any]:
+def run_step(name: str, cmd: list[str], warn_mode: bool = False,
+             script: str = "") -> dict[str, Any]:
     """
     运行单步检查。
 
@@ -65,9 +66,10 @@ def run_step(name: str, cmd: list[str], warn_mode: bool = False) -> dict[str, An
         name: 检查名称
         cmd: 命令行列表
         warn_mode: True 时，检查发现规则问题不阻塞（状态 WARN），仅基础设施错误阻塞
+        script: 对应的检查脚本路径（用于结构化输出）
 
     Returns:
-        {name, status, exit_code, stdout, elapsed}
+        {name, status, exit_code, stdout, elapsed, script}
         状态值: PASS / WARN / FAIL / SKIPPED
     """
     start = time.perf_counter()
@@ -113,6 +115,7 @@ def run_step(name: str, cmd: list[str], warn_mode: bool = False) -> dict[str, An
         "stdout": stdout,
         "elapsed": round(elapsed, 2),
         "warn_mode": warn_mode,
+        "script": script,
     }
 
 
@@ -241,9 +244,16 @@ def main() -> int:
         step_index = args.step if args.step else i
         is_warn = step_index in warn_step_indices
 
+        # 提取脚本路径（命令列表中 python 后的第一个非选项参数）
+        script_path = ""
+        for arg in cmd:
+            if arg != sys.executable and not arg.startswith("-"):
+                script_path = arg
+                break
+
         mode_label = " [WARN-ONLY]" if is_warn else ""
         print(f"[{i}/{len(steps_to_run)}] {name}{mode_label}...", end=" ", flush=True)
-        result = run_step(name, cmd_with_config, warn_mode=is_warn)
+        result = run_step(name, cmd_with_config, warn_mode=is_warn, script=script_path)
         results.append(result)
 
         # 根据状态输出标签
@@ -299,6 +309,18 @@ def main() -> int:
             "total_steps": len(results),
         }
         print(f"\n__HARNESS_JSON_SUMMARY__ {json.dumps(summary, ensure_ascii=False)}")
+
+        # 结构化 check results 输出（供 memory rule enforcement 解析）
+        check_results = [
+            {
+                "name": r["name"],
+                "script": r.get("script", ""),
+                "status": r["status"],
+                "exit_code": r["exit_code"],
+            }
+            for r in results
+        ]
+        print(f"__HARNESS_CHECK_RESULTS__ {json.dumps(check_results, ensure_ascii=False)}")
 
     # 退出码逻辑：
     # - 阻断检查或基础设施失败 → exit 1
