@@ -42,6 +42,9 @@ from typing import Any
 # 项目根目录
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
+# Memory Rule Enforcement 路径（Step 18a）
+_MEMORY_RULES_PATH = PROJECT_ROOT / "docs" / "memory" / "memory_rules.yml"
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # 观察期检查配置（已结束）
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -152,6 +155,8 @@ class FastGateReport:
     warn_checks_passed: int = 0
     warn_checks_warned: int = 0
     warn_checks_infra_fail: int = 0
+    # Memory Rule Enforcement（Step 18a dry-run）
+    enforcement_report: dict[str, Any] | None = None
 
 
 def _now_utc() -> str:
@@ -222,6 +227,84 @@ def _parse_harness_json_summary(stdout: str) -> dict[str, int] | None:
         ]
         return {k: int(summary.get(k, 0)) for k in expected_keys}
     except (json.JSONDecodeError, TypeError, ValueError):
+        return None
+
+
+def _parse_harness_check_results(stdout: str) -> list[dict[str, Any]] | None:
+    """从 harness stdout 中解析 __HARNESS_CHECK_RESULTS__ 行。
+
+    格式: __HARNESS_CHECK_RESULTS__ [...]
+
+    Returns:
+        解析成功返回 check result 列表，失败返回 None
+    """
+    match = re.search(r"__HARNESS_CHECK_RESULTS__\s*(\[.*\])", stdout, re.DOTALL)
+    if not match:
+        return None
+    try:
+        results = json.loads(match.group(1))
+        if not isinstance(results, list):
+            return None
+        return results
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return None
+
+
+def _run_memory_rule_enforcement(
+    harness_stdout: str,
+    rules_path: Path | None = None,
+) -> dict[str, Any] | None:
+    """从 harness stdout 解析 check results 并运行 memory rule enforcement。
+
+    Args:
+        harness_stdout: harness 步骤的 stdout
+        rules_path: memory_rules.yml 路径，默认使用项目标准路径
+
+    Returns:
+        enforcement report dict，或 None（如果因基础设施错误无法生成）
+    """
+    if rules_path is None:
+        rules_path = _MEMORY_RULES_PATH
+
+    if not rules_path.exists():
+        return None
+
+    # 解析 check results
+    check_results = _parse_harness_check_results(harness_stdout)
+    if check_results is None:
+        # 回退：尝试从 stdout 文本解析
+        try:
+            from harness.memory_rule_enforcement import (
+                _parse_harness_stdout_for_check_results,
+            )
+            check_results = _parse_harness_stdout_for_check_results(harness_stdout)
+        except ImportError:
+            return None
+
+    if not check_results:
+        return None
+
+    try:
+        # 确保项目根目录在 sys.path 中（直接运行脚本时需要）
+        import sys as _sys
+        _project_root = str(Path(__file__).resolve().parents[1])
+        if _project_root not in _sys.path:
+            _sys.path.insert(0, _project_root)
+
+        from harness.memory_rule_enforcement import build_enforcement_report
+
+        report = build_enforcement_report(
+            rules_path=rules_path,
+            check_results=check_results,
+        )
+        return report
+    except Exception as exc:
+        # Step 18a: 基础设施错误不应静默，输出到 stderr 以便诊断
+        import sys as _sys
+        print(
+            f"[WARN] Memory Rule Enforcement 基础设施错误: {exc}",
+            file=_sys.stderr,
+        )
         return None
 
 
@@ -363,6 +446,53 @@ def render_markdown(report: FastGateReport) -> str:
             lines.append("```")
         lines.append("")
 
+    # Step 18a: Memory Rule Enforcement Summary
+    if report.enforcement_report:
+        enf = report.enforcement_report
+        enf_summary = enf.get("summary", {})
+        lines.append("## Memory Rule Enforcement (Step 18a Dry-Run)")
+        lines.append("")
+        lines.append(f"| 指标 | 数量 |")
+        lines.append(f"|------|------|")
+        lines.append(f"| 总规则数 | {enf_summary.get('total_rules', 0)} |")
+        lines.append(f"| proposed（仅可见） | {enf_summary.get('proposed', 0)} |")
+        lines.append(f"| active+blocking=false（警告） | {enf_summary.get('active_warning', 0)} |")
+        lines.append(f"| active+blocking=true（dry-run） | {enf_summary.get('active_blocking', 0)} |")
+        lines.append(f"| deprecated | {enf_summary.get('deprecated', 0)} |")
+        lines.append(f"| superseded | {enf_summary.get('superseded', 0)} |")
+        lines.append(f"| 通过 | {enf_summary.get('passed', 0)} |")
+        lines.append(f"| 警告 | {enf_summary.get('warnings', 0)} |")
+        lines.append(f"| would_fail（dry-run） | {enf_summary.get('would_fail', 0)} |")
+        lines.append(f"| 跳过 | {enf_summary.get('skipped', 0)} |")
+        lines.append(f"| 基础设施错误 | {enf_summary.get('infra_errors', 0)} |")
+        lines.append("")
+        lines.append("> **Exit code 受影响:** 否（Step 18a dry-run 模式）")
+        lines.append("")
+
+        # would_fail 规则详情
+        would_fail_rules = [
+            rr for rr in enf.get("rule_results", [])
+            if rr.get("result") == "would_fail"
+        ]
+        if would_fail_rules:
+            lines.append("### would_fail 规则详情")
+            lines.append("")
+            for rr in would_fail_rules:
+                lines.append(f"- **{rr['rule_id']}**: {rr.get('message', '')}")
+            lines.append("")
+
+        # warning 规则详情
+        warning_rules = [
+            rr for rr in enf.get("rule_results", [])
+            if rr.get("result") == "warning"
+        ]
+        if warning_rules:
+            lines.append("### warning 规则详情")
+            lines.append("")
+            for rr in warning_rules:
+                lines.append(f"- **{rr['rule_id']}**: {rr.get('message', '')}")
+            lines.append("")
+
     lines.append("## 边界确认")
     lines.append("")
     lines.append("- ✅ 所有步骤使用 `--provider mock`（未调用真实 LLM）")
@@ -457,6 +587,14 @@ def run_fast_gate(
     warn_checks_warned = harness_summary.get("warn_warn", 0) if harness_summary else 0
     warn_checks_infra_fail = harness_summary.get("warn_infra_fail", 0) if harness_summary else 0
 
+    # Step 18a: Memory Rule Enforcement dry-run
+    enforcement_report = None
+    harness_step = next(
+        (r for r in step_results if r.name == "harness"), None
+    )
+    if harness_step and harness_step.stdout:
+        enforcement_report = _run_memory_rule_enforcement(harness_step.stdout)
+
     report = FastGateReport(
         run_id=run_id,
         timestamp=run_id,
@@ -473,6 +611,7 @@ def run_fast_gate(
         warn_checks_passed=warn_checks_passed,
         warn_checks_warned=warn_checks_warned,
         warn_checks_infra_fail=warn_checks_infra_fail,
+        enforcement_report=enforcement_report,
     )
 
     # 写入报告文件
@@ -570,6 +709,16 @@ def main(argv: list[str] | None = None) -> int:
     report_path = Path(args.report_dir)
     print(f"\n📄 Markdown 报告: {report_path / 'fast_gate_latest.md'}")
     print(f"📄 JSON 报告:   {report_path / 'fast_gate_latest.json'}")
+
+    # Step 18a: Memory Rule Enforcement Summary
+    if report.enforcement_report:
+        try:
+            from harness.memory_rule_enforcement import (
+                render_enforcement_console_summary,
+            )
+            print(render_enforcement_console_summary(report.enforcement_report))
+        except ImportError:
+            pass
 
     return 0 if report.overall == "PASS" else 1
 
