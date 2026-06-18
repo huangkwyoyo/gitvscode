@@ -62,6 +62,54 @@ def test_fast_gate_total_steps_matches_executed_and_skipped(monkeypatch, tmp_pat
     assert report.skipped == 1
 
 
+def test_active_blocking_failure_makes_fast_gate_exit_nonzero(monkeypatch, tmp_path):
+    """Memory blocking failure 应把全通过的 fast gate 转为非零退出。"""
+    import harness.run_fast_gate as fast_gate
+
+    def fake_run_step(step, cwd, timeout_seconds=120):
+        return StepResult(
+            name=step["name"],
+            display=step["display"],
+            status="PASS",
+            exit_code=0,
+            stdout="check results" if step["name"] == "harness" else "ok",
+            stderr="",
+            duration_seconds=0.01,
+        )
+
+    enforcement_report = {
+        "summary": {"blocking_failures": 1},
+        "rule_results": [
+            {
+                "rule_id": "TA-R018",
+                "title": "LLM 融合安全规则",
+                "enforcement_level": "blocking_error",
+                "result": "FAIL",
+            },
+        ],
+        "exit_code_should_fail": True,
+    }
+    monkeypatch.setattr(fast_gate, "run_step", fake_run_step)
+    monkeypatch.setattr(
+        fast_gate,
+        "_run_memory_rule_enforcement",
+        lambda stdout: enforcement_report,
+    )
+
+    report = fast_gate.run_fast_gate(
+        skip_mock=True,
+        cwd=PROJECT_ROOT,
+        report_dir=tmp_path,
+    )
+    assert report.overall == "FAIL"
+    assert report.failed == 0
+    assert report.enforcement_report == enforcement_report
+
+    # CLI 退出码只依赖最终 overall，验证真实进程语义为非零。
+    monkeypatch.setattr(fast_gate, "run_fast_gate", lambda **kwargs: report)
+    assert fast_gate.main(["--report-dir", str(tmp_path)]) == 1
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # Step 9: 观察期结束，全部检查升级为阻断
 # ═══════════════════════════════════════════════════════════════════════════════

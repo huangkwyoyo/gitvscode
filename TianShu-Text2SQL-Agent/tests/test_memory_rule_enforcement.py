@@ -512,6 +512,32 @@ class TestComputeRuleEnforcement:
         assert "TA-R018" in result["message"]
         assert "回滚" in result["message"]
 
+    def test_blocking_error_exposes_actionable_failure_details(self):
+        """阻断结果应提供失败检查、失败消息、修复建议和回滚方案。"""
+        rule = _make_rule(
+            "TA-R018",
+            title="LLM 融合安全规则",
+            status="active",
+            blocking=True,
+            required_checks=["harness/checks/check_a.py"],
+        )
+        check_results = [
+            _make_check_result(
+                name="融合安全检查",
+                script="harness/checks/check_a.py",
+                status="FAIL",
+                exit_code=1,
+            ),
+        ]
+
+        result = compute_rule_enforcement(rule, check_results)
+
+        assert result["failed_required_checks"] == ["harness/checks/check_a.py"]
+        assert "融合安全检查" in result["failure_message"]
+        assert "exit_code=1" in result["failure_message"]
+        assert "检查输出" in result["suggested_fix"]
+        assert "blocking 从 true 改回 false" in result["rollback_plan"]
+
     # --- Scenario 4: deprecated/superseded → ignored ---
 
     def test_deprecated_rule_ignored(self):
@@ -779,6 +805,11 @@ class TestRenderers:
         assert "FAIL" in summary
         assert "TA-R018" in summary
         assert "exit code affected:           yes" in summary
+        assert "enforcement_level=blocking_error" in summary
+        assert "失败 required_check" in summary
+        assert "失败消息" in summary
+        assert "建议修复" in summary
+        assert "回滚方案" in summary
 
     def test_render_markdown_shows_blocking_failures(self, tmp_path):
         """无阻断失败时不应有阻断失败详情章节。"""

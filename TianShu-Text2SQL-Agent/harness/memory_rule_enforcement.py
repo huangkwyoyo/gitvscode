@@ -332,6 +332,10 @@ def compute_rule_enforcement(
     has_unmatched = any(cr.get("status") == "SKIPPED" for cr in matched)
     failed_checks = [cr for cr in matched if cr.get("status") == "FAIL"]
     has_failure = len(failed_checks) > 0
+    failed_required_checks: list[str] = []
+    failure_message = ""
+    suggested_fix = ""
+    rollback_plan = ""
 
     # 判定结果
     if has_unmatched:
@@ -349,12 +353,24 @@ def compute_rule_enforcement(
         elif enforcement_level == ENFORCEMENT_BLOCKING_ERROR:
             result = "FAIL"
             failed_check_names = [cr.get("name", "?") for cr in failed_checks]
+            failed_required_checks = [
+                str(cr.get("script") or cr.get("name", "?"))
+                for cr in failed_checks
+            ]
+            failure_message = "; ".join(
+                f"{cr.get('name', '?')} status=FAIL, exit_code={cr.get('exit_code')}"
+                for cr in failed_checks
+            )
+            suggested_fix = "检查上述 required_check 的检查输出，修复失败原因后重新运行 fast gate。"
+            rollback_plan = (
+                f"将 memory_rules.yml 中 {rid} 的 blocking 从 true 改回 false，"
+                "即可恢复非阻断模式，无需修改业务代码。"
+            )
             msg = (
                 f"active+blocking=true 规则 {rid} 的 "
                 f"{len(failed_checks)} 项 required_checks 失败"
                 f"（{', '.join(failed_check_names[:3])}），"
-                f"fast gate 阻断。回滚方案: 将 memory_rules.yml 中 {rid} 的 "
-                f"blocking 从 true 改回 false 即可恢复 dry-run 模式。"
+                f"fast gate 阻断。回滚方案: {rollback_plan}"
             )
         # 向后兼容：旧 blocking_dry_run 级别仍按 dry-run 处理
         elif enforcement_level == ENFORCEMENT_BLOCKING_DRY_RUN:
@@ -375,6 +391,10 @@ def compute_rule_enforcement(
         "enforcement_level": enforcement_level,
         "result": result,
         "message": msg,
+        "failed_required_checks": failed_required_checks,
+        "failure_message": failure_message,
+        "suggested_fix": suggested_fix,
+        "rollback_plan": rollback_plan,
         "required_checks": required_checks,
         "matched_check_results": [
             {"name": cr.get("name", ""), "script": cr.get("script", ""),
@@ -616,6 +636,17 @@ def render_enforcement_markdown(report: dict[str, Any]) -> str:
             lines.append(f"- **结果:** {rr.get('result', '?')}")
             lines.append(f"- **消息:** {rr.get('message', '')}")
 
+            if rr.get("failed_required_checks"):
+                lines.append(
+                    f"- **失败 required_check:** {', '.join(rr['failed_required_checks'])}"
+                )
+            if rr.get("failure_message"):
+                lines.append(f"- **失败消息:** {rr['failure_message']}")
+            if rr.get("suggested_fix"):
+                lines.append(f"- **建议修复:** {rr['suggested_fix']}")
+            if rr.get("rollback_plan"):
+                lines.append(f"- **回滚方案:** {rr['rollback_plan']}")
+
             required = rr.get("required_checks", [])
             if required:
                 lines.append(f"- **Required checks:** {', '.join(str(c) for c in required)}")
@@ -704,9 +735,17 @@ def render_enforcement_console_summary(report: dict[str, Any]) -> str:
         lines.append("[FAIL] active+blocking=true 规则阻断失败:")
         for rr in blocking_failure_rules:
             lines.append(f"  - {rr['rule_id']}: {rr.get('title', '')}")
+            lines.append(f"    enforcement_level={rr.get('enforcement_level', '?')}")
+            failed_required_checks = rr.get("failed_required_checks", [])
+            if failed_required_checks:
+                lines.append(f"    失败 required_check: {', '.join(failed_required_checks)}")
+            if rr.get("failure_message"):
+                lines.append(f"    失败消息: {rr['failure_message']}")
             lines.append(f"    {rr.get('message', '')}")
-            # 输出 rollback 信息
-            lines.append(f"    回滚方案: 将 memory_rules.yml 中 {rr['rule_id']} 的 blocking 从 true 改回 false")
+            if rr.get("suggested_fix"):
+                lines.append(f"    建议修复: {rr['suggested_fix']}")
+            # 保留显式回滚信息，避免误报时需要推断恢复步骤
+            lines.append(f"    回滚方案: {rr.get('rollback_plan', '')}")
 
     # 输出 warning 详情
     warning_rules = [

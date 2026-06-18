@@ -1,0 +1,106 @@
+{
+  "report_type": "memory_rule_enforcement_stability",
+  "step": 19,
+  "classification": "C",
+  "generated_at": "2026-06-18T22:13:00+08:00",
+  "baseline": {
+    "repository": "huangkwyoyo/gitvscode",
+    "path": "TianShu-Text2SQL-Agent",
+    "branch": "main",
+    "observed_commit": "d78166c",
+    "step18b_commit": "0c7f609",
+    "step18b_is_ancestor": true,
+    "fast_gate_mode": "complete_offline_5_steps",
+    "active_blocking_rules": ["TA-R018"]
+  },
+  "normal_runs": [
+    {
+      "run": 1,
+      "run_id": "2026-06-18T14:07:54.797115Z",
+      "timestamp": "2026-06-18T14:07:54.797115Z",
+      "commit": "d78166c",
+      "exit_code": 0,
+      "overall": "PASS",
+      "ta_r018_result": "passed",
+      "ta_r018_enforcement_level": "blocking_error",
+      "blocking_failures": 0,
+      "warnings": 1,
+      "enforcement_exit_code_affected": false
+    },
+    {
+      "run": 2,
+      "run_id": "2026-06-18T14:09:09.176956Z",
+      "timestamp": "2026-06-18T14:09:09.176956Z",
+      "commit": "d78166c",
+      "exit_code": 0,
+      "overall": "PASS",
+      "ta_r018_result": "passed",
+      "ta_r018_enforcement_level": "blocking_error",
+      "blocking_failures": 0,
+      "warnings": 1,
+      "enforcement_exit_code_affected": false
+    },
+    {
+      "run": 3,
+      "run_id": "2026-06-18T14:10:24.153564Z",
+      "timestamp": "2026-06-18T14:10:24.153564Z",
+      "commit": "d78166c",
+      "exit_code": 0,
+      "overall": "PASS",
+      "ta_r018_result": "passed",
+      "ta_r018_enforcement_level": "blocking_error",
+      "blocking_failures": 0,
+      "warnings": 1,
+      "enforcement_exit_code_affected": false
+    }
+  ],
+  "negative_blocking_verification": {
+    "scenario": "active+blocking=true TA-R018 with failed required_check",
+    "failed_required_check": "harness/checks/check_result_fusion_safety.py",
+    "check_status": "FAIL",
+    "check_exit_code": 1,
+    "blocking_failures": 1,
+    "exit_code_should_fail": true,
+    "fast_gate_overall": "FAIL",
+    "fast_gate_cli_exit_code": 1,
+    "verified_by": "tests/test_fast_gate.py::test_active_blocking_failure_makes_fast_gate_exit_nonzero"
+  },
+  "failure_message_quality": {
+    "rule_id": true,
+    "title": true,
+    "failed_required_check": true,
+    "failure_message": true,
+    "rollback_plan": true,
+    "suggested_fix": true,
+    "enforcement_level_blocking_error": true
+  },
+  "rollback": {
+    "plan": "将 memory_rules.yml 中 TA-R018 的 blocking 从 true 改回 false，即可恢复非阻断模式，无需修改业务代码。",
+    "executed": false,
+    "scope": "manual memory_rules.yml change only",
+    "business_code_change_required": false
+  },
+  "tests": [
+    {"command": "python -m pytest tests/test_memory_rule_enforcement.py tests/test_fast_gate.py -q", "result": "92 passed"},
+    {"command": "python -m pytest tests -k \"memory_rule_enforcement or fast_gate\" -q", "result": "141 passed, 1 skipped, 1111 deselected"},
+    {"command": "python -m pytest tests -k \"memory or fast_gate\" -q", "result": "501 passed, 1 skipped, 751 deselected"},
+    {"command": "python -m pytest tests/test_fast_gate.py::test_active_blocking_failure_makes_fast_gate_exit_nonzero -q", "result": "1 passed"}
+  ],
+  "false_positive_risk": {
+    "ta_r018_false_positive_observed": false,
+    "stable_nonblocking_warning": "TA-R021 required_check harness/checks/check_result_summary_safety.py was unmatched in all three runs",
+    "assessment": "TA-R018 stable across three runs; observation window remains short and covers one commit/environment."
+  },
+  "boundaries": {
+    "docs_memory_modified": false,
+    "memory_rules_modified": false,
+    "ta_r018_modified": false,
+    "pre_commit_modified": false,
+    "llm_called": false,
+    "business_code_modified": false,
+    "stability_latest_generated": false,
+    "project_fast_gate_latest_unchanged": false,
+    "project_fast_gate_latest_note": "Existing subprocess tests invoked run_fast_gate.py without --report-dir and rewrote ignored harness/reports/fast_gate_latest.* during required verification. No byte-identical pre-run copy was available for restoration."
+  },
+  "recommendation": "Proceed to Step 20 pre-commit warn-mode design only; do not enter blocking. Track the existing fast_gate_latest test-isolation side effect separately."
+}
