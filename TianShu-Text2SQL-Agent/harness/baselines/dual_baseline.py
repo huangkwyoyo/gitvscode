@@ -15,6 +15,10 @@ from pathlib import Path
 from typing import Callable, Iterable
 
 from harness.baselines.failure_triage import load_failure_triage_from_report
+from harness.memory_suggestion_pipeline import (
+    render_pipeline_summary_for_baseline,
+    run_pipeline_on_failure_triage,
+)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -465,6 +469,10 @@ def render_markdown(snapshot: dict) -> str:
     triage = snapshot.get("failure_triage")
     if triage is not None:
         lines.extend(_render_failure_triage(triage))
+    # Step 13: Memory suggestion pipeline 摘要
+    pipeline = snapshot.get("memory_suggestion_pipeline")
+    if pipeline is not None:
+        lines.append(render_pipeline_summary_for_baseline(pipeline))
     lines.extend([
         "## Boundary",
         "",
@@ -562,6 +570,30 @@ def run_runtime_baseline(
     snapshot["failure_triage"] = load_failure_triage_from_report(
         cwd / "harness/reports/llm_e2e_eval_latest.json"
     )
+
+    # ── Step 13: 自动生成 memory suggestion + review 报告 ──
+    # 只在存在 failed cases 时触发；zero failure 时不生成空报告
+    # 管道失败不吞掉原始 baseline failure
+    triage = snapshot["failure_triage"]
+    if triage.get("total_failed", 0) > 0:
+        try:
+            pipeline_result = run_pipeline_on_failure_triage(
+                triage,
+                output_root=output_dir,
+            )
+            snapshot["memory_suggestion_pipeline"] = pipeline_result
+        except Exception:
+            # 管道失败作为 warning 记录，不替代原始 baseline failure
+            snapshot["memory_suggestion_pipeline"] = {
+                "generated": False,
+                "failed_cases": triage.get("total_failed", 0),
+                "suggestions_report": None,
+                "review_report": None,
+                "warnings": ["pipeline 调用异常"],
+                "summary": "Memory suggestion pipeline 异常，原始 baseline 结论不受影响",
+                "error": "pipeline exception",
+            }
+
     paths = write_snapshot_files(snapshot, output_dir)
     snapshot["snapshot_paths"] = {key: str(value) for key, value in paths.items()}
     return snapshot
@@ -620,6 +652,21 @@ def main(argv: list[str] | None = None) -> int:
         )
         snapshots.append(runtime)
         print(f"[RUNTIME] status={runtime['status']} json={runtime['snapshot_paths']['json']}")
+        # Step 13: 输出 memory suggestion pipeline 摘要
+        pipeline = runtime.get("memory_suggestion_pipeline")
+        if pipeline is not None:
+            if pipeline.get("generated"):
+                print(f"  [MEMORY SUGGESTION] generated={pipeline['generated']} failed_cases={pipeline.get('failed_cases', 0)}")
+                sr = pipeline.get("suggestions_report", {}) or {}
+                rr = pipeline.get("review_report", {}) or {}
+                if sr.get("json"):
+                    print(f"    suggestions: {sr['json']}")
+                if rr.get("json"):
+                    print(f"    review: {rr['json']}")
+                for warning in pipeline.get("warnings", []):
+                    print(f"    warning: {warning}")
+            else:
+                print(f"  [MEMORY SUGGESTION] skipped: {pipeline.get('summary', 'no failed cases')}")
     if args.mode == "all":
         index_path = write_combined_index(snapshots, args.output_dir)
         print(f"[INDEX] {index_path}")
