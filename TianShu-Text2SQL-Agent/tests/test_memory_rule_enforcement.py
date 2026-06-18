@@ -1,9 +1,9 @@
-"""Memory Rule Enforcement（Step 18a）测试。
+"""Memory Rule Enforcement（Step 18b）测试。
 
 覆盖 15+ 测试场景：
   1.  proposed 规则 → visibility_only，不进入 warn/error
   2.  active+blocking=false + check failed → warning，不改变 exit code
-  3.  active+blocking=true + check failed → would_fail，Step 18a 不改变 exit code
+  3.  active+blocking=true + check failed → FAIL，Step 18b 改变 exit code
   4.  deprecated/superseded → ignored
   5.  required_checks 找不到对应 check result → warning/skipped
   6.  memory_rules.yml 解析失败 → infrastructure failure
@@ -11,7 +11,7 @@
   8.  enforcement summary 包含正确统计
   9.  run_fast_gate.py 输出 Memory Rule Enforcement Summary
   10. run_fast_gate.py 原有 blocking checks 行为不回退
-  11. active+blocking=true dry-run failure 不导致 exit code 非 0
+  11. active+blocking=true check 失败导致 exit code 非 0（Step 18b 真实阻断）
   12. 不读取 latest
   13. 不修改 docs/memory/*
   14. 不接 pre-commit
@@ -35,6 +35,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from harness.memory_rule_enforcement import (  # noqa: E402
     ENFORCEMENT_BLOCKING_DRY_RUN,
+    ENFORCEMENT_BLOCKING_ERROR,
     ENFORCEMENT_IGNORED,
     ENFORCEMENT_VISIBILITY,
     ENFORCEMENT_WARN,
@@ -135,10 +136,10 @@ class TestClassifyRule:
         rule = _make_rule(status="active", blocking=False)
         assert classify_rule(rule) == ENFORCEMENT_WARN
 
-    def test_active_blocking_rule_dry_run(self):
-        """active + blocking=true 规则应归类为 blocking_dry_run。"""
+    def test_active_blocking_rule_blocking_error(self):
+        """active + blocking=true 规则应归类为 blocking_error（Step 18b 真实阻断）。"""
         rule = _make_rule(status="active", blocking=True)
-        assert classify_rule(rule) == ENFORCEMENT_BLOCKING_DRY_RUN
+        assert classify_rule(rule) == ENFORCEMENT_BLOCKING_ERROR
 
     def test_deprecated_rule_ignored(self):
         """deprecated 规则应归类为 ignored。"""
@@ -480,7 +481,7 @@ class TestComputeRuleEnforcement:
         assert result["enforcement_level"] == ENFORCEMENT_WARN
         assert result["result"] == "warning"
 
-    # --- Scenario 3: active + blocking=true → blocking_dry_run ---
+    # --- Scenario 3: active + blocking=true → blocking_error（Step 18b 真实阻断）---
 
     def test_active_blocking_rule_check_passed(self):
         """active+blocking=true 规则 check 通过 → passed。"""
@@ -492,11 +493,11 @@ class TestComputeRuleEnforcement:
             _make_check_result(script="harness/checks/check_a.py", status="PASS"),
         ]
         result = compute_rule_enforcement(rule, check_results)
-        assert result["enforcement_level"] == ENFORCEMENT_BLOCKING_DRY_RUN
+        assert result["enforcement_level"] == ENFORCEMENT_BLOCKING_ERROR
         assert result["result"] == "passed"
 
-    def test_active_blocking_rule_check_failed_would_fail(self):
-        """active+blocking=true 规则 check 失败 → would_fail（dry-run）。"""
+    def test_active_blocking_rule_check_failed_blocking_error(self):
+        """active+blocking=true 规则 check 失败 → FAIL（Step 18b 真实阻断）。"""
         rule = _make_rule(
             "TA-R018", status="active", blocking=True,
             required_checks=["harness/checks/check_a.py"],
@@ -505,8 +506,11 @@ class TestComputeRuleEnforcement:
             _make_check_result(script="harness/checks/check_a.py", status="FAIL", exit_code=1),
         ]
         result = compute_rule_enforcement(rule, check_results)
-        assert result["enforcement_level"] == ENFORCEMENT_BLOCKING_DRY_RUN
-        assert result["result"] == "would_fail"
+        assert result["enforcement_level"] == ENFORCEMENT_BLOCKING_ERROR
+        assert result["result"] == "FAIL"
+        # 阻断消息应包含 rule_id 和回滚方案
+        assert "TA-R018" in result["message"]
+        assert "回滚" in result["message"]
 
     # --- Scenario 4: deprecated/superseded → ignored ---
 
@@ -612,12 +616,12 @@ class TestBuildEnforcementReport:
         assert report["summary"]["proposed"] == 1
         assert report["summary"]["active_warning"] == 1
         assert report["summary"]["active_blocking"] == 1
-        assert report["exit_code_should_fail"] is False
-        assert report["write_mode"] == "dry_run"
+        assert report["exit_code_should_fail"] is False  # 无 check 失败，不阻断
+        assert report["write_mode"] == "blocking"
         assert len(report["rule_results"]) == 3
 
     def test_build_report_with_check_results(self, tmp_path):
-        """带 check results 的 report 构建。"""
+        """带 check results 的 report 构建——check 失败导致 exit_code_should_fail=True。"""
         rules = [
             _make_rule(
                 "TA-R018", status="active", blocking=True,
@@ -630,9 +634,9 @@ class TestBuildEnforcementReport:
         rules_path = _write_rules_yml(rules, tmp_path)
         report = build_enforcement_report(rules_path, check_results=check_results)
 
-        assert report["summary"]["would_fail"] == 1
-        # Step 18a: exit_code_should_fail 始终为 False
-        assert report["exit_code_should_fail"] is False
+        assert report["summary"]["blocking_failures"] == 1
+        # Step 18b: check 失败 → exit_code_should_fail=True
+        assert report["exit_code_should_fail"] is True
 
     def test_build_report_with_infra_errors(self, tmp_path):
         """包含基础设施错误的 report。"""
@@ -672,9 +676,8 @@ class TestBuildEnforcementReport:
         assert s["passed"] >= 4
         assert s["skipped"] == 2
 
-    def test_exit_code_should_fail_always_false(self, tmp_path):
-        """Step 18a: exit_code_should_fail 始终为 False。"""
-        # 即使有 would_fail，exit_code_should_fail 也不应为 True
+    def test_exit_code_should_fail_when_check_fails(self, tmp_path):
+        """Step 18b: active+blocking=true check 失败 → exit_code_should_fail=True。"""
         rules = [
             _make_rule(
                 "TA-R018", status="active", blocking=True,
@@ -686,7 +689,8 @@ class TestBuildEnforcementReport:
         ]
         rules_path = _write_rules_yml(rules, tmp_path)
         report = build_enforcement_report(rules_path, check_results=check_results)
-        assert report["exit_code_should_fail"] is False
+        assert report["exit_code_should_fail"] is True
+        assert report["summary"]["blocking_failures"] == 1
 
     def test_none_check_results_accepted(self, tmp_path):
         """check_results=None 视为空列表。"""
@@ -734,13 +738,13 @@ class TestRenderers:
         assert "边界确认" in md
         assert "未修改 docs/memory" in md
 
-    def test_render_markdown_includes_dry_run_notice(self, tmp_path):
-        """Markdown 应标注 dry-run 模式。"""
+    def test_render_markdown_includes_blocking_notice(self, tmp_path):
+        """Markdown 应标注 blocking 模式（Step 18b）。"""
         rules = [_make_rule("TA-R001")]
         rules_path = _write_rules_yml(rules, tmp_path)
         report = build_enforcement_report(rules_path)
         md = render_enforcement_markdown(report)
-        assert "dry-run" in md.lower()
+        assert "blocking" in md.lower()
 
     def test_render_console_summary(self, tmp_path):
         """控制台摘要应包含必要信息。"""
@@ -755,10 +759,10 @@ class TestRenderers:
 
         assert "Memory Rule Enforcement Summary" in summary
         assert "exit code affected" in summary.lower()
-        assert "no" in summary.lower()
+        assert "no" in summary.lower()  # 无 check 失败 → exit code not affected
 
-    def test_render_console_with_would_fail_details(self, tmp_path):
-        """控制台摘要应列举 would_fail 规则详情。"""
+    def test_render_console_with_blocking_failure_details(self, tmp_path):
+        """控制台摘要应列举 blocking failure 规则详情。"""
         rules = [
             _make_rule(
                 "TA-R018", status="active", blocking=True,
@@ -772,19 +776,19 @@ class TestRenderers:
         report = build_enforcement_report(rules_path, check_results=check_results)
         summary = render_enforcement_console_summary(report)
 
-        assert "WOULD_FAIL" in summary
+        assert "FAIL" in summary
         assert "TA-R018" in summary
+        assert "exit code affected:           yes" in summary
 
-    def test_render_markdown_no_would_fail_section_when_none(self, tmp_path):
-        """无 would_fail 规则时不应有 would_fail 章节。"""
+    def test_render_markdown_shows_blocking_failures(self, tmp_path):
+        """无阻断失败时不应有阻断失败详情章节。"""
         rules = [_make_rule("TA-R001", status="proposed")]
         rules_path = _write_rules_yml(rules, tmp_path)
         report = build_enforcement_report(rules_path)
         md = render_enforcement_markdown(report)
 
-        # 不应有 "would_fail 规则详情" 章节
-        # 但会在汇总表中出现 would_fail=0
-        assert "would_fail（dry-run） | 0" in md
+        # blocking_failures 应为 0
+        assert "阻断失败 | 0" in md
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -900,13 +904,14 @@ class TestFastGateIntegration:
                 "warnings": 0,
                 "blocking_dry_run_failures": 0,
                 "would_fail": 0,
+                "blocking_failures": 0,
                 "passed": 2,
                 "skipped": 1,
                 "infra_errors": 0,
             },
             "rule_results": [],
             "exit_code_should_fail": False,
-            "write_mode": "dry_run",
+            "write_mode": "blocking",
         }
 
         report = FastGateReport(
@@ -926,7 +931,7 @@ class TestFastGateIntegration:
 
         md = render_markdown(report)
         assert "Memory Rule Enforcement" in md
-        assert "Step 18a" in md
+        assert "Step 18b" in md
         assert "Exit code 受影响" in md
 
     def test_fast_gate_markdown_no_enforcement_when_none(self):
@@ -956,10 +961,10 @@ class TestFastGateIntegration:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class TestExitCodeSemantics:
-    """exit code 语义测试（Step 18a 关键约束）。"""
+    """exit code 语义测试（Step 18b 关键约束）。"""
 
-    def test_active_blocking_would_fail_does_not_affect_exit_code(self, tmp_path):
-        """active+blocking=true would_fail 不导致 exit_code_should_fail=True。"""
+    def test_active_blocking_check_fail_affects_exit_code(self, tmp_path):
+        """active+blocking=true check 失败 → exit_code_should_fail=True。"""
         rules = [
             _make_rule(
                 "TA-R018", status="active", blocking=True,
@@ -972,13 +977,13 @@ class TestExitCodeSemantics:
         rules_path = _write_rules_yml(rules, tmp_path)
         report = build_enforcement_report(rules_path, check_results=check_results)
 
-        # would_fail > 0
-        assert report["summary"]["would_fail"] == 1
-        # 但 exit_code_should_fail 仍为 False（Step 18a dry-run）
-        assert report["exit_code_should_fail"] is False
+        # blocking_failures > 0
+        assert report["summary"]["blocking_failures"] == 1
+        # Step 18b: check 失败 → exit_code_should_fail=True
+        assert report["exit_code_should_fail"] is True
 
-    def test_multiple_would_fail_still_no_exit_code_change(self, tmp_path):
-        """多条 would_fail 规则也不改变 exit code。"""
+    def test_multiple_blocking_failures_affect_exit_code(self, tmp_path):
+        """多条 active+blocking=true check 失败 → exit_code_should_fail=True。"""
         rules = [
             _make_rule(
                 "TA-R018", status="active", blocking=True,
@@ -996,8 +1001,8 @@ class TestExitCodeSemantics:
         rules_path = _write_rules_yml(rules, tmp_path)
         report = build_enforcement_report(rules_path, check_results=check_results)
 
-        assert report["summary"]["would_fail"] == 2
-        assert report["exit_code_should_fail"] is False
+        assert report["summary"]["blocking_failures"] == 2
+        assert report["exit_code_should_fail"] is True
 
     def test_original_blocking_checks_still_block(self):
         """原有 blocking checks 不应被 enforcement 影响。
@@ -1094,8 +1099,8 @@ class TestSafetyBoundaries:
 class TestEndToEnd:
     """端到端 enforcement 流程测试。"""
 
-    def test_full_dry_run_pipeline(self, tmp_path):
-        """完整 dry-run pipeline：加载规则 → 分类 → 匹配 → enforcement → 汇总。"""
+    def test_full_blocking_pipeline(self, tmp_path):
+        """完整 blocking pipeline：加载规则 → 分类 → 匹配 → enforcement → 汇总。"""
         # 创建包含各状态的规则
         rules = [
             _make_rule("TA-R001", status="proposed"),
@@ -1147,14 +1152,14 @@ class TestEndToEnd:
         # TA-R100: superseded → skipped
         assert s["passed"] == 2  # TA-R001, TA-R018
         assert s["warnings"] == 1  # TA-R010
-        assert s["would_fail"] == 0
+        assert s["blocking_failures"] == 0
         assert s["skipped"] == 2  # TA-R099, TA-R100
 
-        # 验证 exit_code_should_fail 始终为 False
+        # TA-R018 通过，所以 exit_code_should_fail=False
         assert report["exit_code_should_fail"] is False
 
-    def test_all_active_blocking_fail_dry_run(self, tmp_path):
-        """所有 active+blocking=true 规则 check 失败 → would_fail 但不改变 exit code。"""
+    def test_all_active_blocking_fail_blocking_error(self, tmp_path):
+        """所有 active+blocking=true 规则 check 失败 → FAIL 且改变 exit code。"""
         rules = [
             _make_rule(
                 "TA-R018", status="active", blocking=True,
@@ -1172,8 +1177,8 @@ class TestEndToEnd:
         rules_path = _write_rules_yml(rules, tmp_path)
         report = build_enforcement_report(rules_path, check_results=check_results)
 
-        assert report["summary"]["would_fail"] == 2
-        assert report["exit_code_should_fail"] is False
+        assert report["summary"]["blocking_failures"] == 2
+        assert report["exit_code_should_fail"] is True
 
     def test_mixed_real_world_scenario(self, tmp_path):
         """模拟真实场景：混合状态的规则 + check results。"""
@@ -1217,7 +1222,7 @@ class TestEndToEnd:
         # TA-R010: proposed + checks all PASS → passed
         # TA-R018: active+blocking=true + checks all PASS → passed
         assert report["summary"]["passed"] == 2
-        assert report["summary"]["would_fail"] == 0
+        assert report["summary"]["blocking_failures"] == 0
         assert report["summary"]["warnings"] == 0
 
 

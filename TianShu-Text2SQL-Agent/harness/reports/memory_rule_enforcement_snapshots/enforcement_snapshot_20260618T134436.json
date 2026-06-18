@@ -1,0 +1,435 @@
+{
+  "run_id": "MRE-20260618T134437",
+  "timestamp": "2026-06-18T13:44:37.864932Z",
+  "summary": {
+    "total_rules": 21,
+    "proposed": 20,
+    "active_warning": 0,
+    "active_blocking": 1,
+    "deprecated": 0,
+    "superseded": 0,
+    "warnings": 1,
+    "blocking_dry_run_failures": 0,
+    "would_fail": 0,
+    "passed": 20,
+    "skipped": 0,
+    "infra_errors": 0
+  },
+  "rule_results": [
+    {
+      "rule_id": "TA-R010",
+      "title": "拒绝策略的关键词检测必须同时覆盖中英文危险操作词",
+      "status": "proposed",
+      "blocking": false,
+      "enforcement_level": "visibility_only",
+      "result": "passed",
+      "message": "proposed 规则无 required_checks 或全部通过，注册表可见",
+      "required_checks": [
+        "harness/checks/check_refusal_policy.py"
+      ],
+      "matched_check_results": [
+        {
+          "name": "反问/拒绝策略完备性",
+          "script": "harness/checks/check_refusal_policy.py",
+          "status": "PASS",
+          "exit_code": 0
+        }
+      ]
+    },
+    {
+      "rule_id": "TA-R011",
+      "title": "歧义检测不应仅依赖置信度阈值，需检查候选指标集规模和语义距离",
+      "status": "proposed",
+      "blocking": false,
+      "enforcement_level": "visibility_only",
+      "result": "passed",
+      "message": "proposed 规则无 required_checks 或全部通过，注册表可见",
+      "required_checks": [
+        "harness/checks/check_refusal_policy.py"
+      ],
+      "matched_check_results": [
+        {
+          "name": "反问/拒绝策略完备性",
+          "script": "harness/checks/check_refusal_policy.py",
+          "status": "PASS",
+          "exit_code": 0
+        }
+      ]
+    },
+    {
+      "rule_id": "TA-R012",
+      "title": "LLM 不得在 JSON 字段中嵌入 SQL，sql_plan_to_sql() 是 SQL 生成唯一入口",
+      "status": "proposed",
+      "blocking": false,
+      "enforcement_level": "visibility_only",
+      "result": "passed",
+      "message": "proposed 规则无 required_checks 或全部通过，注册表可见",
+      "required_checks": [
+        "harness/checks/check_ir_schema.py",
+        "harness/checks/check_sql_readonly.py"
+      ],
+      "matched_check_results": [
+        {
+          "name": "IR 数据结构完整性",
+          "script": "harness/checks/check_ir_schema.py",
+          "status": "PASS",
+          "exit_code": 0
+        },
+        {
+          "name": "SQL 只读安全门禁",
+          "script": "harness/checks/check_sql_readonly.py",
+          "status": "PASS",
+          "exit_code": 0
+        }
+      ]
+    },
+    {
+      "rule_id": "TA-R013",
+      "title": "Prompt 中指标应按业务域分组展示，同域相近指标触发反问",
+      "status": "proposed",
+      "blocking": false,
+      "enforcement_level": "visibility_only",
+      "result": "passed",
+      "message": "proposed 规则无 required_checks 或全部通过，注册表可见",
+      "required_checks": [
+        "harness/checks/check_metric_registered.py"
+      ],
+      "matched_check_results": [
+        {
+          "name": "指标注册合规门禁",
+          "script": "harness/checks/check_metric_registered.py",
+          "status": "PASS",
+          "exit_code": 0
+        }
+      ]
+    },
+    {
+      "rule_id": "TA-R014",
+      "title": "G3→G2 降级路由由规则代码统一处理，不依赖 LLM 判断",
+      "status": "proposed",
+      "blocking": false,
+      "enforcement_level": "visibility_only",
+      "result": "passed",
+      "message": "proposed 规则无 required_checks 或全部通过，注册表可见",
+      "required_checks": [
+        "harness/checks/check_layer_compliance.py"
+      ],
+      "matched_check_results": [
+        {
+          "name": "层级合规门禁",
+          "script": "harness/checks/check_layer_compliance.py",
+          "status": "PASS",
+          "exit_code": 0
+        }
+      ]
+    },
+    {
+      "rule_id": "TA-R015",
+      "title": "修改 Prompt 后必须同步更新回归夹具和 regression_cases.yml",
+      "status": "proposed",
+      "blocking": false,
+      "enforcement_level": "visibility_only",
+      "result": "passed",
+      "message": "proposed 规则无 required_checks 或全部通过，注册表可见",
+      "required_checks": [
+        "harness/checks/check_memory_update.py"
+      ],
+      "matched_check_results": [
+        {
+          "name": "Memory Gate",
+          "script": "harness/checks/check_memory_update.py",
+          "status": "PASS",
+          "exit_code": 0
+        }
+      ]
+    },
+    {
+      "rule_id": "TA-R016",
+      "title": "Runtime 基线 UNSTABLE 需附 provider 稳定性指标，连续 N 次后降级告警",
+      "status": "proposed",
+      "blocking": false,
+      "enforcement_level": "visibility_only",
+      "result": "passed",
+      "message": "proposed 规则无 required_checks 或全部通过，注册表可见",
+      "required_checks": [],
+      "matched_check_results": []
+    },
+    {
+      "rule_id": "TA-R017",
+      "title": "IR 结构应支持一对多映射——跨表多指标拆分为多 SubIntent + 多 SQLPlan",
+      "status": "proposed",
+      "blocking": false,
+      "enforcement_level": "visibility_only",
+      "result": "passed",
+      "message": "proposed 规则无 required_checks 或全部通过，注册表可见",
+      "required_checks": [
+        "harness/checks/check_ir_schema.py",
+        "harness/checks/check_execution_strategy_safety.py",
+        "harness/checks/check_plan_executor_safety.py"
+      ],
+      "matched_check_results": [
+        {
+          "name": "IR 数据结构完整性",
+          "script": "harness/checks/check_ir_schema.py",
+          "status": "PASS",
+          "exit_code": 0
+        },
+        {
+          "name": "执行策略安全门禁",
+          "script": "harness/checks/check_execution_strategy_safety.py",
+          "status": "PASS",
+          "exit_code": 0
+        },
+        {
+          "name": "PlanExecutor 安全门禁",
+          "script": "harness/checks/check_plan_executor_safety.py",
+          "status": "PASS",
+          "exit_code": 0
+        }
+      ]
+    },
+    {
+      "rule_id": "TA-R018",
+      "title": "LLM 融合结果必须保留模板 fallback + 数值一致性后校验，禁止编造因果",
+      "status": "active",
+      "blocking": true,
+      "enforcement_level": "blocking_dry_run",
+      "result": "passed",
+      "message": "active+blocking=true 规则全部 required_checks 通过",
+      "required_checks": [
+        "harness/checks/check_result_fusion_safety.py",
+        "harness/checks/check_cross_domain_policy.py"
+      ],
+      "matched_check_results": [
+        {
+          "name": "LLM 融合安全门禁",
+          "script": "harness/checks/check_result_fusion_safety.py",
+          "status": "PASS",
+          "exit_code": 0
+        },
+        {
+          "name": "跨域策略安全门禁",
+          "script": "harness/checks/check_cross_domain_policy.py",
+          "status": "PASS",
+          "exit_code": 0
+        }
+      ]
+    },
+    {
+      "rule_id": "TA-R019",
+      "title": "PlanExecutor 安全链路不可绕过——read_only、离线阻断、validate_sql_safety、execution trace",
+      "status": "proposed",
+      "blocking": false,
+      "enforcement_level": "visibility_only",
+      "result": "passed",
+      "message": "proposed 规则无 required_checks 或全部通过，注册表可见",
+      "required_checks": [
+        "harness/checks/check_plan_executor_safety.py"
+      ],
+      "matched_check_results": [
+        {
+          "name": "PlanExecutor 安全门禁",
+          "script": "harness/checks/check_plan_executor_safety.py",
+          "status": "PASS",
+          "exit_code": 0
+        }
+      ]
+    },
+    {
+      "rule_id": "TA-R020",
+      "title": "ExecutionStrategy 并发安全边界——默认串行、DuckDB 连接不跨线程共享、每个 plan 独立安全校验",
+      "status": "proposed",
+      "blocking": false,
+      "enforcement_level": "visibility_only",
+      "result": "passed",
+      "message": "proposed 规则无 required_checks 或全部通过，注册表可见",
+      "required_checks": [
+        "harness/checks/check_execution_strategy_safety.py"
+      ],
+      "matched_check_results": [
+        {
+          "name": "执行策略安全门禁",
+          "script": "harness/checks/check_execution_strategy_safety.py",
+          "status": "PASS",
+          "exit_code": 0
+        }
+      ]
+    },
+    {
+      "rule_id": "TA-R021",
+      "title": "ResultSummary 是 merge/fusion/chart 的结构化输入——grain/date/columns/row_count 不能被随意推断",
+      "status": "proposed",
+      "blocking": false,
+      "enforcement_level": "visibility_only",
+      "result": "warning",
+      "message": "required_checks 中有 1 项未找到对应 check result（harness/checks/check_result_summary_safety.py），无法验证",
+      "required_checks": [
+        "harness/checks/check_result_summary_safety.py"
+      ],
+      "matched_check_results": [
+        {
+          "name": "harness/checks/check_result_summary_safety.py",
+          "script": "harness/checks/check_result_summary_safety.py",
+          "status": "SKIPPED",
+          "exit_code": null
+        }
+      ]
+    },
+    {
+      "rule_id": "TA-R022",
+      "title": "ResultMerge 只允许严格 date/grain 对齐——不做 SQL 层跨表 JOIN、不做因果解释、缺 date 不 merge",
+      "status": "proposed",
+      "blocking": false,
+      "enforcement_level": "visibility_only",
+      "result": "passed",
+      "message": "proposed 规则无 required_checks 或全部通过，注册表可见",
+      "required_checks": [
+        "harness/checks/check_cross_domain_policy.py"
+      ],
+      "matched_check_results": [
+        {
+          "name": "跨域策略安全门禁",
+          "script": "harness/checks/check_cross_domain_policy.py",
+          "status": "PASS",
+          "exit_code": 0
+        }
+      ]
+    },
+    {
+      "rule_id": "TA-R023",
+      "title": "CrossDomainPolicy 不得削弱跨域拒绝和因果边界——unknown 反问、traffic+safety 禁止因果、standard_fine_total 非实际收入",
+      "status": "proposed",
+      "blocking": false,
+      "enforcement_level": "visibility_only",
+      "result": "passed",
+      "message": "proposed 规则无 required_checks 或全部通过，注册表可见",
+      "required_checks": [
+        "harness/checks/check_cross_domain_policy.py"
+      ],
+      "matched_check_results": [
+        {
+          "name": "跨域策略安全门禁",
+          "script": "harness/checks/check_cross_domain_policy.py",
+          "status": "PASS",
+          "exit_code": 0
+        }
+      ]
+    },
+    {
+      "rule_id": "TA-R024",
+      "title": "ChartSpec 不生成 HTML/JS、不访问 DuckDB、不调用 LLM——纯规则 JSON 可序列化图表规格",
+      "status": "proposed",
+      "blocking": false,
+      "enforcement_level": "visibility_only",
+      "result": "passed",
+      "message": "proposed 规则无 required_checks 或全部通过，注册表可见",
+      "required_checks": [
+        "harness/checks/check_chart_spec_safety.py"
+      ],
+      "matched_check_results": [
+        {
+          "name": "图表规格安全门禁",
+          "script": "harness/checks/check_chart_spec_safety.py",
+          "status": "PASS",
+          "exit_code": 0
+        }
+      ]
+    },
+    {
+      "rule_id": "TA-R025",
+      "title": "Legacy executor 不应承载新执行能力——新功能应走 PlanExecutor，不绕过安全链路",
+      "status": "proposed",
+      "blocking": false,
+      "enforcement_level": "visibility_only",
+      "result": "passed",
+      "message": "proposed 规则无 required_checks 或全部通过，注册表可见",
+      "required_checks": [
+        "harness/checks/check_plan_executor_safety.py"
+      ],
+      "matched_check_results": [
+        {
+          "name": "PlanExecutor 安全门禁",
+          "script": "harness/checks/check_plan_executor_safety.py",
+          "status": "PASS",
+          "exit_code": 0
+        }
+      ]
+    },
+    {
+      "rule_id": "TA-R026",
+      "title": "Harness checks 变更必须同步 registry——新增/修改 check 时需更新 memory_rules.yml 的 required_checks",
+      "status": "proposed",
+      "blocking": false,
+      "enforcement_level": "visibility_only",
+      "result": "passed",
+      "message": "proposed 规则无 required_checks 或全部通过，注册表可见",
+      "required_checks": [],
+      "matched_check_results": []
+    },
+    {
+      "rule_id": "TA-R027",
+      "title": "Harness baselines 变更必须审计稳定性语义——基线逻辑变化需评估对 UNSTABLE/FAIL 判定的影响",
+      "status": "proposed",
+      "blocking": false,
+      "enforcement_level": "visibility_only",
+      "result": "passed",
+      "message": "proposed 规则无 required_checks 或全部通过，注册表可见",
+      "required_checks": [],
+      "matched_check_results": []
+    },
+    {
+      "rule_id": "TA-R028",
+      "title": "evals 变更必须同步 required_evals——新增 eval case 时需更新对应规则的 eval 映射",
+      "status": "proposed",
+      "blocking": false,
+      "enforcement_level": "visibility_only",
+      "result": "passed",
+      "message": "proposed 规则无 required_checks 或全部通过，注册表可见",
+      "required_checks": [],
+      "matched_check_results": []
+    },
+    {
+      "rule_id": "TA-R029",
+      "title": "memory_rules.yml 变更必须重新生成规则来源索引——运行 generate_rule_index.py，禁止手动编辑 Markdown",
+      "status": "proposed",
+      "blocking": false,
+      "enforcement_level": "visibility_only",
+      "result": "passed",
+      "message": "proposed 规则无 required_checks 或全部通过，注册表可见",
+      "required_checks": [
+        "harness/checks/check_memory_update.py"
+      ],
+      "matched_check_results": [
+        {
+          "name": "Memory Gate",
+          "script": "harness/checks/check_memory_update.py",
+          "status": "PASS",
+          "exit_code": 0
+        }
+      ]
+    },
+    {
+      "rule_id": "TA-R030",
+      "title": "generate_rule_index.py 变更必须验证 Markdown 输出不退化——rule_id 唯一、TA-R 前缀、核心字段完整",
+      "status": "proposed",
+      "blocking": false,
+      "enforcement_level": "visibility_only",
+      "result": "passed",
+      "message": "proposed 规则无 required_checks 或全部通过，注册表可见",
+      "required_checks": [
+        "harness/checks/check_memory_update.py"
+      ],
+      "matched_check_results": [
+        {
+          "name": "Memory Gate",
+          "script": "harness/checks/check_memory_update.py",
+          "status": "PASS",
+          "exit_code": 0
+        }
+      ]
+    }
+  ],
+  "infra_errors": [],
+  "exit_code_should_fail": false,
+  "write_mode": "dry_run"
+}

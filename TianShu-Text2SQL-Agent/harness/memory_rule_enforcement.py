@@ -1,17 +1,18 @@
-"""Memory Rule Enforcement —— active 规则在 fast gate 中的分级门禁（Step 18a）。
+"""Memory Rule Enforcement —— active 规则在 fast gate 中的分级门禁（Step 18b）。
 
 本模块实现 memory_rules.yml 中 active 规则与 fast gate check 结果的关联分析，
-按规则状态/blocking 分级输出 enforcement 结果。本轮为 dry-run 模式：
+按规则状态/blocking 分级输出 enforcement 结果。Step 18b 起启用真实阻断：
   - proposed 规则 → visibility_only（仅 registry 可见，不影响 exit code）
   - active + blocking=false → warn（输出 warning，不影响 exit code）
-  - active + blocking=true → blocking_dry_run（输出 would_fail，不影响 exit code）
+  - active + blocking=true → blocking_error（check 失败 → fast gate FAIL，exit code 非 0）
   - deprecated/superseded → ignored（不参与 enforcement）
 
 关键边界：
   - 不修改 docs/memory/*
   - 不修改 memory_rules.yml
   - 不自动晋升规则
-  - 不让 active+blocking=true 真实阻断 fast gate
+  - 只对 ready_for_error 的 active+blocking=true 规则启用真实阻断
+  - 不接入 pre-commit
   - 不调用 LLM
   - 不读取 *_latest.*
 """
@@ -31,10 +32,11 @@ import yaml
 # ═══════════════════════════════════════════════════════════════════════════════
 
 # Enforcement 级别
-ENFORCEMENT_VISIBILITY = "visibility_only"     # proposed 规则，仅供参考
-ENFORCEMENT_WARN = "warn"                       # active + blocking=false，仅警告
-ENFORCEMENT_BLOCKING_DRY_RUN = "blocking_dry_run"  # active + blocking=true，dry-run 报错
-ENFORCEMENT_IGNORED = "ignored"                 # deprecated / superseded，不参与
+ENFORCEMENT_VISIBILITY = "visibility_only"      # proposed 规则，仅供参考
+ENFORCEMENT_WARN = "warn"                        # active + blocking=false，仅警告
+ENFORCEMENT_BLOCKING_ERROR = "blocking_error"    # active + blocking=true，真实阻断（Step 18b）
+ENFORCEMENT_BLOCKING_DRY_RUN = "blocking_dry_run"  # [已废弃] 保留以兼容旧测试/数据
+ENFORCEMENT_IGNORED = "ignored"                  # deprecated / superseded，不参与
 
 # 合法的 rule status 值
 VALID_STATUSES = {"proposed", "active", "deprecated", "superseded"}
@@ -170,7 +172,7 @@ def classify_rule(rule: dict[str, Any]) -> str:
     elif status == "active" and not blocking:
         return ENFORCEMENT_WARN
     elif status == "active" and blocking:
-        return ENFORCEMENT_BLOCKING_DRY_RUN
+        return ENFORCEMENT_BLOCKING_ERROR  # Step 18b: 真实阻断
     else:
         # 未知状态回退到 visibility_only
         return ENFORCEMENT_VISIBILITY
@@ -344,6 +346,17 @@ def compute_rule_enforcement(
         elif enforcement_level == ENFORCEMENT_WARN:
             result = "warning"
             msg = f"active+blocking=false 规则的 {len(failed_checks)} 项 required_checks 失败，仅警告不阻断"
+        elif enforcement_level == ENFORCEMENT_BLOCKING_ERROR:
+            result = "FAIL"
+            failed_check_names = [cr.get("name", "?") for cr in failed_checks]
+            msg = (
+                f"active+blocking=true 规则 {rid} 的 "
+                f"{len(failed_checks)} 项 required_checks 失败"
+                f"（{', '.join(failed_check_names[:3])}），"
+                f"fast gate 阻断。回滚方案: 将 memory_rules.yml 中 {rid} 的 "
+                f"blocking 从 true 改回 false 即可恢复 dry-run 模式。"
+            )
+        # 向后兼容：旧 blocking_dry_run 级别仍按 dry-run 处理
         elif enforcement_level == ENFORCEMENT_BLOCKING_DRY_RUN:
             result = "would_fail"
             msg = f"active+blocking=true 规则的 {len(failed_checks)} 项 required_checks 失败（dry-run，本轮不阻断）"
@@ -378,6 +391,8 @@ def _enforcement_message(level: str, result: str) -> str:
         (ENFORCEMENT_VISIBILITY, "warning"): "proposed 规则 check 存在问题，仅注册表观察",
         (ENFORCEMENT_WARN, "passed"): "active+blocking=false 规则全部 required_checks 通过",
         (ENFORCEMENT_WARN, "warning"): "active+blocking=false 规则 check 失败，仅警告",
+        (ENFORCEMENT_BLOCKING_ERROR, "passed"): "active+blocking=true 规则全部 required_checks 通过",
+        (ENFORCEMENT_BLOCKING_ERROR, "FAIL"): "active+blocking=true 规则 check 失败，fast gate 阻断",
         (ENFORCEMENT_BLOCKING_DRY_RUN, "passed"): "active+blocking=true 规则全部 required_checks 通过",
         (ENFORCEMENT_BLOCKING_DRY_RUN, "would_fail"): "active+blocking=true 规则 check 失败（dry-run would_fail）",
     }
@@ -434,6 +449,13 @@ def build_enforcement_report(
     # 汇总统计
     summary = _build_summary(rules, rule_results, infra_errors)
 
+    # Step 18b: 当任何 active+blocking=true 规则结果为 FAIL 时，exit_code_should_fail=True
+    exit_code_should_fail = any(
+        rr.get("enforcement_level") == ENFORCEMENT_BLOCKING_ERROR
+        and rr.get("result") == "FAIL"
+        for rr in rule_results
+    )
+
     # 生成 run_id
     run_id = _generate_run_id()
 
@@ -443,8 +465,8 @@ def build_enforcement_report(
         "summary": summary,
         "rule_results": rule_results,
         "infra_errors": infra_errors,
-        "exit_code_should_fail": False,  # Step 18a: 始终不改变 exit code
-        "write_mode": "dry_run",
+        "exit_code_should_fail": exit_code_should_fail,
+        "write_mode": "blocking",  # Step 18b: 真实阻断模式
     }
 
 
@@ -484,6 +506,7 @@ def _build_summary(
 
     warnings = sum(1 for rr in rule_results if rr.get("result") == "warning")
     would_fail = sum(1 for rr in rule_results if rr.get("result") == "would_fail")
+    blocking_failures = sum(1 for rr in rule_results if rr.get("result") == "FAIL")
     passed = sum(1 for rr in rule_results if rr.get("result") == "passed")
     skipped = sum(1 for rr in rule_results if rr.get("result") == "skipped")
     infra_error_count = sum(1 for rr in rule_results if rr.get("result") == "infra_error")
@@ -496,6 +519,7 @@ def _build_summary(
         "deprecated": deprecated,
         "superseded": superseded,
         "warnings": warnings,
+        "blocking_failures": blocking_failures,
         "blocking_dry_run_failures": would_fail,
         "would_fail": would_fail,
         "passed": passed,
@@ -532,11 +556,11 @@ def render_enforcement_markdown(report: dict[str, Any]) -> str:
     rule_results = report.get("rule_results", [])
     infra_errors = report.get("infra_errors", [])
 
-    lines.append("# Memory Rule Enforcement 报告 (Step 18a Dry-Run)")
+    lines.append("# Memory Rule Enforcement 报告 (Step 18b Blocking)")
     lines.append("")
     lines.append(f"**Run ID:** `{report.get('run_id', 'N/A')}`")
     lines.append(f"**时间:** {report.get('timestamp', 'N/A')}")
-    lines.append(f"**模式:** dry-run（不改变 fast gate exit code）")
+    lines.append(f"**模式:** blocking（active+blocking=true 规则 check 失败时阻断 fast gate）")
     lines.append("")
 
     # 汇总
@@ -547,16 +571,16 @@ def render_enforcement_markdown(report: dict[str, Any]) -> str:
     lines.append(f"| 总规则数 | {summary.get('total_rules', 0)} |")
     lines.append(f"| proposed（仅可见） | {summary.get('proposed', 0)} |")
     lines.append(f"| active + blocking=false（警告） | {summary.get('active_warning', 0)} |")
-    lines.append(f"| active + blocking=true（dry-run） | {summary.get('active_blocking', 0)} |")
+    lines.append(f"| active + blocking=true（阻断） | {summary.get('active_blocking', 0)} |")
     lines.append(f"| deprecated | {summary.get('deprecated', 0)} |")
     lines.append(f"| superseded | {summary.get('superseded', 0)} |")
     lines.append(f"| 通过 | {summary.get('passed', 0)} |")
     lines.append(f"| 警告 | {summary.get('warnings', 0)} |")
-    lines.append(f"| would_fail（dry-run） | {summary.get('would_fail', 0)} |")
+    lines.append(f"| 阻断失败 | {summary.get('blocking_failures', 0)} |")
     lines.append(f"| 跳过 | {summary.get('skipped', 0)} |")
     lines.append(f"| 基础设施错误 | {summary.get('infra_errors', 0)} |")
     lines.append("")
-    lines.append(f"**Exit code 受影响:** {'否' if not report.get('exit_code_should_fail') else '是'}")
+    lines.append(f"**Exit code 受影响:** {'是' if report.get('exit_code_should_fail') else '否'}")
     lines.append("")
 
     # 基础设施错误
@@ -573,7 +597,8 @@ def render_enforcement_markdown(report: dict[str, Any]) -> str:
 
     # 按 enforcement_level 分组展示
     for level_label, level_key, icon in [
-        ("active + blocking=true（blocking_dry_run）", ENFORCEMENT_BLOCKING_DRY_RUN, "🔴"),
+        ("active + blocking=true（blocking_error）", ENFORCEMENT_BLOCKING_ERROR, "🔴"),
+        ("active + blocking=true（blocking_dry_run，已废弃）", ENFORCEMENT_BLOCKING_DRY_RUN, "🔴"),
         ("active + blocking=false（warn）", ENFORCEMENT_WARN, "🟡"),
         ("proposed（visibility_only）", ENFORCEMENT_VISIBILITY, "🔵"),
         ("deprecated / superseded（ignored）", ENFORCEMENT_IGNORED, "⚫"),
@@ -611,7 +636,7 @@ def render_enforcement_markdown(report: dict[str, Any]) -> str:
     lines.append("- ✅ 未修改 memory_rules.yml")
     lines.append("- ✅ 未自动晋升 active")
     lines.append("- ✅ 未自动设置 blocking=true")
-    lines.append("- ✅ active+blocking=true 仅为 dry-run，不改变 exit code")
+    lines.append("- ✅ 只对 ready_for_error 的 active+blocking=true 规则启用真实阻断")
     lines.append("- ✅ 未读取 *_latest.*")
     lines.append("- ✅ 未调用 LLM")
     lines.append("- ✅ 未接入 pre-commit")
@@ -626,10 +651,10 @@ def _result_icon(result: str) -> str:
         "passed": "[PASS]",
         "warning": "[WARN]",
         "would_fail": "[WOULD_FAIL]",
+        "FAIL": "[FAIL]",
         "skipped": "[SKIP]",
         "infra_error": "[ERROR]",
         "PASS": "[PASS]",
-        "FAIL": "[FAIL]",
         "WARN": "[WARN]",
         "SKIPPED": "[SKIP]",
     }
@@ -648,36 +673,40 @@ def render_enforcement_console_summary(report: dict[str, Any]) -> str:
         控制台摘要字符串
     """
     summary = report.get("summary", {})
+    exit_code_affected = report.get("exit_code_should_fail", False)
     lines: list[str] = []
     lines.append("")
     lines.append("=" * 60)
-    lines.append("Memory Rule Enforcement Summary (Step 18a Dry-Run)")
+    lines.append("Memory Rule Enforcement Summary (Step 18b)")
     lines.append("=" * 60)
     lines.append(f"  proposed visibility only:     {summary.get('proposed', 0)}")
     lines.append(f"  active warning rules:         {summary.get('active_warning', 0)}")
-    lines.append(f"  active blocking dry-run rules:{summary.get('active_blocking', 0)}")
+    lines.append(f"  active blocking rules:        {summary.get('active_blocking', 0)}")
     lines.append(f"  deprecated:                   {summary.get('deprecated', 0)}")
     lines.append(f"  superseded:                   {summary.get('superseded', 0)}")
     lines.append(f"  ---")
     lines.append(f"  passed:                       {summary.get('passed', 0)}")
     lines.append(f"  warnings:                     {summary.get('warnings', 0)}")
-    lines.append(f"  would_fail (dry-run only):    {summary.get('would_fail', 0)}")
+    lines.append(f"  blocking failures:            {summary.get('blocking_failures', 0)}")
     lines.append(f"  skipped:                      {summary.get('skipped', 0)}")
     lines.append(f"  infra errors:                 {summary.get('infra_errors', 0)}")
     lines.append(f"  ---")
-    lines.append(f"  exit code affected:           no")
+    lines.append(f"  exit code affected:           {'yes' if exit_code_affected else 'no'}")
     lines.append("=" * 60)
 
-    # 输出 would_fail 详情
-    would_fail_rules = [
+    # 输出 blocking failure 详情
+    blocking_failure_rules = [
         rr for rr in report.get("rule_results", [])
-        if rr.get("result") == "would_fail"
+        if rr.get("result") == "FAIL"
     ]
-    if would_fail_rules:
+    if blocking_failure_rules:
         lines.append("")
-        lines.append("[WOULD_FAIL] active+blocking=true 规则 dry-run failures:")
-        for rr in would_fail_rules:
-            lines.append(f"  - {rr['rule_id']}: {rr.get('message', '')}")
+        lines.append("[FAIL] active+blocking=true 规则阻断失败:")
+        for rr in blocking_failure_rules:
+            lines.append(f"  - {rr['rule_id']}: {rr.get('title', '')}")
+            lines.append(f"    {rr.get('message', '')}")
+            # 输出 rollback 信息
+            lines.append(f"    回滚方案: 将 memory_rules.yml 中 {rr['rule_id']} 的 blocking 从 true 改回 false")
 
     # 输出 warning 详情
     warning_rules = [

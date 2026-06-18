@@ -446,30 +446,45 @@ def render_markdown(report: FastGateReport) -> str:
             lines.append("```")
         lines.append("")
 
-    # Step 18a: Memory Rule Enforcement Summary
+    # Step 18b: Memory Rule Enforcement Summary
     if report.enforcement_report:
         enf = report.enforcement_report
         enf_summary = enf.get("summary", {})
-        lines.append("## Memory Rule Enforcement (Step 18a Dry-Run)")
+        enf_exit_affected = enf.get("exit_code_should_fail", False)
+        lines.append("## Memory Rule Enforcement (Step 18b)")
         lines.append("")
         lines.append(f"| 指标 | 数量 |")
         lines.append(f"|------|------|")
         lines.append(f"| 总规则数 | {enf_summary.get('total_rules', 0)} |")
         lines.append(f"| proposed（仅可见） | {enf_summary.get('proposed', 0)} |")
         lines.append(f"| active+blocking=false（警告） | {enf_summary.get('active_warning', 0)} |")
-        lines.append(f"| active+blocking=true（dry-run） | {enf_summary.get('active_blocking', 0)} |")
+        lines.append(f"| active+blocking=true（阻断） | {enf_summary.get('active_blocking', 0)} |")
         lines.append(f"| deprecated | {enf_summary.get('deprecated', 0)} |")
         lines.append(f"| superseded | {enf_summary.get('superseded', 0)} |")
         lines.append(f"| 通过 | {enf_summary.get('passed', 0)} |")
         lines.append(f"| 警告 | {enf_summary.get('warnings', 0)} |")
-        lines.append(f"| would_fail（dry-run） | {enf_summary.get('would_fail', 0)} |")
+        lines.append(f"| 阻断失败 | {enf_summary.get('blocking_failures', 0)} |")
         lines.append(f"| 跳过 | {enf_summary.get('skipped', 0)} |")
         lines.append(f"| 基础设施错误 | {enf_summary.get('infra_errors', 0)} |")
         lines.append("")
-        lines.append("> **Exit code 受影响:** 否（Step 18a dry-run 模式）")
+        lines.append(f"> **Exit code 受影响:** {'是' if enf_exit_affected else '否'}")
         lines.append("")
 
-        # would_fail 规则详情
+        # blocking failure 规则详情
+        blocking_failure_rules = [
+            rr for rr in enf.get("rule_results", [])
+            if rr.get("result") == "FAIL"
+        ]
+        if blocking_failure_rules:
+            lines.append("### 阻断失败规则详情")
+            lines.append("")
+            for rr in blocking_failure_rules:
+                lines.append(f"- **{rr['rule_id']}**: {rr.get('title', '')}")
+                lines.append(f"  - 消息: {rr.get('message', '')}")
+                lines.append(f"  - 回滚: 将 memory_rules.yml 中 {rr['rule_id']} 的 blocking 从 true 改回 false")
+            lines.append("")
+
+        # would_fail 规则详情（dry-run 遗留）
         would_fail_rules = [
             rr for rr in enf.get("rule_results", [])
             if rr.get("result") == "would_fail"
@@ -587,13 +602,17 @@ def run_fast_gate(
     warn_checks_warned = harness_summary.get("warn_warn", 0) if harness_summary else 0
     warn_checks_infra_fail = harness_summary.get("warn_infra_fail", 0) if harness_summary else 0
 
-    # Step 18a: Memory Rule Enforcement dry-run
+    # Step 18b: Memory Rule Enforcement（真实阻断模式）
     enforcement_report = None
     harness_step = next(
         (r for r in step_results if r.name == "harness"), None
     )
     if harness_step and harness_step.stdout:
         enforcement_report = _run_memory_rule_enforcement(harness_step.stdout)
+
+    # Step 18b: 当 enforcement 要求阻断时，overall 设为 FAIL
+    if enforcement_report and enforcement_report.get("exit_code_should_fail"):
+        overall = "FAIL"
 
     report = FastGateReport(
         run_id=run_id,
