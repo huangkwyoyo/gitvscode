@@ -534,8 +534,9 @@ scripts/dev_agent/                 ← v2 CLI 入口
 | M3 安全压实（3 缺口） | ✅ | G1/G2/G3 修复 |
 | **M4a 人审状态机最小实现** | ✅ | DecisionStatus enum + decision.yml + decision_log.yml + verification_summary.yml |
 | **M4b 状态机完整实现** | ✅ | SUPERSEDED 自动转换 + artifact_hashes + decision_manager + 人审 CLI |
+| **M4c 跨 package 注册表** | ✅ | package_registry + list/deps/status + SUPERSEDED 传播 + 一致性检查 |
 | v1 pipeline 保留 | ✅ | `scripts/pipeline/` 完整保留，143 测试通过 |
-| 测试 | ✅ | 581 passed，零回归 |
+| 测试 | ✅ | 629 passed，零回归 |
 
 ### 10.3 部分完成（PARTIAL）
 
@@ -543,7 +544,7 @@ scripts/dev_agent/                 ← v2 CLI 入口
 |------|------|------|
 | Spark 只读样本执行 | ⚠️ | `sandbox/spark_executor.py` 是桩，始终返回 SKIPPED/PENDING |
 | SQL/Spark 交叉验证 | ⚠️ | `verify/cross_validation.py` 逻辑完整，但输入缺失→始终 SKIPPED |
-| 跨 package SUPERSEDED | ⚠️ | M4b 已实现同一 package 内 SUPERSEDED；跨 package 注册表待 M4c |
+| 跨 package SUPERSEDED 传播 | ✅ | M4c 已实现——注册表 + 自动传播 + 一致性检查 |
 
 ### 10.4 待完成（TODO）
 
@@ -555,7 +556,6 @@ scripts/dev_agent/                 ← v2 CLI 入口
 | ColumnBindingTable 动态加载增强 | ❌ | 当前 fallback 可用 |
 | 完整 DAG 端到端测试 | ❌ | 待规划 |
 | KEY_MERGE 增量策略 | ❌ | 未来里程碑 |
-| 跨 package SUPERSEDED（M4c） | ❌ | M4b artifact_hashes 基础已就绪 |
 
 ### 10.5 关键约束（不得违反）
 

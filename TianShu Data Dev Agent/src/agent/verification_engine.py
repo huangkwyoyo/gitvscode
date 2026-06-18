@@ -8,6 +8,7 @@ M4a：新增 verification_summary.yml——结构化验证摘要。
       绝不修改 decision.yml.current_state（SUPERSEDED 为 M4b+）。
 M4b：实现 SUPERSEDED 自动转换——重新验证且旧状态为 APPROVED 时自动过渡。
       新增 artifact 完整性检查、verification_id。
+M4c：SUPERSEDED 后自动传播至下游 APPROVED package + 同步注册表。
 """
 
 from __future__ import annotations
@@ -39,6 +40,10 @@ from .decision_manager import (
     read_decision,
     transition_state,
     update_artifact_hashes_in_decision,
+)
+from .package_registry import (
+    propagate_superseded,
+    update_registry_state,
 )
 
 
@@ -197,6 +202,26 @@ def verify_review_package(
                 f"M4b SUPERSEDED：旧 APPROVED 已自动过渡至 SUPERSEDED"
                 f"（verification_id={verification_id}，overall_status={overall_status}）"
             )
+
+            # M4c：SUPERSEDED 传播——通知下游 package
+            package_id = package_dir.name
+            try:
+                update_registry_state(package_id, "SUPERSEDED")
+                affected = propagate_superseded(
+                    package_id=package_id,
+                    reason=f"重新验证触发 SUPERSEDED（{overall_status}）",
+                    verification_id=verification_id,
+                    _transition_fn=transition_state,
+                )
+                if affected:
+                    warnings.append(
+                        f"M4c 传播：下游 {len(affected)} 个 package 受影响"
+                        f"（{', '.join(affected)}）"
+                    )
+            except Exception as exc:
+                warnings.append(
+                    f"M4c SUPERSEDED 传播失败（不阻断验证）: {exc}"
+                )
         except ValueError as exc:
             # SUPERSEDED 转换失败不阻断验证流程
             warnings.append(f"M4b SUPERSEDED 转换失败（不阻断验证）: {exc}")

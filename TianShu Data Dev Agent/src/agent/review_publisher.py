@@ -4,6 +4,7 @@ Review Package 发布器。
 M2 阶段只写审查材料，不写生产数据。
 M4a：新增 decision.yml（机读权威状态）和 decision_log.yml（审计日志）。
 M4b：decision.yml 含 artifact_hashes；decision_log 含 actor_id。
+M4c：发布后自动注册到 package 注册表。
 """
 
 from __future__ import annotations
@@ -261,9 +262,58 @@ def publish_review_package(
         ),
     )
 
+    # M4c：发布后注册到 package 注册表
+    _register_to_registry(
+        requirement=requirement,
+        package_dir=package_dir,
+        artifact_hashes=artifact_hashes,
+        output_root=root,
+    )
+
     return ReviewPackageManifest(
         request_id=requirement.request_id,
         package_path=str(package_dir.resolve()),
         files=REQUIRED_FILES,
         pending_items=plan.pending_items + drafts.pending_items,
     )
+
+
+def _register_to_registry(
+    requirement: RequirementSpec,
+    package_dir: Path,
+    artifact_hashes: ArtifactHashes,
+    output_root: str | Path,
+) -> None:
+    """M4c：发布后将 package 注册到注册表。
+
+    从 lineage 和需求声明中收集依赖信息。
+
+    Args:
+        requirement: 需求规格
+        package_dir: Package 目录路径
+        artifact_hashes: artifact 哈希集合
+        output_root: Review Package 输出根目录
+    """
+    try:
+        from .package_registry import (
+            auto_detect_dependencies,
+            read_registry,
+            register_package,
+        )
+
+        registry = read_registry(str(output_root))
+        # 自动检测 + 需求中显式声明的依赖
+        auto_deps = auto_detect_dependencies(package_dir, registry)
+        manual_deps = getattr(requirement, "depends_on", None) or []
+        all_deps = list(dict.fromkeys(auto_deps + list(manual_deps)))
+
+        register_package(
+            package_id=requirement.request_id,
+            package_path=package_dir,
+            artifact_hashes=artifact_hashes.to_dict(),
+            depends_on=all_deps,
+            output_root=str(output_root),
+        )
+    except Exception:
+        # 注册失败不阻塞 M2 构建
+        pass

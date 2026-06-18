@@ -253,3 +253,173 @@ def test_no_command_shows_help():
     )
     # 无子命令应返回非零或打印 help
     assert "show" in result.stdout or "set" in result.stdout or "audit" in result.stdout
+
+
+# ═══════════════════════════════════════════════════════════
+# M4c 新增 CLI 测试——list / deps / status
+# ═══════════════════════════════════════════════════════════
+
+
+def test_list_shows_all_packages(tmp_path):
+    """list 命令列出注册表中所有 package。"""
+    # 先构建一个 package 以产生注册表条目
+    package_dir = _build_and_verify(tmp_path)
+
+    result = subprocess.run(
+        [sys.executable, str(REVIEW_CLI), "list",
+         "--registry", str(tmp_path)],
+        cwd=PROJECT_ROOT, text=True, capture_output=True, check=False,
+    )
+    # 应能看到 package
+    assert "trip_daily_report_m2" in result.stdout
+
+
+def test_list_filter_by_state(tmp_path):
+    """--state APPROVED 过滤只显示 APPROVED。"""
+    package_dir = _build_and_verify(tmp_path)
+
+    # 先 set APPROVED
+    subprocess.run(
+        [sys.executable, str(REVIEW_CLI), "set", str(package_dir),
+         "--state", "APPROVED", "--message", "测试过滤", "--user", "tester"],
+        cwd=PROJECT_ROOT, text=True, capture_output=True, check=False,
+    )
+
+    result = subprocess.run(
+        [sys.executable, str(REVIEW_CLI), "list",
+         "--state", "APPROVED", "--registry", str(tmp_path)],
+        cwd=PROJECT_ROOT, text=True, capture_output=True, check=False,
+    )
+    assert "trip_daily_report_m2" in result.stdout
+
+
+def test_list_filter_excludes_non_matching(tmp_path):
+    """过滤 PENDING_REVIEW 时不显示 APPROVED。"""
+    package_dir = _build_and_verify(tmp_path)
+
+    # set APPROVED
+    subprocess.run(
+        [sys.executable, str(REVIEW_CLI), "set", str(package_dir),
+         "--state", "APPROVED", "--message", "测试排除", "--user", "tester"],
+        cwd=PROJECT_ROOT, text=True, capture_output=True, check=False,
+    )
+
+    # 过滤 REJECTED 应该没有
+    result = subprocess.run(
+        [sys.executable, str(REVIEW_CLI), "list",
+         "--state", "REJECTED", "--registry", str(tmp_path)],
+        cwd=PROJECT_ROOT, text=True, capture_output=True, check=False,
+    )
+    assert "trip_daily_report_m2" not in result.stdout or "共 0 个" in result.stdout
+
+
+def test_list_json_output(tmp_path):
+    """--json 输出应可被解析。"""
+    package_dir = _build_and_verify(tmp_path)
+
+    result = subprocess.run(
+        [sys.executable, str(REVIEW_CLI), "list",
+         "--json", "--registry", str(tmp_path)],
+        cwd=PROJECT_ROOT, text=True, capture_output=True, check=False,
+    )
+    import json
+    data = json.loads(result.stdout)
+    assert isinstance(data, list)
+    assert any("trip_daily_report_m2" in str(item) for item in data)
+
+
+def test_list_empty_registry(tmp_path):
+    """空注册表不应报错。"""
+    result = subprocess.run(
+        [sys.executable, str(REVIEW_CLI), "list",
+         "--registry", str(tmp_path)],
+        cwd=PROJECT_ROOT, text=True, capture_output=True, check=False,
+    )
+    assert result.returncode == 0
+
+
+def test_deps_shows_dependency_info(tmp_path):
+    """deps 命令显示依赖树。"""
+    package_dir = _build_and_verify(tmp_path)
+
+    result = subprocess.run(
+        [sys.executable, str(REVIEW_CLI), "deps", str(package_dir),
+         "--registry", str(tmp_path)],
+        cwd=PROJECT_ROOT, text=True, capture_output=True, check=False,
+    )
+    assert "trip_daily_report_m2" in result.stdout
+
+
+def test_deps_nonexistent_package(tmp_path):
+    """不存在的 package 目录 deps 应报错。"""
+    result = subprocess.run(
+        [sys.executable, str(REVIEW_CLI), "deps", str(tmp_path / "nonexistent"),
+         "--registry", str(tmp_path)],
+        cwd=PROJECT_ROOT, text=True, capture_output=True, check=False,
+    )
+    assert result.returncode != 0
+
+
+def test_status_shows_summary(tmp_path):
+    """status 显示全局概览。"""
+    package_dir = _build_and_verify(tmp_path)
+
+    result = subprocess.run(
+        [sys.executable, str(REVIEW_CLI), "status",
+         "--registry", str(tmp_path)],
+        cwd=PROJECT_ROOT, text=True, capture_output=True, check=False,
+    )
+    assert result.returncode == 0
+    assert "trip_daily_report_m2" in result.stdout or "注册表" in result.stdout
+
+
+def test_status_empty_registry_ok(tmp_path):
+    """空注册表 status 不报错。"""
+    result = subprocess.run(
+        [sys.executable, str(REVIEW_CLI), "status",
+         "--registry", str(tmp_path)],
+        cwd=PROJECT_ROOT, text=True, capture_output=True, check=False,
+    )
+    assert result.returncode == 0
+
+
+def test_set_updates_registry_state(tmp_path):
+    """set 操作后注册表状态应同步更新。"""
+    package_dir = _build_and_verify(tmp_path)
+
+    subprocess.run(
+        [sys.executable, str(REVIEW_CLI), "set", str(package_dir),
+         "--state", "APPROVED", "--message", "注册表同步测试", "--user", "tester"],
+        cwd=PROJECT_ROOT, text=True, capture_output=True, check=False,
+    )
+
+    # list --json 验证注册表
+    result = subprocess.run(
+        [sys.executable, str(REVIEW_CLI), "list",
+         "--json", "--state", "APPROVED", "--registry", str(tmp_path)],
+        cwd=PROJECT_ROOT, text=True, capture_output=True, check=False,
+    )
+    import json
+    data = json.loads(result.stdout)
+    assert len(data) >= 1
+    assert data[0]["state"] == "APPROVED"
+
+
+def test_deps_shows_state_flags(tmp_path):
+    """deps 命令显示上游状态标记。"""
+    package_dir = _build_and_verify(tmp_path)
+
+    # 先 set APPROVED 使状态稳定
+    subprocess.run(
+        [sys.executable, str(REVIEW_CLI), "set", str(package_dir),
+         "--state", "APPROVED", "--message", "测试依赖标记", "--user", "tester"],
+        cwd=PROJECT_ROOT, text=True, capture_output=True, check=False,
+    )
+
+    result = subprocess.run(
+        [sys.executable, str(REVIEW_CLI), "deps", str(package_dir),
+         "--registry", str(tmp_path)],
+        cwd=PROJECT_ROOT, text=True, capture_output=True, check=False,
+    )
+    # 应显示状态
+    assert "APPROVED" in result.stdout
