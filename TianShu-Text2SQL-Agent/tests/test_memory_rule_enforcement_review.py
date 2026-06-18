@@ -1038,10 +1038,11 @@ class TestIntegrationWithRealRules:
         ]
         assert len(active_blocking) > 0, "至少应有 1 条 active+blocking=true 规则"
 
-    def test_real_fast_gate_generates_enforcement(self):
+    def test_real_fast_gate_generates_enforcement(self, tmp_path):
         """真实 fast gate 可生成 enforcement 数据。"""
         result = subprocess.run(
-            [sys.executable, "harness/run_fast_gate.py", "--step", "3", "--json"],
+            [sys.executable, "harness/run_fast_gate.py", "--step", "3", "--json",
+             "--report-dir", str(tmp_path)],
             cwd=PROJECT_ROOT,
             capture_output=True,
             text=True,
@@ -1055,11 +1056,12 @@ class TestIntegrationWithRealRules:
             f"fast gate 应正常退出，stderr:\n{result.stderr[:500]}"
         )
 
-    def test_review_with_real_enforcement_data(self):
+    def test_review_with_real_enforcement_data(self, tmp_path):
         """使用真实 enforcement 数据运行审查。"""
         # 运行 fast gate 获取 enforcement 数据
         result = subprocess.run(
-            [sys.executable, "harness/run_fast_gate.py", "--step", "3", "--json"],
+            [sys.executable, "harness/run_fast_gate.py", "--step", "3", "--json",
+             "--report-dir", str(tmp_path)],
             cwd=PROJECT_ROOT,
             capture_output=True,
             text=True,

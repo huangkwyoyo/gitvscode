@@ -309,7 +309,7 @@ class TestFastGateWarnModeStep3:
             f"Markdown 不应包含「观察期」字样:\n{md[:500]}"
         )
 
-    def test_fast_gate_stdout_no_observation_notice(self):
+    def test_fast_gate_stdout_no_observation_notice(self, tmp_path):
         """观察期结束后，fast gate 输出不应再提示「观察期」"""
         import subprocess
         import sys
@@ -317,7 +317,8 @@ class TestFastGateWarnModeStep3:
 
         project_root = PROJECT_ROOT
         result = subprocess.run(
-            [sys.executable, "harness/run_fast_gate.py", "--step", "3"],
+            [sys.executable, "harness/run_fast_gate.py", "--step", "3",
+             "--report-dir", str(tmp_path)],
             cwd=project_root,
             capture_output=True,
             text=True,
