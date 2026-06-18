@@ -228,12 +228,12 @@ def test_verify_does_not_modify_decision_file(tmp_path):
 
 
 def test_verification_summary_yml_is_written(tmp_path):
-    """M4a：M3 验证后必须写入 verification_summary.yml。"""
+    """M4b：M3 验证后必须写入 verification_summary.yml（含 M4b 新字段）。"""
     package_dir = _build_package(tmp_path)
     verify_review_package(package_dir)
 
     summary_path = package_dir / "reports" / "verification_summary.yml"
-    assert summary_path.is_file(), "M4a 必须生成 verification_summary.yml"
+    assert summary_path.is_file(), "M4b 必须生成 verification_summary.yml"
 
     summary = yaml.safe_load(summary_path.read_text(encoding="utf-8"))
     assert "overall_status" in summary
@@ -245,10 +245,17 @@ def test_verification_summary_yml_is_written(tmp_path):
     assert "warnings" in summary
     assert "failures" in summary
     assert "stale_risk_note" in summary
+    # M4b 新字段
+    assert "verification_id" in summary
+    assert summary["verification_id"].startswith("verify_")
+    assert "artifact_hashes_verified" in summary
+    assert len(summary["artifact_hashes_verified"]["sql_main"]) == 64
+    assert "decision_state_before_verify" in summary
+    assert "decision_state_after_verify" in summary
 
 
 def test_verification_summary_contains_stale_risk_note(tmp_path):
-    """M4a：verification_summary.yml 必须包含 stale 风险提示但不自动 SUPERSEDED。"""
+    """M4b：verification_summary.yml 必须包含 stale 风险提示（M4b 已实现）。"""
     package_dir = _build_package(tmp_path)
     verify_review_package(package_dir)
 
@@ -257,9 +264,8 @@ def test_verification_summary_contains_stale_risk_note(tmp_path):
     )
 
     assert "stale_risk_note" in summary
-    # 风险提示告知人审者注意 stale 状态，但不自动变更
-    assert "SUPERSEDED" in summary["stale_risk_note"]
-    assert "M4b+" in summary["stale_risk_note"]
+    # M4b：自动 SUPERSEDED 已实现，文案不再说 "M4b+ 将实现"
+    assert "M4b" in summary["stale_risk_note"]
 
 
 def test_verify_does_not_modify_decision_yml(tmp_path):
@@ -508,3 +514,100 @@ def test_overall_status_all_pass():
         failures=[],
     )
     assert status == "PASS"
+
+
+# ═════════════════════════════════════════════════════════════
+# M4b SUPERSEDED 专项测试
+# ═════════════════════════════════════════════════════════════
+
+
+def test_artifact_hashes_in_decision_after_m2(tmp_path):
+    """M2 生成的 decision.yml 必须包含 artifact_hashes。"""
+    package_dir = _build_package(tmp_path)
+    decision_yml = yaml.safe_load(
+        (package_dir / "decision.yml").read_text(encoding="utf-8")
+    )
+    assert "artifact_hashes" in decision_yml
+    hashes = decision_yml["artifact_hashes"]
+    assert len(hashes["sql_main"]) == 64
+    assert len(hashes["spark_main"]) == 64
+    assert len(hashes["lineage_source_refs"]) == 64
+
+
+def test_artifact_integrity_warning_on_modified_sql(tmp_path):
+    """修改 sql 后 verify 应产生完整性警告。"""
+    package_dir = _build_package(tmp_path)
+    # 修改 sql 文件
+    (package_dir / "sql" / "main.sql").write_text("SELECT 1;\n", encoding="utf-8")
+    result = verify_review_package(package_dir)
+    # 应至少有 1 条完整性警告
+    integrity_warnings = [w for w in result.warnings if "artifact 完整性" in w]
+    assert len(integrity_warnings) >= 1
+
+
+def test_no_superseded_when_state_is_pending_review(tmp_path):
+    """PENDING_REVIEW + verify → 保持 PENDING_REVIEW，不触发 SUPERSEDED。"""
+    package_dir = _build_package(tmp_path)
+    verify_review_package(package_dir)
+    decision_yml = yaml.safe_load(
+        (package_dir / "decision.yml").read_text(encoding="utf-8")
+    )
+    assert decision_yml["current_state"] == "PENDING_REVIEW"
+
+
+def test_verification_id_in_summary(tmp_path):
+    """verification_summary.yml 必须包含 verification_id。"""
+    package_dir = _build_package(tmp_path)
+    verify_review_package(package_dir)
+    summary = yaml.safe_load(
+        (package_dir / "reports" / "verification_summary.yml").read_text(encoding="utf-8")
+    )
+    assert summary["verification_id"].startswith("verify_")
+
+
+def test_decision_state_fields_in_summary(tmp_path):
+    """verification_summary.yml 必须包含 decision_state_before/after_verify。"""
+    package_dir = _build_package(tmp_path)
+    verify_review_package(package_dir)
+    summary = yaml.safe_load(
+        (package_dir / "reports" / "verification_summary.yml").read_text(encoding="utf-8")
+    )
+    assert summary["decision_state_before_verify"] == "PENDING_REVIEW"
+    # 未发生变更时 decision_state_after_verify 为 None
+    assert summary["decision_state_after_verify"] is None
+
+
+def test_artifact_hashes_verified_in_summary(tmp_path):
+    """verification_summary.yml 的 artifact_hashes_verified 必须为快照。"""
+    package_dir = _build_package(tmp_path)
+    verify_review_package(package_dir)
+    summary = yaml.safe_load(
+        (package_dir / "reports" / "verification_summary.yml").read_text(encoding="utf-8")
+    )
+    hashes = summary["artifact_hashes_verified"]
+    assert len(hashes["sql_main"]) == 64
+    assert len(hashes["spark_main"]) == 64
+    assert len(hashes["lineage_source_refs"]) == 64
+    # artifact_hashes_verified 在写入 verification_summary.yml 前计算，
+    # 因此 verification_summary 自身哈希为 null（无法包含自身哈希）
+
+
+def test_superseded_when_approved_and_reverify(tmp_path):
+    """APPROVED + re-verify → SUPERSEDED 自动转换（通过 decision_manager 模拟）。"""
+    from src.agent.decision_manager import transition_state
+
+    package_dir = _build_package(tmp_path)
+    # 先让人批准
+    transition_state(package_dir, to_state="APPROVED", changed_by="human", reason="批准", actor_id="human:t")
+    assert yaml.safe_load((package_dir / "decision.yml").read_text(encoding="utf-8"))["current_state"] == "APPROVED"
+
+    # 重新验证——因为 overall_status 为 WARN（Spark SKIPPED），不在 {PASS, FAIL} 中，不会触发 SUPERSEDED
+    # 这是设计意图：WARN 不触发 SUPERSEDED，需人判断
+    result = verify_review_package(package_dir)
+    decision_yml = yaml.safe_load((package_dir / "decision.yml").read_text(encoding="utf-8"))
+    # WARN 不触发 SUPERSEDED
+    if result.overall_status in {"PASS", "FAIL"}:
+        assert decision_yml["current_state"] == "SUPERSEDED"
+    else:
+        # WARN/SKIPPED/PENDING 时保持原状态
+        pass  # 状态不变

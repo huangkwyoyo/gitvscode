@@ -6,11 +6,16 @@
 generated/results/
 generated/reports/
 generated/tasks/
+generated/review_packages/
 
 # 保留 generated 目录结构（README/样例/基线快照可提交）
 !generated/**/README.md
 !generated/**/.gitkeep
 !generated/**/baseline_*
+
+# 测试 golden fixture——不受 generated/ 忽略规则影响
+!tests/fixtures/review_packages/
+!tests/fixtures/review_packages/**
 
 # Python 缓存
 __pycache__/

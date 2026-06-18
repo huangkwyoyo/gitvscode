@@ -227,7 +227,7 @@ def test_decision_states_not_approved(tmp_path):
 
 
 def test_decision_yml_contains_required_fields(tmp_path):
-    """decision.yml 必须包含 M4a 规定的全部字段。"""
+    """decision.yml 必须包含 M4b 规定的全部字段（含 artifact_hashes）。"""
     req = _make_requirement()
     plan = _make_plan()
     drafts = _make_drafts()
@@ -245,6 +245,14 @@ def test_decision_yml_contains_required_fields(tmp_path):
     assert decision_yml["verification_report_ref"] == "reports/verification.md"
     assert decision_yml["verification_overall_status"] == "PENDING"
     assert decision_yml["human_decision_note"] == ""
+    # M4b：artifact_hashes 必须存在
+    assert "artifact_hashes" in decision_yml
+    hashes = decision_yml["artifact_hashes"]
+    assert len(hashes["sql_main"]) == 64
+    assert len(hashes["spark_main"]) == 64
+    assert len(hashes["lineage_source_refs"]) == 64
+    # M2 阶段 verification_summary hash 为 null
+    assert hashes["verification_summary"] is None
 
 
 def test_decision_yml_initial_state_not_approved(tmp_path):
@@ -279,6 +287,7 @@ def test_decision_log_yml_contains_creation_entry(tmp_path):
     assert entry["from_state"] is None
     assert entry["to_state"] == "PENDING_REVIEW"
     assert entry["changed_by"] == "agent"
+    assert entry["actor_id"] == "agent"  # M4b：actor_id 必须存在
     assert "timestamp" in entry
     assert "Review Package 创建" in entry["reason"]
 

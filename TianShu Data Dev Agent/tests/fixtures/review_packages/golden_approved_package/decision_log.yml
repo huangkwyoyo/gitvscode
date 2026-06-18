@@ -1,0 +1,14 @@
+request_id: trip_daily_report_m2
+entries:
+- timestamp: '2026-06-18T13:36:20.664302+00:00'
+  from_state: null
+  to_state: PENDING_REVIEW
+  changed_by: agent
+  actor_id: agent
+  reason: Review Package 创建，初始状态为 PENDING_REVIEW
+- timestamp: '2026-06-18T13:36:35.577435+00:00'
+  from_state: PENDING_REVIEW
+  to_state: APPROVED
+  changed_by: human
+  actor_id: human:fixture_user
+  reason: 人审通过，业务口径确认无误，WARN/SKIPPED 项已审查可接受

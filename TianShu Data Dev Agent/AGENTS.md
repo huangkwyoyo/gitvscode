@@ -522,7 +522,7 @@ scripts/dev_agent/                 ← v2 CLI 入口
 
 | 模块 | 状态 | 说明 |
 |------|------|------|
-| M2 Review Package 生成 | ✅ | `build_review_package()` → 7 文件审查材料包 |
+| M2 Review Package 生成 | ✅ | `build_review_package()` → 9 文件审查材料包 |
 | M2 双份代码草案 | ✅ | `dual_code_generator.py` 确定性生成 SQL + Spark DSL |
 | M2 审查材料包结构 | ✅ | `generated/review_packages/{request_id}/` 完整目录 |
 | M3 静态检查 | ✅ | `Validator.validate_static()` 5 项检查 |
@@ -531,8 +531,11 @@ scripts/dev_agent/                 ← v2 CLI 入口
 | M3 表访问权限 | ✅ | bronze/silver 禁止 + 可用表白名单 |
 | M3 JOIN 白名单合规 | ✅ | IR 路径 A + SQL 文本路径 B 双路径 |
 | M3 SQL 样本执行 | ✅ | `sandbox/executor.py`，只读 + LIMIT 1000 + 超时保护 |
-| M3 安全压实（3 缺口） | ✅ | G1/G2/G3 修复，529 测试零回归 |
+| M3 安全压实（3 缺口） | ✅ | G1/G2/G3 修复 |
+| **M4a 人审状态机最小实现** | ✅ | DecisionStatus enum + decision.yml + decision_log.yml + verification_summary.yml |
+| **M4b 状态机完整实现** | ✅ | SUPERSEDED 自动转换 + artifact_hashes + decision_manager + 人审 CLI |
 | v1 pipeline 保留 | ✅ | `scripts/pipeline/` 完整保留，143 测试通过 |
+| 测试 | ✅ | 581 passed，零回归 |
 
 ### 10.3 部分完成（PARTIAL）
 
@@ -540,26 +543,26 @@ scripts/dev_agent/                 ← v2 CLI 入口
 |------|------|------|
 | Spark 只读样本执行 | ⚠️ | `sandbox/spark_executor.py` 是桩，始终返回 SKIPPED/PENDING |
 | SQL/Spark 交叉验证 | ⚠️ | `verify/cross_validation.py` 逻辑完整，但输入缺失→始终 SKIPPED |
-| `decision.md` | ⚠️ | 已生成人审模板，但**不是程序化人审状态机** |
-| `src/agent/` 模块直接测试 | ✅ | 6 文件、142 测试覆盖 6 个 M2/M3 核心模块 |
+| 跨 package SUPERSEDED | ⚠️ | M4b 已实现同一 package 内 SUPERSEDED；跨 package 注册表待 M4c |
 
 ### 10.4 待完成（TODO）
 
 | 模块 | 状态 | 阻塞原因 |
 |------|------|---------|
-| 人审状态机 | ❌ | 尚未设计 |
 | 真实 SQL/Spark 交叉验证 | ❌ | 需 Spark 环境就绪 |
 | LLM 接入代码生成 | ❌ | 项目边界：当前不接真实 LLM API |
 | Prompt 回归系统 | ❌ | 需 LLM API |
 | ColumnBindingTable 动态加载增强 | ❌ | 当前 fallback 可用 |
 | 完整 DAG 端到端测试 | ❌ | 待规划 |
 | KEY_MERGE 增量策略 | ❌ | 未来里程碑 |
+| 跨 package SUPERSEDED（M4c） | ❌ | M4b artifact_hashes 基础已就绪 |
 
 ### 10.5 关键约束（不得违反）
 
 - LLM 产物即使未来接入，也只能是**不可信草案**，必须经过 Validator + sample run + 人审
 - 所有 SQL/Spark 草案**必须经过 Validator、sample run、人审**才能上线
-- **不能自动 APPROVE**——最终决策始终在人
+- **不能自动 APPROVE**——Agent 只能写入 PENDING_REVIEW 和 SUPERSEDED
 - **不能把 PENDING/SKIPPED 写成 PASS**——未执行就是未执行
-- **不能夸大当前能力**——Spark 未完整验证、decision.md 不是正式审批系统
+- **不能夸大当前能力**——Spark 未完整验证
 - **v1 pipeline 不删除、不重构**——保留为确定性验证底座
+- **Agent 能在 src/agent 中触发 SUPERSEDED，但不能触发 APPROVED/REQUEST_CHANGES/REJECTED**

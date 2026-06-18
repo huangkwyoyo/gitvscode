@@ -1,0 +1,28 @@
+request_id: trip_daily_report_m2
+source_tables:
+- name: gold.dws_daily_trip_summary
+  role: primary
+  source: TianShu Gold 层 G3 每日出行汇总表
+source_fields:
+- name: trip_date
+  table: gold.dws_daily_trip_summary
+  source: gold.dws_daily_trip_summary.trip_date
+metric_sources:
+- name: trip_count
+  field: trip_count
+  definition_source: meta.metric_definitions.trip_count
+- name: total_fare_amount
+  field: total_fare_amount
+  definition_source: meta.metric_definitions.total_fare_amount
+- name: total_distance_miles
+  field: total_distance_miles
+  definition_source: meta.metric_definitions.total_distance_miles
+filters:
+  date_range:
+  - '2026-01-01'
+  - '2026-03-31'
+grain:
+- trip_date
+human_review_points:
+- 'Human Review: 请确认 2026年Q1 日期范围是否符合业务口径。'
+- 'Human Review: 请确认使用 gold.dws_daily_trip_summary 作为唯一来源表是否满足需求。'

@@ -1,0 +1,13 @@
+request_id: trip_daily_report_m2
+current_state: PENDING_REVIEW
+human_review_required: true
+last_updated: '2026-06-18T13:36:20.662797+00:00'
+last_updated_by: agent
+verification_report_ref: reports/verification.md
+verification_overall_status: PENDING
+human_decision_note: ''
+artifact_hashes:
+  sql_main: 13d7625bed0b3682cc086403470b487ed6a44c6c2e5f754b5d72c5bf27aed49f
+  spark_main: 72e8da503b89cbae6b54f71ce3e339be288e1a94481111bc6175cbd730251ea3
+  lineage_source_refs: 4c61a296d4bba83db07025d1912c614a186d2c058328a63b536b66d83121ec57
+  verification_summary: null

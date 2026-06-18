@@ -136,6 +136,7 @@ Obsidian/
 | M3 SQL 样本执行 | ✅ | `sandbox/executor.py`，只读 + LIMIT 1000 + 超时保护 |
 | M3 安全压实（3 缺口闭合） | ✅ | `check_sample_execution` / `execute_sql` / `validate_context` 防御纵深 |
 | **M4a 人审状态机最小实现** | ✅ | DecisionStatus enum + decision.yml（机读权威状态）+ decision_log.yml（审计日志）+ verification_summary.yml（结构化摘要） |
+| **M4b 状态机完整实现** | ✅ | SUPERSEDED 自动转换 + artifact_hashes + decision_manager + 人审 CLI，581 测试零回归 |
 | 测试 | ✅ | 529 passed，零回归 |
 | `src/agent/` 模块直接测试 | ✅ | 6 文件、142 测试覆盖 6 个 M2/M3 核心模块 |
 
@@ -144,14 +145,15 @@ Obsidian/
 | 模块 | 状态 | 说明 |
 |------|------|------|
 | `reports/cross_validation.md` | ⚠️ | 逻辑完整，但始终 SKIPPED（Spark executor 是桩） |
-| `decision.md` + `decision.yml` | ⚠️ | M4a 已有程序化状态机基础（DecisionStatus enum + decision.yml），**人审 CLI 待 M4b 实现** |
+| `decision.md` + `decision.yml` | ✅ | M4b 完成程序化状态机（SUPERSEDED 自动转换 + 人审 CLI + artifact_hashes） |
+| 跨 package SUPERSEDED | ⚠️ | M4b 已实现同一 package 内 SUPERSEDED；跨 package 注册表待 M4c |
 | Spark 只读样本执行 | ⚠️ | `spark_executor.py` 始终返回 SKIPPED/PENDING |
 | SQL/Spark 双结果交叉验证 | ⚠️ | `cross_validation.py` 逻辑完整，输入缺失→始终 SKIPPED |
 ### ❌ TODO（待完成）
 
 | 模块 | 阻塞原因 |
 |------|---------|
-| 人审 CLI（M4b） | M4a 已完成 DecisionStatus + decision.yml/decision_log.yml/verification_summary.yml |
+| 跨 package SUPERSEDED（M4c） | M4b artifact_hashes 基础已就绪 |
 | LLM 接入代码生成 | 项目边界：当前不接真实 LLM API |
 | 真实 SQL/Spark 交叉验证 | 需 Spark 环境就绪 |
 | Prompt 回归系统 | 需 LLM API |

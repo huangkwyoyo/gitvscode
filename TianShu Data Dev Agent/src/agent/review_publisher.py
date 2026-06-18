@@ -3,6 +3,7 @@ Review Package 发布器。
 
 M2 阶段只写审查材料，不写生产数据。
 M4a：新增 decision.yml（机读权威状态）和 decision_log.yml（审计日志）。
+M4b：decision.yml 含 artifact_hashes；decision_log 含 actor_id。
 """
 
 from __future__ import annotations
@@ -13,8 +14,9 @@ from typing import Any
 
 import yaml
 
-from src.ir.types import DecisionRecord, DecisionStatus, ReviewPackageManifest
+from src.ir.types import ArtifactHashes, DecisionRecord, DecisionStatus, ReviewPackageManifest
 
+from .decision_manager import compute_artifact_hashes
 from .design_planner import DevPlan
 from .dual_code_generator import DualCodeDrafts
 from .requirement_analyzer import RequirementSpec
@@ -158,14 +160,18 @@ def _build_lineage(requirement: RequirementSpec, plan: DevPlan) -> dict[str, Any
     }
 
 
-def _build_decision_yml(requirement: RequirementSpec) -> dict[str, Any]:
-    """构造 decision.yml——机读权威状态源（M4a）。
+def _build_decision_yml(
+    requirement: RequirementSpec,
+    artifact_hashes: ArtifactHashes | None = None,
+) -> dict[str, Any]:
+    """构造 decision.yml——机读权威状态源（M4b）。
 
     Agent 只能写入 PENDING_REVIEW，绝不写入 APPROVED/REQUEST_CHANGES/REJECTED。
     verification_overall_status 初始为 PENDING——等 M3 运行后才更新。
+    artifact_hashes 记录生成时的代码哈希——M4b 完整性校验基础。
     """
     now_iso = datetime.now(timezone.utc).isoformat()
-    return {
+    result: dict[str, Any] = {
         "request_id": requirement.request_id,
         "current_state": DecisionStatus.PENDING_REVIEW.value,
         "human_review_required": True,
@@ -175,12 +181,16 @@ def _build_decision_yml(requirement: RequirementSpec) -> dict[str, Any]:
         "verification_overall_status": "PENDING",
         "human_decision_note": "",
     }
+    if artifact_hashes is not None:
+        result["artifact_hashes"] = artifact_hashes.to_dict()
+    return result
 
 
 def _build_decision_log_yml(requirement: RequirementSpec) -> dict[str, Any]:
-    """构造 decision_log.yml 初始审计日志（M4a）。
+    """构造 decision_log.yml 初始审计日志（M4b）。
 
     记录 Review Package 创建事件——这是审计链的起点。
+    actor_id 为 "agent"——M4b 新增字段。
     """
     now_iso = datetime.now(timezone.utc).isoformat()
     return {
@@ -191,6 +201,7 @@ def _build_decision_log_yml(requirement: RequirementSpec) -> dict[str, Any]:
                 "from_state": None,
                 "to_state": DecisionStatus.PENDING_REVIEW.value,
                 "changed_by": "agent",
+                "actor_id": "agent",
                 "reason": "Review Package 创建，初始状态为 PENDING_REVIEW",
             },
         ],
@@ -203,12 +214,17 @@ def publish_review_package(
     drafts: DualCodeDrafts,
     output_root: str | Path = "generated/review_packages",
 ) -> ReviewPackageManifest:
-    """写出完整 Review Package 并返回 manifest"""
+    """写出完整 Review Package 并返回 manifest。
+
+    M4b 变更：先写代码和报告文件，计算 artifact 哈希，
+    再将哈希写入 decision.yml——保证哈希与文件一致。
+    """
     root = Path(output_root)
     package_dir = root / requirement.request_id
     for rel in ["sql", "spark", "tests", "reports", "lineage"]:
         (package_dir / rel).mkdir(parents=True, exist_ok=True)
 
+    # 阶段 1：写所有代码和报告文件（decision.yml/decision_log.yml 除外）
     _write_text(package_dir / "sql" / "main.sql", drafts.sql.content)
     _write_text(package_dir / "spark" / "main.py", drafts.spark.content)
     _write_text(package_dir / "tests" / "test_generated.py", _build_test_stub(requirement))
@@ -218,12 +234,20 @@ def publish_review_package(
         package_dir / "lineage" / "source_refs.yml",
         yaml.safe_dump(_build_lineage(requirement, plan), allow_unicode=True, sort_keys=False),
     )
-    decision = DecisionRecord(notes=plan.human_review_points + drafts.pending_items)
+
+    # M4b：计算 artifact 哈希（在 decision.yml 写入之前）
+    artifact_hashes = compute_artifact_hashes(package_dir)
+
+    # 阶段 2：写 decision 文件（含 artifact 哈希）
+    decision = DecisionRecord(
+        notes=plan.human_review_points + drafts.pending_items,
+        artifact_hashes=artifact_hashes,
+    )
     _write_text(package_dir / "decision.md", _build_decision_md(decision, plan, drafts))
     _write_text(
         package_dir / "decision.yml",
         yaml.safe_dump(
-            _build_decision_yml(requirement),
+            _build_decision_yml(requirement, artifact_hashes=artifact_hashes),
             allow_unicode=True,
             sort_keys=False,
         ),

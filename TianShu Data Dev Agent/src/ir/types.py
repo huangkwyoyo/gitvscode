@@ -105,17 +105,40 @@ class CrossValidateStatus(str, Enum):
 
 
 class DecisionStatus(str, Enum):
-    """人审决策状态——M4a 最小实现。
+    """人审决策状态——M4b 状态机完整实现。
 
     Agent 只能写入 PENDING_REVIEW。
-    APPROVED / REQUEST_CHANGES / REJECTED 只能由人设置。
-    SUPERSEDED 为 M4b+ 预留——当前允许定义但不自动变更。
+    APPROVED / REQUEST_CHANGES / REJECTED 只能由人通过 CLI 设置。
+    SUPERSEDED 由 M3 重新验证且旧状态为 APPROVED 时自动触发。
     """
     PENDING_REVIEW = "PENDING_REVIEW"       # 等待人审（Agent 初始写入）
     APPROVED = "APPROVED"                   # 人审通过（仅人可设置）
     REQUEST_CHANGES = "REQUEST_CHANGES"     # 人审要求修改（仅人可设置）
     REJECTED = "REJECTED"                   # 人审拒绝（仅人可设置）
-    SUPERSEDED = "SUPERSEDED"               # 被新验证替代（M4b+ 自动过渡）
+    SUPERSEDED = "SUPERSEDED"               # 被新验证替代（M4b 自动过渡）
+
+
+@dataclass
+class ArtifactHashes:
+    """artifact SHA-256 哈希集合——M4b 完整性校验基础。
+
+    记录 Review Package 中关键文件的 SHA-256 哈希，
+    用于检测批准后代码是否被修改，以及验证是否针对当前代码执行。
+    verification_summary 在 M2 阶段为 None，M3 运行后填充。
+    """
+    sql_main: str = ""
+    spark_main: str = ""
+    lineage_source_refs: str = ""
+    verification_summary: Optional[str] = None
+
+    def to_dict(self) -> dict[str, Any]:
+        """序列化为字典"""
+        return {
+            "sql_main": self.sql_main,
+            "spark_main": self.spark_main,
+            "lineage_source_refs": self.lineage_source_refs,
+            "verification_summary": self.verification_summary,
+        }
 
 
 # ═══════════════════════════════════════════════════════════
@@ -660,10 +683,11 @@ class CodeDraft:
 
 @dataclass
 class DecisionRecord:
-    """人审决策记录——M4a 状态机核心。
+    """人审决策记录——M4b 状态机核心。
 
     current_state 为机读权威状态源（decision.yml）。
     Agent 只能写入 PENDING_REVIEW；APPROVED/REQUEST_CHANGES/REJECTED 仅人可设置。
+    artifact_hashes 记录生成时的代码哈希——M4b 完整性校验基础。
     """
     current_state: DecisionStatus = DecisionStatus.PENDING_REVIEW
     options: list[str] = field(default_factory=lambda: [
@@ -673,15 +697,19 @@ class DecisionRecord:
     ])
     human_review_required: bool = True
     notes: list[str] = field(default_factory=list)
+    artifact_hashes: Optional[ArtifactHashes] = None
 
     def to_dict(self) -> dict[str, Any]:
         """序列化为字典"""
-        return {
+        result: dict[str, Any] = {
             "current_state": self.current_state.value,
             "options": self.options,
             "human_review_required": self.human_review_required,
             "notes": self.notes,
         }
+        if self.artifact_hashes is not None:
+            result["artifact_hashes"] = self.artifact_hashes.to_dict()
+        return result
 
 
 @dataclass
