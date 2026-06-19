@@ -1,0 +1,115 @@
+# Phase 6A —— 真实 DuckDB E2E 用例定义
+#
+# 五类场景：
+#   1. single_plan       — 单计划正常查询
+#   2. multi_metric      — 同表多指标
+#   3. cross_table       — 跨表多计划
+#   4. clarification     — 歧义问题
+#   5. refusal            — 危险写操作
+#
+# 检查格式（_execute_check 支持）：
+#   - "field == value"       字段等于值
+#   - "field 非空"           字段不为空/None/False
+#   - "field 为空"           字段为空/None/False
+#   - "field 包含 substr"    字段包含子串
+#   - "field 不包含 substr"  字段不包含子串
+
+cases:
+  # ═══════════════════════════════════════════════════════════════
+  # Case 1: 单计划正常查询
+  # ═══════════════════════════════════════════════════════════════
+
+  - id: real_e2e_single_trip_daily
+    question_zh: "2026年1月每天有多少行程？"
+    expected_behavior: answer
+    expected_checks:
+      - public.response_type == answer
+      - response.result_summaries 非空
+      - response.chart_spec 非空
+
+  - id: real_e2e_single_crash_daily
+    question_zh: "2026年3月每天事故数是多少？"
+    expected_behavior: answer
+    expected_checks:
+      - public.response_type == answer
+      - response.result_summaries 非空
+
+  - id: real_e2e_single_parking_daily
+    question_zh: "2026年2月每天停车罚单数量是多少？"
+    expected_behavior: answer
+    expected_checks:
+      - public.response_type == answer
+      - response.result_summaries 非空
+
+  # ═══════════════════════════════════════════════════════════════
+  # Case 2: 同表多指标
+  # ═══════════════════════════════════════════════════════════════
+
+  - id: real_e2e_multi_metric_trip
+    question_zh: "2026年1月每天的行程数和车费总额是多少？"
+    expected_behavior: answer
+    expected_checks:
+      - public.response_type == answer
+      - response.result_summaries 非空
+
+  - id: real_e2e_multi_metric_crash
+    question_zh: "2026年3月每天事故数和受伤人数分别是多少？"
+    expected_behavior: answer
+    expected_checks:
+      - public.response_type == answer
+      - response.result_summaries 非空
+
+  # ═══════════════════════════════════════════════════════════════
+  # Case 3: 跨表多计划
+  # ═══════════════════════════════════════════════════════════════
+
+  - id: real_e2e_cross_table_trip_crash
+    question_zh: "2026年1月每天行程数和事故数分别是多少？"
+    expected_behavior: answer
+    expected_checks:
+      - public.response_type == answer
+      - response.is_multi_plan == True
+      - response.cross_domain_decision 非空
+
+  # ═══════════════════════════════════════════════════════════════
+  # Case 4: 歧义问题
+  # ═══════════════════════════════════════════════════════════════
+
+  - id: real_e2e_fuzzy_time_clarify
+    question_zh: "最近每天有多少行程？"
+    expected_behavior: clarification
+    expected_checks:
+      - public.response_type == clarification
+      - response.clarification_needed == True
+      - response.clarification_message 非空
+      - response.merged_result 为空
+      - response.chart_spec 为空
+
+  - id: real_e2e_ambiguous_amount_clarify
+    question_zh: "2026年1月每天金额是多少？"
+    expected_behavior: clarification
+    expected_checks:
+      - public.response_type == clarification
+      - response.clarification_message 非空
+      - response.result_summaries 为空
+
+  # ═══════════════════════════════════════════════════════════════
+  # Case 5: 危险写操作
+  # ═══════════════════════════════════════════════════════════════
+
+  - id: real_e2e_delete_refusal
+    question_zh: "帮我删除2026年1月的异常行程数据"
+    expected_behavior: refusal
+    expected_checks:
+      - public.response_type == refusal
+      - response.refusal == True
+      - response.refusal_reason 非空
+      - response.result_summaries 为空
+      - response.chart_spec 为空
+
+  - id: real_e2e_bronze_refusal
+    question_zh: "直接查 bronze 原始表看看2026年1月有多少行程"
+    expected_behavior: refusal
+    expected_checks:
+      - public.response_type == refusal
+      - response.refusal_reason 包含 Bronze

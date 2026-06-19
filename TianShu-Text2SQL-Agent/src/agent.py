@@ -66,6 +66,7 @@ from .result_fusion import (
 )
 from .result_summary import summarize_sql_result
 from .cross_domain_policy import CrossDomainPolicy, CrossDomainDecision
+from .chart_spec import build_chart_spec_from_summary, build_chart_spec_from_merged_result
 from .llm import LLMClient, LLMRequest, PromptLoader
 from .llm_adapter import RefusalDetected
 from .llm_pipeline import extract_json_object, question_intent_from_dict, sql_plan_from_dict
@@ -609,6 +610,48 @@ class Text2SQLAgent:
                 all_warnings = list(merged.merge_warnings) + policy_decision.warnings
                 merged.merge_warnings = all_warnings
 
+            # ── Phase 6A：构建 summaries 并存入 response ──
+            summaries: list[Any] = []  # list[ResultSummary]
+            for i, ur in enumerate(unified_responses):
+                plan_index = i + 1
+                try:
+                    summary = summarize_sql_result(ur, plan_index=plan_index)
+                    summaries.append(summary)
+                except Exception:
+                    # 单个摘要构建失败时保持流程继续
+                    pass
+            response.result_summaries = [s.to_dict() for s in summaries]
+
+            # ── Phase 6A：存储 merged / policy decision ──
+            response.merged_result = merged.to_dict() if merged else None
+            response.cross_domain_decision = policy_decision.to_dict() if policy_decision else None
+            response.warnings = list(policy_decision.warnings) if policy_decision else []
+            response.execution_mode = "parallel" if parallel else "serial"
+
+            # ── Phase 6A：生成 ChartSpec ──
+            try:
+                if merged is not None and merged.merge_status.value == "merged":
+                    response.chart_spec = build_chart_spec_from_merged_result(
+                        merged,
+                        cross_domain_warning=(
+                            policy_decision.reason
+                            if policy_decision and not policy_decision.allow_causal_language
+                            else None
+                        ),
+                    ).to_dict()
+                elif summaries:
+                    response.chart_spec = build_chart_spec_from_summary(
+                        summaries[0],
+                        cross_domain_warning=(
+                            policy_decision.reason
+                            if policy_decision and not policy_decision.allow_causal_language
+                            else None
+                        ),
+                    ).to_dict()
+            except Exception:
+                # ChartSpec 生成失败不阻断主流程
+                pass
+
             response.chinese_answer = self._fuse_results_with_llm(
                 question=question,
                 unified_responses=unified_responses,
@@ -693,6 +736,27 @@ class Text2SQLAgent:
 
             if result.error:
                 response.trace.append(f"         [ERROR] {result.error}")
+
+        # ── Phase 6A：单计划结构化产物 ──
+        if not response.clarification_needed and not response.refusal and response.result is not None:
+            try:
+                # 构造临时 UnifiedResponse 以复用 summarize_sql_result
+                temp_ur = UnifiedResponse(
+                    sub_intent=SubIntent(
+                        metrics=response.intent.metrics if response.intent else [],
+                        domain=response.intent.domain if response.intent else None,
+                        planning_table=response.plan.primary_table if response.plan else "",
+                    ),
+                    plan=response.plan,
+                    result=response.result,
+                )
+                summary = summarize_sql_result(temp_ur, plan_index=1)
+                response.result_summaries = [summary.to_dict()]
+                response.chart_spec = build_chart_spec_from_summary(summary).to_dict()
+            except Exception:
+                # 摘要/图表生成失败不阻断主流程
+                pass
+        response.execution_mode = "single"
 
         # ── Step 6: 中文解释 ──
         response.trace.append("[STEP 6] 生成解释...")

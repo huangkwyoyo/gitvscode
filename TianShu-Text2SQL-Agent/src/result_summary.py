@@ -105,6 +105,9 @@ def summarize_sql_result(
     # ── 提取样本行（前 5 行，值转为可序列化格式）──
     sample_rows = _extract_sample_rows(result.rows, result.column_types, max_rows=5)
 
+    # ── 确保列类型全是字符串（DuckDB 可能返回 DuckDBPyType 对象）──
+    safe_column_types = [str(ct) for ct in result.column_types]
+
     return ResultSummary(
         source_plan_index=plan_index,
         metrics=metrics,
@@ -112,7 +115,7 @@ def summarize_sql_result(
         primary_table=primary_table,
         strategy=strategy,
         columns=list(result.columns),
-        column_types=list(result.column_types),
+        column_types=safe_column_types,
         row_count=result.row_count,
         sample_rows=sample_rows,
         has_date_column=has_date,

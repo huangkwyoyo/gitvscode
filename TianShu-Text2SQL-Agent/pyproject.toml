@@ -28,6 +28,9 @@ tianshu-ask = "src.agent:main"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
+markers = [
+    "real_duckdb: 需要真实 DuckDB 数据库连接的端到端测试（默认不运行）",
+]
 
 [tool.ruff]
 line-length = 100

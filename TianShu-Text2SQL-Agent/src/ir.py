@@ -560,9 +560,16 @@ class AgentResponse:
     # ── Phase 2B：多计划支持 ──
     is_multi_plan: bool = False                       # 是否为多计划响应
     plans: list[UnifiedResponse] = field(default_factory=list)  # 子计划列表
+    # ── Phase 6A：结构化执行产物 ──
+    result_summaries: list = field(default_factory=list)   # list[ResultSummary.to_dict()]
+    merged_result: Optional[dict] = None                   # MergedResult.to_dict()
+    cross_domain_decision: Optional[dict] = None           # CrossDomainDecision.to_dict()
+    chart_spec: Optional[dict] = None                      # ChartSpec.to_dict()
+    warnings: list[str] = field(default_factory=list)      # 全局警告（跨域/安全等）
+    execution_mode: str = ""                                # single / serial / parallel / offline
 
     def to_dict(self) -> dict[str, Any]:
-        """序列化为字典"""
+        """序列化为字典（向后兼容，旧字段不变，新增字段增量添加）"""
         return {
             "question": self.question,
             "intent": self.intent.to_dict() if self.intent else None,
@@ -576,4 +583,11 @@ class AgentResponse:
             "trace": self.trace,
             "is_multi_plan": self.is_multi_plan,
             "plans": [p.to_dict() for p in self.plans],
+            # ── Phase 6A 新增字段 ──
+            "result_summaries": self.result_summaries,
+            "merged_result": self.merged_result,
+            "cross_domain_decision": self.cross_domain_decision,
+            "chart_spec": self.chart_spec,
+            "warnings": self.warnings,
+            "execution_mode": self.execution_mode,
         }

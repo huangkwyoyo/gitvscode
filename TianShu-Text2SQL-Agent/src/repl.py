@@ -32,11 +32,22 @@ def _print_banner(agent: Text2SQLAgent):
 
 
 def _format_answer(response: AgentResponse) -> str:
-    """格式化最终回答"""
+    """格式化最终回答（含 Phase 6A 结构化产物提示）"""
     lines: list[str] = []
 
     if response.chinese_answer:
         lines.append(f"\n📊 {response.chinese_answer}")
+
+    # ── Phase 6A：结构化产物提示 ──
+    if response.warnings:
+        for w in response.warnings[:3]:  # 最多展示前 3 条警告
+            lines.append(f"   ⚠️  {w}")
+
+    if response.chart_spec:
+        chart_type = response.chart_spec.get("chart_type", "") if isinstance(response.chart_spec, dict) else ""
+        if chart_type:
+            type_labels = {"line": "📈 折线图", "bar": "📊 柱状图", "table": "📋 表格", "metric_card": "🔢 指标卡"}
+            lines.append(f"   {type_labels.get(chart_type, chart_type)} 可用")
 
     # 补充元信息
     if response.result:
