@@ -318,8 +318,8 @@ rules:
   # ═════════════════════════════════════════════════════════════════════════════
   - rule_id: TA-R020
     title: "ExecutionStrategy 并发安全边界——默认串行、DuckDB 连接不跨线程共享、每个 plan 独立安全校验"
-    status: proposed
-    blocking: false
+    status: active
+    blocking: true
     severity: high
     source_memory: "Phase 3 架构设计——ExecutionStrategy 执行策略"
     risk_ids:
@@ -333,7 +333,7 @@ rules:
       - tests/test_execution_strategy.py
     required_evals:
       - evals/e2e_cases.yml
-    notes: "并发默认关闭，DuckDB connection 不可跨线程共享，每个 plan 必须独立走 validate_sql_safety()。"
+    notes: "2026-06-19 晋升 active+blocking=true，审批人: huangkwyoyo (HAR-TA-R020-20260619T230110)，基于 Step 25 Blocking Expansion Readiness Review。并发默认关闭，DuckDB connection 不可跨线程共享，每个 plan 必须独立走 validate_sql_safety()。"
 
   # ═════════════════════════════════════════════════════════════════════════════
   # TA-R021: ResultSummary 是下游的结构化输入
