@@ -569,10 +569,17 @@ scripts/dev_agent/                 ← v2 CLI 入口
 | SQL/Spark 交叉验证 | ⚠️ | `verify/cross_validation.py` 逻辑完整，但输入缺失→始终 SKIPPED |
 | 跨 package SUPERSEDED 传播 | ✅ | M4c 已实现——注册表 + 自动传播 + 一致性检查 |
 
-### 10.4 待完成（TODO）
+### 10.4 部分完成（PARTIAL）——新增
+
+| 模块 | 状态 | 说明 |
+|------|------|------|
+| **M5b-0 设计与威胁模型** | ✅ | `docs/m5b_duckdb_sandbox_design.md`——一次性可写 DuckDB Sandbox 设计完成 |
+
+### 10.5 待完成（TODO）
 
 | 模块 | 状态 | 阻塞原因 |
 |------|------|---------|
+| **M5b-1 DuckDB CTAS Sandbox** | 🔵 设计完成，待实现 | 本阶段只设计，不实现 |
 | 真实 SQL/Spark 交叉验证 | ❌ | 需 Spark 环境就绪 |
 | LLM 接入代码生成 | ❌ | 项目边界：当前不接真实 LLM API |
 | Prompt 回归系统 | ❌ | 需 LLM API |
