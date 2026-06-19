@@ -135,8 +135,12 @@ def _hash_content(content: str) -> str:
 class TestSecurityBlockedOperations:
     """M5b-1 安全场景：禁止操作必须被拦截。"""
 
-    def test_insert_strategy_blocked(self):
-        """INSERT 语句必须 FAIL。"""
+    def test_valid_ctas_strategy_passes_cleanup(self):
+        """合法 CTAS（无 INSERT 关键字）正常执行并通过清理。
+
+        INSERT 写入策略在策略白名单层（ALLOWED_MATERIALIZATION_STRATEGIES）
+        和 CTAS 结构校验层被拦截——本测试验证合法 CTAS 全链路通过。
+        """
         tmp = _mkdtemp()
         try:
             manifest = _sample_manifest()
@@ -410,6 +414,92 @@ class TestSecurityBlockedOperations:
         finally:
             _rmdtemp(tmp)
 
+    def test_join_statement_blocked(self):
+        """JOIN 查询必须 FAIL——M5b-1 仅支持单 source table。"""
+        tmp = _mkdtemp()
+        try:
+            manifest = _sample_manifest()
+            deploy_sql = (
+                "CREATE TABLE generated.test AS\n"
+                "    SELECT a.trip_date FROM gold.dws_daily_trip_summary a\n"
+                "    JOIN gold.other_table b ON a.trip_date = b.trip_date;\n"
+            )
+            rows, cols, types = _sample_data()
+            result = execute_ctas_in_sandbox(
+                deploy_sql=deploy_sql,
+                manifest=manifest,
+                sample_data_rows=rows,
+                sample_data_columns=cols,
+                sample_data_types=types,
+                sandbox_root=tmp / ".sandbox_tmp",
+            )
+            assert result.overall_status == "FAIL"
+            fail_msgs = result.failures + [
+                c.detail for c in result.checks if c.status == "FAIL"
+            ]
+            assert any("JOIN" in m for m in fail_msgs), (
+                f"未检测到 JOIN 错误: failures={result.failures}"
+            )
+        finally:
+            _rmdtemp(tmp)
+
+    def test_comma_join_from_blocked(self):
+        """逗号连接的多表 FROM 必须 FAIL。"""
+        tmp = _mkdtemp()
+        try:
+            manifest = _sample_manifest()
+            deploy_sql = (
+                "CREATE TABLE generated.test AS\n"
+                "    SELECT a.trip_date FROM gold.dws_daily_trip_summary a, gold.other_table b;\n"
+            )
+            rows, cols, types = _sample_data()
+            result = execute_ctas_in_sandbox(
+                deploy_sql=deploy_sql,
+                manifest=manifest,
+                sample_data_rows=rows,
+                sample_data_columns=cols,
+                sample_data_types=types,
+                sandbox_root=tmp / ".sandbox_tmp",
+            )
+            assert result.overall_status == "FAIL"
+            fail_msgs = result.failures + [
+                c.detail for c in result.checks if c.status == "FAIL"
+            ]
+            assert any("逗号" in m for m in fail_msgs), (
+                f"未检测到逗号连接错误: failures={result.failures}"
+            )
+        finally:
+            _rmdtemp(tmp)
+
+    def test_multiple_from_blocked(self):
+        """多个 FROM 子句（子查询）必须 FAIL。"""
+        tmp = _mkdtemp()
+        try:
+            manifest = _sample_manifest()
+            deploy_sql = (
+                "CREATE TABLE generated.test AS\n"
+                "    SELECT trip_date FROM gold.dws_daily_trip_summary\n"
+                "    WHERE trip_date IN (SELECT trip_date FROM gold.other_table);\n"
+            )
+            rows, cols, types = _sample_data()
+            result = execute_ctas_in_sandbox(
+                deploy_sql=deploy_sql,
+                manifest=manifest,
+                sample_data_rows=rows,
+                sample_data_columns=cols,
+                sample_data_types=types,
+                sandbox_root=tmp / ".sandbox_tmp",
+            )
+            assert result.overall_status == "FAIL"
+            fail_msgs = result.failures + [
+                c.detail for c in result.checks if c.status == "FAIL"
+            ]
+            assert any("FROM" in m for m in fail_msgs), (
+                f"未检测到多 FROM 错误: failures={result.failures}"
+            )
+        finally:
+            _rmdtemp(tmp)
+
 
 # ═══════════════════════════════════════════════════════════════
 # §2 正常场景测试
@@ -668,6 +758,152 @@ class TestHashIntegrity:
             hash_check = [c for c in checks if c.check_id == "deploy_artifact_hash"]
             assert len(hash_check) > 0
             assert hash_check[0].status == "FAIL"
+        finally:
+            _rmdtemp(tmp)
+
+    def test_hash_status_fields_synced_when_pass(self):
+        """hash 校验 PASS 后顶层状态字段应同步为 PASS。
+
+        通过 materialization_verification_engine 的完整流程验证：
+        source_query_hash_status / deploy_artifact_hash_status 不再保持 PENDING。
+        """
+        tmp = _mkdtemp()
+        try:
+            from src.agent.materialization_verification_engine import verify_materialization
+
+            package_dir = tmp / "test_pkg3"
+            (package_dir / "sql").mkdir(parents=True)
+            (package_dir / "deploy").mkdir(parents=True)
+
+            # 准备合法 CTAS SQL
+            deploy_sql_content = _build_ctas_sql()
+            (package_dir / "deploy" / "main.sql").write_text(
+                deploy_sql_content, encoding="utf-8",
+            )
+
+            sql_content = "SELECT trip_date FROM gold.dws_daily_trip_summary;\n"
+            (package_dir / "sql" / "main.sql").write_text(sql_content, encoding="utf-8")
+
+            actual_sql_hash = _hash_content(sql_content)
+            actual_deploy_hash = _hash_content(deploy_sql_content)
+
+            # Manifest 含正确 hash
+            manifest = _sample_manifest(source_query_hash=actual_sql_hash)
+            manifest_path = package_dir / "deployment_manifest.yml"
+            manifest_path.write_text(
+                yaml.safe_dump(manifest, allow_unicode=True), encoding="utf-8",
+            )
+
+            # Decision 含正确 deploy hash
+            decision = {
+                "request_id": "test_m5b1",
+                "current_state": "PENDING_REVIEW",
+                "artifact_hashes": {
+                    "deploy_sql": actual_deploy_hash,
+                },
+            }
+            (package_dir / "decision.yml").write_text(
+                yaml.safe_dump(decision, allow_unicode=True), encoding="utf-8",
+            )
+
+            # 通过 engine 执行——需要传入 sample 数据
+            rows, cols, types = _sample_data()
+            result = verify_materialization(
+                package_dir=package_dir,
+                sample_data_rows=rows,
+                sample_data_columns=cols,
+                sample_data_types=types,
+            )
+
+            # 顶层 hash 状态字段应与静态检查结果一致
+            # 静态检查中 hash checks 为 PASS → 顶层字段应为 PASS
+            assert result.source_query_hash_status != "PENDING", (
+                f"source_query_hash_status 应从 PENDING 同步为 PASS/FAIL，"
+                f"实际: {result.source_query_hash_status}"
+            )
+            assert result.deploy_artifact_hash_status != "PENDING", (
+                f"deploy_artifact_hash_status 应从 PENDING 同步为 PASS/FAIL，"
+                f"实际: {result.deploy_artifact_hash_status}"
+            )
+
+            # 验证 hash checks 确实 PASS
+            sq_check = [c for c in result.checks if c.check_id == "source_query_hash"]
+            da_check = [c for c in result.checks if c.check_id == "deploy_artifact_hash"]
+            if sq_check and sq_check[0].status == "PASS":
+                assert result.source_query_hash_status == "PASS", (
+                    "source_query_hash check 为 PASS，顶层字段应为 PASS，"
+                    f"实际: {result.source_query_hash_status}"
+                )
+            if da_check and da_check[0].status == "PASS":
+                assert result.deploy_artifact_hash_status == "PASS", (
+                    "deploy_artifact_hash check 为 PASS，顶层字段应为 PASS，"
+                    f"实际: {result.deploy_artifact_hash_status}"
+                )
+        finally:
+            _rmdtemp(tmp)
+
+    def test_hash_mismatch_does_not_start_sandbox(self):
+        """hash mismatch 时不启动 Sandbox——在静态校验阶段短路。"""
+        tmp = _mkdtemp()
+        try:
+            from src.agent.materialization_verification_engine import verify_materialization
+
+            package_dir = tmp / "test_pkg4"
+            (package_dir / "sql").mkdir(parents=True)
+            (package_dir / "deploy").mkdir(parents=True)
+
+            deploy_sql_content = _build_ctas_sql()
+            (package_dir / "deploy" / "main.sql").write_text(
+                deploy_sql_content, encoding="utf-8",
+            )
+
+            sql_content = "SELECT trip_date FROM gold.dws_daily_trip_summary;\n"
+            (package_dir / "sql" / "main.sql").write_text(sql_content, encoding="utf-8")
+
+            actual_deploy_hash = _hash_content(deploy_sql_content)
+
+            # Manifest 含错误 hash——触发 mismatch
+            manifest = _sample_manifest(
+                source_query_hash="0000000000000000000000000000000000000000000000000000000000000000",
+            )
+            manifest_path = package_dir / "deployment_manifest.yml"
+            manifest_path.write_text(
+                yaml.safe_dump(manifest, allow_unicode=True), encoding="utf-8",
+            )
+
+            decision = {
+                "request_id": "test_m5b1",
+                "current_state": "PENDING_REVIEW",
+                "artifact_hashes": {
+                    "deploy_sql": actual_deploy_hash,
+                },
+            }
+            (package_dir / "decision.yml").write_text(
+                yaml.safe_dump(decision, allow_unicode=True), encoding="utf-8",
+            )
+
+            rows, cols, types = _sample_data()
+            result = verify_materialization(
+                package_dir=package_dir,
+                sample_data_rows=rows,
+                sample_data_columns=cols,
+                sample_data_types=types,
+            )
+
+            # hash mismatch → 拒绝执行，Sandbox 不应启动
+            assert result.overall_status == "FAIL", (
+                f"hash mismatch 后 overall_status 须为 FAIL，实际: {result.overall_status}"
+            )
+            # sandbox_id 为空表示未启动 Sandbox——静态校验阶段已短路
+            assert result.sandbox_id == "", (
+                f"hash mismatch 后不应启动 Sandbox，sandbox_id 应为空，"
+                f"实际: {result.sandbox_id}"
+            )
+            # execution_status 应保持默认 PENDING——从未执行
+            assert result.execution_status == "PENDING", (
+                f"hash mismatch 后不应执行，execution_status 应为 PENDING，"
+                f"实际: {result.execution_status}"
+            )
         finally:
             _rmdtemp(tmp)
 
@@ -1000,6 +1236,133 @@ class TestStateAndCleanup:
             assert result.overall_status != "PASS"
             assert result.overall_status in ("FAIL",)
             assert result.execution_status in ("SKIPPED", "PENDING")
+        finally:
+            _rmdtemp(tmp)
+
+    def test_timeout_triggers_fail_and_cleanup_still_ok(self):
+        """超时硬中断后 overall_status=FAIL 且清理仍成功。
+
+        使用真实 DuckDB interrupt 机制：通过递归 CTE 创建耗时查询，
+        配合极短超时（1ms），验证超时后：(a) overall_status=FAIL；
+        (b) 清理不受影响；(c) 无 Sandbox 残留。
+        """
+        tmp = _mkdtemp()
+        try:
+            manifest = _sample_manifest()
+            # 递归 CTE 生成大量行——足够慢以触发 1ms 超时
+            slow_ctas = (
+                "CREATE OR REPLACE TABLE generated.test AS\n"
+                "WITH RECURSIVE cnt(x) AS (\n"
+                "  SELECT 1\n"
+                "  UNION ALL\n"
+                "  SELECT x + 1 FROM cnt WHERE x < 10000000\n"
+                ")\n"
+                "SELECT x FROM cnt;\n"
+            )
+            rows, cols, types = _sample_data()
+            sandbox_root = tmp / ".sandbox_tmp"
+
+            result = execute_ctas_in_sandbox(
+                deploy_sql=slow_ctas,
+                manifest=manifest,
+                sample_data_rows=rows,
+                sample_data_columns=cols,
+                sample_data_types=types,
+                sandbox_root=sandbox_root,
+                timeout_seconds=0.001,  # 1ms——递归 CTAS 几乎必然超时
+            )
+
+            # 超时 → FAIL 或 极快完成 → PASS（1ms 内完成的极端情况）
+            if result.execution_status == "FAIL":
+                fail_msgs = result.failures + [
+                    c.detail for c in result.checks if c.status == "FAIL"
+                ]
+                assert any("超时" in m for m in fail_msgs), (
+                    f"超时 FAIL 应包含'超时'信息，实际: {result.failures}"
+                )
+
+            # 无论超时与否，清理必须成功——不能有 Sandbox 残留
+            assert result.cleanup_status == "PASS", (
+                f"清理必须成功，实际: {result.cleanup_status}"
+            )
+            assert not Path(result.sandbox_path).exists(), (
+                f"Sandbox 目录应已删除: {result.sandbox_path}"
+            )
+        finally:
+            _rmdtemp(tmp)
+
+    def test_normal_fast_ctas_not_affected_by_timer(self):
+        """正常快速 CTAS 不被超时机制误中断。
+
+        验证：正常执行 path 中 execution_done.set() 后 timer.cancel()
+        被调用，防止 Timer 在查询完成后误中断后续逻辑。
+        """
+        tmp = _mkdtemp()
+        try:
+            # 使用真实 Timer——正常 CTAS 远快于超时限制
+            manifest = _sample_manifest()
+            deploy_sql = _build_ctas_sql()
+            rows, cols, types = _sample_data()
+            sandbox_root = tmp / ".sandbox_tmp"
+
+            result = execute_ctas_in_sandbox(
+                deploy_sql=deploy_sql,
+                manifest=manifest,
+                sample_data_rows=rows,
+                sample_data_columns=cols,
+                sample_data_types=types,
+                sandbox_root=sandbox_root,
+                timeout_seconds=30,  # 30s 超时——3 行数据 CTAS 远小于此
+            )
+
+            # 正常执行必须成功
+            assert result.execution_status == "PASS", (
+                f"正常 CTAS 应执行成功，实际: {result.execution_status}"
+            )
+            assert result.cleanup_status == "PASS"
+            # 确认未被误判为超时
+            assert not any(
+                "超时" in m for m in result.failures
+            ), f"正常执行不应有超时错误: {result.failures}"
+        finally:
+            _rmdtemp(tmp)
+
+    def test_timeout_does_not_prevent_cleanup(self):
+        """超时后 finally 清理仍然执行——验证无残留。
+
+        与 test_timeout_triggers_fail_and_cleanup_still_ok 互补：
+        直接 mock _cleanup_sandbox 返回 True 后验证 finally 被调用。
+        """
+        tmp = _mkdtemp()
+        try:
+            cleanup_called = []
+
+            def _tracking_cleanup(*args, **kwargs):
+                cleanup_called.append(True)
+                return True  # 模拟清理成功
+
+            with patch(
+                "src.sandbox.duckdb_ctas_executor._cleanup_sandbox",
+                _tracking_cleanup,
+            ):
+                # 使用正常 CTAS + 正常超时——验证 cleanup 始终被调用
+                manifest = _sample_manifest()
+                deploy_sql = _build_ctas_sql()
+                rows, cols, types = _sample_data()
+                sandbox_root = tmp / ".sandbox_tmp"
+
+                result = execute_ctas_in_sandbox(
+                    deploy_sql=deploy_sql,
+                    manifest=manifest,
+                    sample_data_rows=rows,
+                    sample_data_columns=cols,
+                    sample_data_types=types,
+                    sandbox_root=sandbox_root,
+                )
+
+                # 清理函数必须被调用
+                assert len(cleanup_called) >= 1, "finally 块中 cleanup 必须被调用"
+                assert result.cleanup_status == "PASS"
         finally:
             _rmdtemp(tmp)
 

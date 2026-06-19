@@ -12,6 +12,11 @@
   - 禁止 ATTACH/DETACH/COPY/EXPORT 等危险操作
   - 所有连接在 finally 中关闭，所有临时文件在 finally 中删除
   - 清理失败必须报告 FAIL，不能静默忽略
+
+当前限制（M5b-1）：
+  - 仅支持单 source table CTAS——不支持 JOIN、多 FROM、逗号连接的多表查询
+  - 多表/JOIN 支持留到后续阶段（M5b-2 或 M5b-3）
+  - 超时使用 threading.Timer + conn.interrupt() 硬中断
 """
 from __future__ import annotations
 
@@ -19,6 +24,7 @@ import hashlib
 import re
 import secrets
 import shutil
+import threading
 import time
 import uuid
 from datetime import datetime, timezone
@@ -243,20 +249,54 @@ def execute_ctas_in_sandbox(
             result.static_validation_status = "FAIL"
             return result
 
-        # ── 步骤 8：执行重写后的 CTAS ──
+        # ── 步骤 8：执行重写后的 CTAS（带硬超时中断）──
+        # 使用 threading.Timer + conn.interrupt() 实现硬超时，
+        # 避免长时间运行的 CTAS 无法被中断。
+        # 参照只读 executor.py 的超时模式，但独立实现以保持 Sandbox 隔离。
         execution_start = time.perf_counter()
+        execution_done = threading.Event()
+        _timed_out = False
+
+        def _interrupt_query() -> None:
+            """超时回调：中断正在执行的 DuckDB 查询。"""
+            nonlocal _timed_out
+            if not execution_done.is_set():
+                _timed_out = True
+                try:
+                    conn.interrupt()
+                except Exception:
+                    pass  # 中断操作本身失败不影响主流程
+
+        timer = threading.Timer(timeout_seconds, _interrupt_query)
+        timer.start()
+
         try:
             conn.execute(rewritten_sql)
             elapsed = (time.perf_counter() - execution_start) * 1000
         except Exception as exc:
             elapsed = (time.perf_counter() - execution_start) * 1000
+            if _timed_out:
+                # 超时中断——进入 FAIL
+                result.execution_status = "FAIL"
+                result.failures.append(
+                    f"CTAS 执行超时（>{timeout_seconds}s，耗时 {elapsed:.0f}ms）——已被硬中断"
+                )
+                result.overall_status = "FAIL"
+                result.finished_at = _iso_now()
+                return result
+            # 非超时错误——SQL 语法/执行错误
             result.execution_status = "FAIL"
             result.failures.append(f"CTAS 执行失败（{elapsed:.0f}ms）: {exc}")
             result.overall_status = "FAIL"
             result.finished_at = _iso_now()
             return result
+        finally:
+            # 确保 Timer 在任何路径下都被取消，防止误中断后续逻辑
+            execution_done.set()
+            timer.cancel()
 
         if elapsed / 1000 > timeout_seconds:
+            # 查询完成但接近超时——仅提醒，不视为失败
             result.warnings.append(
                 f"CTAS 执行耗时 {elapsed:.0f}ms 接近超时限制 {timeout_seconds}s"
             )
@@ -440,10 +480,11 @@ def _scan_ctas_safety(sql: str, allowed_target: str) -> list[str]:
     """安全扫描重写后的 CTAS SQL。
 
     检查项：
+      - 禁止多语句（分号分割）
+      - 多表/JOIN 检测（M5b-1 仅支持单 source table）
       - 禁止关键字（ATTACH/DROP/ALTER/COPY/EXPORT …）
       - 禁止文件读取函数（read_csv/read_parquet …）
       - 目标 schema 必须在 sandbox_output
-      - 禁止多语句（分号分割）
       - 禁止 PRAGMA / SET / USE 等危险配置
 
     Args:
@@ -460,6 +501,27 @@ def _scan_ctas_safety(sql: str, allowed_target: str) -> list[str]:
     semicolons = [i for i, c in enumerate(sql) if c == ";"]
     if len(semicolons) > 1:
         errors.append("多语句 SQL 被拒绝——Sandbox 只允许单条 CTAS")
+
+    # ── 多表/JOIN 检测（M5b-1 仅支持单 source table CTAS）──
+    # 在去除注释后检查——必须在关键字检查之前执行，
+    # 确保多表场景被显式拒绝，而非静默不完整执行。
+    from_matches = re.findall(r"\bFROM\s+", cleaned)
+    if len(from_matches) > 1:
+        errors.append(
+            f"检测到 {len(from_matches)} 个 FROM 子句——"
+            f"M5b-1 仅支持单 source table CTAS，多表/JOIN 支持留到后续阶段"
+        )
+    if re.search(r"\bJOIN\b", cleaned):
+        errors.append(
+            "检测到 JOIN——M5b-1 仅支持单 source table CTAS，"
+            "JOIN/多表支持留到后续阶段"
+        )
+    # 检测逗号连接的多表 FROM（如 FROM a, b 或 FROM a alias, b）
+    if re.search(r"\bFROM\s+\w+\.?\w*(?:\s+\w+)?\s*,\s*\w+", cleaned):
+        errors.append(
+            "检测到逗号连接的多表 FROM——M5b-1 仅支持单 source table CTAS，"
+            "多表/JOIN 支持留到后续阶段"
+        )
 
     # ── 禁止关键字 ──
     for keyword in FORBIDDEN_DEPLOY_KEYWORDS:

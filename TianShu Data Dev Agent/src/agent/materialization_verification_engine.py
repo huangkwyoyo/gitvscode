@@ -176,6 +176,16 @@ def verify_materialization(
             for c in static_checks if c.status not in {"PASS", "PENDING"}
         ])
 
+    # ── 同步 hash 状态字段到顶层（修复 M5b-1a #2）──
+    # 静态校验的 hash checks 已合并到 result.checks，
+    # 但顶层 source_query_hash_status / deploy_artifact_hash_status 仍为默认 PENDING。
+    # 此处从 checks 中提取实际状态，确保报告展示与检查明细一致。
+    for check in static_checks:
+        if check.check_id == "source_query_hash":
+            result.source_query_hash_status = check.status
+        elif check.check_id == "deploy_artifact_hash":
+            result.deploy_artifact_hash_status = check.status
+
     # ── 步骤 5：幂等性检查 ──
     if result.execution_status == "PASS":
         idempotency = check_idempotency(
