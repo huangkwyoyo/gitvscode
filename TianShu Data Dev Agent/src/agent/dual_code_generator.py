@@ -2,6 +2,14 @@
 双代码草案生成器。
 
 M2 阶段使用确定性 stub，不接真实 LLM，不执行 SQL/Spark。
+
+安全规则事实源：
+  - SQL 禁止关键字：FORBIDDEN_SQL_KEYWORDS（本地维护，与 checks.FORBIDDEN_KEYWORDS 对齐）
+  - Spark 草案安全检查：统一委托给 src.verify.spark_safety.analyze_spark_draft()
+    （AST-based 分析器——生成端和 Validator 共享同一事实源）
+
+生成端的 validate_*() 函数是 fail-fast 防御性检查，不是安全信任边界。
+任何草案进入 sample run 前必须经过 Validator（checker.py）的权威安全检查。
 """
 
 from __future__ import annotations
@@ -10,6 +18,7 @@ import re
 from dataclasses import dataclass, field
 
 from src.ir.types import CodeDraft
+from src.verify.spark_safety import analyze_spark_draft
 
 from .design_planner import DevPlan
 
@@ -25,6 +34,9 @@ FORBIDDEN_SQL_KEYWORDS = {
     "MERGE",
 }
 
+# 已废弃——Spark 安全检查统一使用 src.verify.spark_safety 的 AST 分析器。
+# 此列表保留仅用于旧测试的向后兼容，不再作为安全检查的事实源。
+# 新代码请使用 analyze_spark_draft(code)。
 FORBIDDEN_SPARK_PATTERNS = [
     ".write",
     ".save",
@@ -66,13 +78,20 @@ def validate_sql_draft(sql: str) -> list[str]:
 
 
 def validate_spark_draft(code: str) -> list[str]:
-    """校验 Spark 草案不包含写入动作"""
-    lowered = code.lower()
-    errors: list[str] = []
-    for pattern in FORBIDDEN_SPARK_PATTERNS:
-        if pattern.lower() in lowered:
-            errors.append(f"Spark 草案包含禁止写入模式: {pattern}")
-    return errors
+    """
+    校验 Spark 草案不包含写入动作。
+
+    生成端 fail-fast 防御性检查——不是安全信任边界。
+    内部委托给 src.verify.spark_safety.analyze_spark_draft()（AST-based 共享分析器），
+    确保生成端和 Validator 使用同一安全规则事实源。
+    通过此检查不代表代码安全、已验证或可执行——必须再经 Validator 权威校验。
+    """
+    result = analyze_spark_draft(code)
+    # 保持向后兼容的返回类型——将结构化结果转为错误字符串列表
+    return [
+        f"Spark 草案安全检查失败: {error}"
+        for error in result.errors
+    ]
 
 
 def _field_expr(field: dict) -> str:

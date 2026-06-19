@@ -226,8 +226,16 @@ def test_validate_spark_rejects_saveastable():
 
 
 def test_validate_spark_rejects_overwrite():
-    """overwrite 模式必须被拒绝。"""
-    errors = validate_spark_draft("df.mode('overwrite')")
+    """
+    overwrite 模式字符串本身不应误报（AST 分析器正确忽略字符串字面量），
+    但包含实际写入调用（.save）时必须被拒绝。
+
+    旧子串匹配会误报 df.mode('overwrite')，AST 分析器已修复此问题。
+    """
+    # mode('overwrite') 仅设置写入模式，不含实际写入——不应误报
+    assert not validate_spark_draft("df.mode('overwrite')")
+    # mode('overwrite').save("path") 包含实际写入——必须被拒绝
+    errors = validate_spark_draft("df.write.mode('overwrite').save('path')")
     assert errors
 
 

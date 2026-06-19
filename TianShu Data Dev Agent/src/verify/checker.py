@@ -6,6 +6,9 @@ checker.py 是 Data Dev Agent v2 的唯一 Validator 编排入口：
 - validate()：保留旧七项检查兼容路径，供 v1/v2 既有测试继续使用。
 
 旧的 scripts/pipeline/layer5_validate.py 属于 v1 legacy validator，不作为 v2 主入口。
+
+Spark 安全检查规则事实源：src.verify.spark_safety.analyze_spark_draft()
+  ——checker.py 和 dual_code_generator.py 均调用同一分析器，禁止维护两份模式列表。
 """
 
 from __future__ import annotations
@@ -14,6 +17,7 @@ import re
 from typing import Any, Callable, Optional
 
 from src.ir.types import CheckResult, SQLPlan, SQLResult, ValidationReport, ValidationStatus
+from src.verify.spark_safety import analyze_spark_draft
 
 from .checks import (
     ALLOWED_PREFIXES,
@@ -40,6 +44,9 @@ SQL_KEYWORDS = {
     "else", "end", "desc", "asc",
 }
 
+# 已废弃——Spark 安全检查统一使用 src.verify.spark_safety.analyze_spark_draft() (AST-based)。
+# 此列表仅保留用于向后兼容，不再作为安全检查的事实源。
+# 新代码请使用 analyze_spark_draft(code)。
 SPARK_FORBIDDEN_PATTERNS = [
     ".write",
     ".save",
@@ -437,18 +444,43 @@ class Validator:
         return CheckResult(104, "SQL lineage 字段引用", ValidationStatus.PASSED, "SQL 字段来自 lineage", "WARN")
 
     def _check_spark_forbidden_patterns(self, spark_code: str) -> CheckResult:
-        """拦截 Spark 写入动作。"""
-        lowered = spark_code.lower()
-        found = [pattern for pattern in SPARK_FORBIDDEN_PATTERNS if pattern in lowered]
-        if found:
+        """
+        拦截 Spark 写入动作。
+
+        内部委托给 src.verify.spark_safety.analyze_spark_draft()（AST-based 共享分析器），
+        确保 Validator 和生成端使用同一安全规则事实源。
+        这是任何 Spark 草案进入 sample run 前的权威安全检查。
+        """
+        if not spark_code.strip():
+            return CheckResult(
+                105,
+                "Spark 禁止写入动作",
+                ValidationStatus.PASSED,
+                "Spark 草案为空，跳过安全检查",
+                "FAIL",
+            )
+
+        result = analyze_spark_draft(spark_code)
+        if result.is_blocked:
             return CheckResult(
                 105,
                 "Spark 禁止写入动作",
                 ValidationStatus.FAILED,
-                f"Spark 草案包含写入或落盘动作: {', '.join(found)}",
+                f"Spark 草案安全检查失败: {'; '.join(result.errors)}",
                 "FAIL",
             )
-        return CheckResult(105, "Spark 禁止写入动作", ValidationStatus.PASSED, "未检测到 Spark 写入动作", "FAIL")
+        if result.status == "HUMAN_REVIEW":
+            return CheckResult(
+                105,
+                "Spark 禁止写入动作",
+                ValidationStatus.WARN,
+                f"Spark 草案安全检查需人审: {'; '.join(result.warnings)}",
+                "FAIL",
+            )
+        return CheckResult(
+            105, "Spark 禁止写入动作", ValidationStatus.PASSED,
+            "未检测到 Spark 写入动作（AST-based 结构化分析）", "FAIL",
+        )
 
     def _check_spark_lineage(
         self,

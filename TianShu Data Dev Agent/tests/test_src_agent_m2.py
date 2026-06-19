@@ -167,11 +167,24 @@ def test_sql_draft_rejects_dml_ddl():
 
 
 def test_spark_draft_rejects_write_patterns():
-    """Spark 草案不能包含写入相关模式。"""
+    """Spark 草案不能包含写入相关模式——AST 分析器准确区分写入操作与模式字符串。"""
     assert validate_spark_draft("df = spark.table('gold.t').select('trip_count')") == []
-    for pattern in FORBIDDEN_SPARK_PATTERNS:
-        errors = validate_spark_draft(f"df{pattern}('gold.t')")
-        assert errors, pattern
+    # 真实写入操作必须被拒绝
+    for code in [
+        "df.write",
+        "df.write.mode('overwrite').save('gold.t')",
+        "df.saveAsTable('gold.t')",
+        "df.write.insertInto('gold.t')",
+        "df.write.save('path')",
+        "df.write.parquet('path')",
+        "df.write.csv('path')",
+        "df.write.json('path')",
+    ]:
+        errors = validate_spark_draft(code)
+        assert errors, f"应拒绝: {code}"
+    # mode('overwrite') 单独只是设置写入模式，不含实际写入——不应误报
+    # （AST 分析器正确处理字符串字面量中的 overwrite）
+    assert validate_spark_draft("df.mode('overwrite')") == []
 
 
 def test_generated_code_uses_only_fixture_tables_and_fields(tmp_path):

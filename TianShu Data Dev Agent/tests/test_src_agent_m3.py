@@ -161,15 +161,26 @@ def test_spark_unavailable_is_skipped_or_pending(tmp_path):
 
 
 def test_spark_forbidden_patterns_fail():
-    """Spark 写入动作必须 FAIL。"""
+    """Spark 写入动作必须 FAIL——AST 分析器准确识别真实写入操作。"""
     validator = Validator()
+    # 真实写入操作必须 FAIL
     for spark_code in [
-        "df.write.mode('overwrite')",
+        "df.write.mode('overwrite').save('gold.t')",
         "df.saveAsTable('gold.t')",
-        "df.mode('overwrite')",
+        "df.write.insertInto('gold.t')",
+        "df.write.save('path')",
+        "df.write.parquet('path')",
+        "df.write.csv('path')",
     ]:
         report = validator.validate_static(sql="SELECT 1", spark_code=spark_code, lineage={})
-        assert report.overall_status == ValidationStatus.FAILED
+        assert report.overall_status == ValidationStatus.FAILED, f"应拒绝: {spark_code}"
+    # mode('overwrite') 仅设置写入模式，不含实际写入调用——不应误报
+    # （AST 分析器正确处理字符串字面量）
+    for safe_code in [
+        "df.mode('overwrite')",
+    ]:
+        report = validator.validate_static(sql="SELECT 1", spark_code=safe_code, lineage={})
+        assert report.overall_status != ValidationStatus.FAILED, f"不应拒绝: {safe_code}"
 
 
 def test_cross_validation_passes_for_matching_results():
