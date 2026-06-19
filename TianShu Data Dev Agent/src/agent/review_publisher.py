@@ -51,7 +51,7 @@ DEPLOY_FILES = [
 def _write_text(path: Path, content: str) -> None:
     """统一写入 UTF-8 文本"""
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content, encoding="utf-8")
+    path.write_text(content, encoding="utf-8", newline="\n")
 
 
 def _build_test_stub(requirement: RequirementSpec) -> str:
@@ -193,6 +193,8 @@ def _build_decision_yml(
         "verification_report_ref": "reports/verification.md",
         "verification_overall_status": "PENDING",
         "human_decision_note": "",
+        "logic_approval_state": "PENDING_REVIEW",
+        "release_approval_state": "DRAFT",
     }
     if artifact_hashes is not None:
         result["artifact_hashes"] = artifact_hashes.to_dict()
@@ -258,11 +260,15 @@ def publish_review_package(
 
     # M5：生成部署产物（阶段 1.5——在计算哈希之前）
     verified_sql_hash = hashlib.sha256(
-        drafts.sql.content.encode("utf-8")
+        (package_dir / "sql" / "main.sql").read_bytes()
+    ).hexdigest()
+    verified_spark_hash = hashlib.sha256(
+        (package_dir / "spark" / "main.py").read_bytes()
     ).hexdigest()
     deploy_manifest = build_deployment_manifest(
         request_id=requirement.request_id,
         verified_sql_hash=verified_sql_hash,
+        verified_spark_hash=verified_spark_hash,
         target_table=deploy_config.get(
             "target_table",
             f"generated.{requirement.request_id}",

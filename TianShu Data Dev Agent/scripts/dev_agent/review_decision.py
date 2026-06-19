@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -41,9 +42,18 @@ except ImportError:
     yaml = None
 
 from src.agent.decision_manager import (
+    LOGIC_ARTIFACT_FILES,
+    RELEASE_ARTIFACT_FILES,
+    append_decision_log,
+    attach_snapshot_to_latest_log,
+    check_required_artifact_integrity,
+    compute_artifact_hashes,
+    invalidate_release_approval,
     read_decision,
     read_decision_log,
     transition_state,
+    write_approval_snapshot,
+    write_decision,
 )
 from src.agent.package_registry import (
     check_consistency,
@@ -550,6 +560,17 @@ def cmd_set(
                     f"请确认已审查所有警告项后再 APPROVED。"
                 )
 
+        decision = read_decision(package_dir)
+        integrity_errors = check_required_artifact_integrity(
+            package_dir,
+            decision.get("artifact_hashes", {}),
+            LOGIC_ARTIFACT_FILES,
+        )
+        if integrity_errors:
+            for error in integrity_errors:
+                print(f"[ERROR] {error}", file=sys.stderr)
+            return EXIT_INVALID_STATE
+
     # 执行状态转换
     try:
         changed = transition_state(
@@ -578,6 +599,18 @@ def cmd_set(
         )
 
     if changed:
+        if state == "APPROVED":
+            hashes = compute_artifact_hashes(package_dir)
+            snapshot = write_approval_snapshot(package_dir, "logic", hashes)
+            attach_snapshot_to_latest_log(package_dir, snapshot)
+        elif state in {"REQUEST_CHANGES", "REJECTED"}:
+            decision = read_decision(package_dir)
+            decision["logic_approval_state"] = state
+            write_decision(package_dir, decision)
+            invalidate_release_approval(
+                package_dir,
+                f"逻辑审批变更为 {state}，旧发布批准失效",
+            )
         decision = read_decision(package_dir)
         print(f"决策已更新: {decision.get('current_state')}")
         print(f"操作者:     human:{user}")
@@ -669,6 +702,15 @@ def cmd_release_set(
         )
         return EXIT_MISSING_FILE
 
+    decision = read_decision(package_dir)
+    logic_state = decision.get("logic_approval_state")
+    if decision.get("current_state") != "APPROVED" or logic_state != "LOGIC_APPROVED":
+        print(
+            "[ERROR] RELEASE_APPROVED 前必须完成人工 LOGIC_APPROVED。",
+            file=sys.stderr,
+        )
+        return EXIT_INVALID_STATE
+
     # 校验 4：RELEASE_APPROVED 要求验证通过
     if state == "RELEASE_APPROVED":
         summary_path = package_dir / "reports" / "verification_summary.yml"
@@ -692,10 +734,10 @@ def cmd_release_set(
                 )
                 return EXIT_INVALID_STATE
 
-            if deploy_status == "FAIL":
+            if deploy_status != "PASS":
                 print(
-                    f"[ERROR] 部署静态检查 status 为 FAIL，不能 RELEASE_APPROVED。\n"
-                    f"请先修复部署产物中的 FAIL 项。",
+                    f"[ERROR] 部署静态检查 status 为 {deploy_status}，"
+                    "必须为 PASS 才能 RELEASE_APPROVED。",
                     file=sys.stderr,
                 )
                 return EXIT_INVALID_STATE
@@ -706,7 +748,25 @@ def cmd_release_set(
         return EXIT_MISSING_FILE
 
     deploy_manifest = yaml.safe_load(deploy_manifest_path.read_text(encoding="utf-8")) or {}
-    current_status = deploy_manifest.get("release_status", "DRAFT")
+    current_status = decision.get(
+        "release_approval_state",
+        deploy_manifest.get("release_status", "DRAFT"),
+    )
+
+    if state == "RELEASE_APPROVED":
+        integrity_errors = check_required_artifact_integrity(
+            package_dir,
+            decision.get("artifact_hashes", {}),
+            RELEASE_ARTIFACT_FILES,
+        )
+        if integrity_errors:
+            invalidate_release_approval(
+                package_dir,
+                "发布闸门检测到制品缺失或哈希变化，旧发布批准失效",
+            )
+            for error in integrity_errors:
+                print(f"[ERROR] {error}", file=sys.stderr)
+            return EXIT_INVALID_STATE
 
     if current_status == state:
         print(f"发布审批状态未变更（已是 {state}）")
@@ -724,22 +784,27 @@ def cmd_release_set(
     )
     tmp_path.replace(deploy_manifest_path)
 
-    # 同时追加到 decision_log
-    try:
-        from src.agent.decision_manager import append_decision_log
-        from datetime import datetime, timezone
+    hashes = compute_artifact_hashes(package_dir)
+    if state == "RELEASE_APPROVED":
+        snapshot = write_approval_snapshot(package_dir, "release", hashes)
+    else:
+        snapshot = hashes.to_dict()
+        decision = read_decision(package_dir)
+        decision["artifact_hashes"] = snapshot
+        decision["release_approval_state"] = state
+        write_decision(package_dir, decision)
 
-        now_iso = datetime.now(timezone.utc).isoformat()
-        append_decision_log(package_dir, {
-            "timestamp": now_iso,
-            "from_state": f"release:{current_status}",
-            "to_state": f"release:{state}",
-            "changed_by": "human",
-            "actor_id": f"human:{user}",
-            "reason": f"发布审批: {message.strip()[:200]}",
-        })
-    except Exception:
-        pass  # 日志追加失败不阻断
+    # 同时追加到 decision_log
+    now_iso = datetime.now(timezone.utc).isoformat()
+    append_decision_log(package_dir, {
+        "timestamp": now_iso,
+        "from_state": f"release:{current_status}",
+        "to_state": f"release:{state}",
+        "changed_by": "human",
+        "actor_id": f"human:{user}",
+        "reason": f"发布审批: {message.strip()[:200]}",
+        "artifact_hashes": snapshot,
+    })
 
     print(f"发布审批状态已更新: {current_status} → {state}")
     print(f"操作者:     human:{user}")

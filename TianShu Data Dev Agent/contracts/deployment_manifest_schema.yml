@@ -1,0 +1,87 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "https://tianshu.dev/data-dev-agent/deployment-manifest/v1"
+title: "DeploymentManifest"
+description: "M5a 部署清单：绑定只读转换内核与确定性写入外壳，不授予执行权限"
+type: object
+required:
+  - request_id
+  - mode
+  - source_sql_ref
+  - source_sql_hash
+  - source_spark_ref
+  - source_spark_hash
+  - target_environment
+  - target_table
+  - write_strategy
+  - partition_columns
+  - sql_deploy_artifact
+  - spark_deploy_artifact
+  - allowed_write_schema
+  - materialization_status
+  - human_review_required
+  - release_status
+properties:
+  request_id:
+    type: string
+    minLength: 1
+  mode:
+    const: MATERIALIZE
+  source_sql_ref:
+    const: sql/main.sql
+    description: "兼容路径，同时也是 SQL 转换内核唯一权威源"
+  source_sql_hash:
+    type: string
+    pattern: "^[0-9a-f]{64}$"
+  source_spark_ref:
+    const: spark/main.py
+    description: "兼容路径，同时也是 Spark 转换内核唯一权威源"
+  source_spark_hash:
+    type: string
+    pattern: "^[0-9a-f]{64}$"
+  source_query_ref:
+    const: sql/main.sql
+    description: "旧字段兼容别名，禁止成为第二份业务逻辑源"
+  source_query_hash:
+    type: string
+    pattern: "^[0-9a-f]{64}$"
+  target_environment:
+    type: string
+    enum: [SANDBOX, STAGING, UNSPECIFIED]
+  target_table:
+    type: string
+    pattern: "^generated\\.[A-Za-z_][A-Za-z0-9_]*$"
+  write_strategy:
+    type: string
+    enum:
+      - CREATE_TABLE_AS_SELECT
+      - INSERT_OVERWRITE_PARTITION
+      - INSERT_INTO_PARTITION
+      - CREATE_VIEW
+  partition_columns:
+    type: array
+    items:
+      type: string
+      minLength: 1
+  sql_deploy_artifact:
+    const: deploy/main.sql
+  spark_deploy_artifact:
+    const: deploy/main.py
+  allowed_write_schema:
+    const: generated
+  materialization_status:
+    type: string
+    enum: [PENDING, STATIC_VALIDATED, FAILED]
+  human_review_required:
+    const: true
+  release_status:
+    type: string
+    enum: [DRAFT, PENDING_RELEASE_REVIEW, RELEASE_APPROVED, RELEASE_REJECTED, SUPERSEDED]
+  warnings:
+    type: array
+    items:
+      type: string
+  human_review_points:
+    type: array
+    items:
+      type: string
+additionalProperties: true

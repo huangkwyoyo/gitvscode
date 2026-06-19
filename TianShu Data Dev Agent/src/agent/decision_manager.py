@@ -20,6 +20,21 @@ import yaml
 from src.ir.types import ArtifactHashes, DecisionStatus
 
 
+LOGIC_ARTIFACT_FILES: dict[str, str] = {
+    "sql_main": "sql/main.sql",
+    "spark_main": "spark/main.py",
+    "lineage_source_refs": "lineage/source_refs.yml",
+    "verification_summary": "reports/verification_summary.yml",
+}
+
+RELEASE_ARTIFACT_FILES: dict[str, str] = {
+    **LOGIC_ARTIFACT_FILES,
+    "deployment_manifest": "deployment_manifest.yml",
+    "deploy_sql": "deploy/main.sql",
+    "deploy_spark": "deploy/main.py",
+}
+
+
 # ═══════════════════════════════════════════════════════════
 # 状态转换合法性表
 # ═══════════════════════════════════════════════════════════
@@ -132,6 +147,25 @@ def append_decision_log(package_dir: Path, entry: dict[str, Any]) -> None:
     log_path = package_dir / "decision_log.yml"
     current = read_decision_log(package_dir)
     current.setdefault("entries", []).append(entry)
+    tmp_path = log_path.with_suffix(".tmp")
+    tmp_path.write_text(
+        yaml.safe_dump(current, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
+    tmp_path.replace(log_path)
+
+
+def attach_snapshot_to_latest_log(
+    package_dir: Path,
+    artifact_hashes: dict[str, Any],
+) -> None:
+    """把审批制品快照附加到最近一次状态转换记录。"""
+    log_path = package_dir / "decision_log.yml"
+    current = read_decision_log(package_dir)
+    entries = current.get("entries", [])
+    if not entries:
+        raise ValueError("decision_log.yml 没有可绑定的状态转换记录")
+    entries[-1]["artifact_hashes"] = artifact_hashes
     tmp_path = log_path.with_suffix(".tmp")
     tmp_path.write_text(
         yaml.safe_dump(current, allow_unicode=True, sort_keys=False),
@@ -338,6 +372,102 @@ def check_artifact_integrity(
             )
 
     return warnings
+
+
+def check_required_artifact_integrity(
+    package_dir: Path,
+    stored_hashes: dict[str, Any],
+    required_files: dict[str, str],
+) -> list[str]:
+    """严格校验审批所需制品，缺失哈希也必须失败。"""
+    errors: list[str] = []
+    for hash_key, rel_path in required_files.items():
+        stored = stored_hashes.get(hash_key)
+        if not stored:
+            errors.append(f"审批制品缺少哈希: {hash_key} ({rel_path})")
+            continue
+        file_path = package_dir / rel_path
+        if not file_path.is_file():
+            errors.append(f"审批制品缺失: {rel_path}")
+            continue
+        current_hash = _hash_file(file_path)
+        if current_hash != stored:
+            errors.append(
+                f"审批制品哈希不一致: {rel_path} "
+                f"(记录 {stored[:12]}...，当前 {current_hash[:12]}...)"
+            )
+    return errors
+
+
+def write_approval_snapshot(
+    package_dir: Path,
+    approval_kind: str,
+    hashes: ArtifactHashes,
+) -> dict[str, Any]:
+    """记录人工批准绑定的不可变制品快照。"""
+    if approval_kind not in {"logic", "release"}:
+        raise ValueError(f"未知审批类型: {approval_kind}")
+    decision = read_decision(package_dir)
+    snapshot = hashes.to_dict()
+    decision["artifact_hashes"] = snapshot
+    decision[f"{approval_kind}_approval_artifact_hashes"] = snapshot
+    decision[f"{approval_kind}_approval_state"] = (
+        "LOGIC_APPROVED" if approval_kind == "logic" else "RELEASE_APPROVED"
+    )
+    decision["last_updated"] = _iso_now()
+    decision["last_updated_by"] = "human"
+    write_decision(package_dir, decision)
+    return snapshot
+
+
+def invalidate_release_approval(package_dir: Path, reason: str) -> bool:
+    """将已失效的发布批准标记为 SUPERSEDED，并保留审计记录。"""
+    decision = read_decision(package_dir)
+    manifest_path = package_dir / "deployment_manifest.yml"
+    manifest = (
+        yaml.safe_load(manifest_path.read_text(encoding="utf-8")) or {}
+        if manifest_path.is_file()
+        else {}
+    )
+    old_state = decision.get(
+        "release_approval_state",
+        manifest.get("release_status", "DRAFT"),
+    )
+    if old_state != "RELEASE_APPROVED":
+        return False
+
+    decision["release_approval_state"] = "SUPERSEDED"
+    decision["last_updated"] = _iso_now()
+    decision["last_updated_by"] = "agent"
+    write_decision(package_dir, decision)
+
+    if manifest_path.is_file():
+        manifest["release_status"] = "SUPERSEDED"
+        tmp_path = manifest_path.with_suffix(".tmp")
+        tmp_path.write_text(
+            yaml.safe_dump(manifest, allow_unicode=True, sort_keys=False),
+            encoding="utf-8",
+        )
+        tmp_path.replace(manifest_path)
+
+    append_decision_log(package_dir, {
+        "timestamp": _iso_now(),
+        "from_state": f"release:{old_state}",
+        "to_state": "release:SUPERSEDED",
+        "changed_by": "agent",
+        "actor_id": "agent",
+        "reason": reason,
+    })
+    return True
+
+
+def mark_logic_approval_superseded(package_dir: Path) -> None:
+    """同步结构化逻辑审批状态，兼容现有 current_state。"""
+    decision = read_decision(package_dir)
+    decision["logic_approval_state"] = "SUPERSEDED"
+    decision["last_updated"] = _iso_now()
+    decision["last_updated_by"] = "agent"
+    write_decision(package_dir, decision)
 
 
 def update_artifact_hashes_in_decision(

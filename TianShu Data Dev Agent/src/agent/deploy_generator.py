@@ -85,6 +85,14 @@ def validate_write_boundary(manifest: DeploymentManifest) -> list[str]:
     """
     errors: list[str] = []
 
+    if manifest.mode != "MATERIALIZE":
+        errors.append("部署清单 mode 必须为 MATERIALIZE")
+    if manifest.allowed_write_schema not in ALLOWED_WRITE_SCHEMAS:
+        errors.append(
+            f"allowed_write_schema 不允许: {manifest.allowed_write_schema}——"
+            f"允许: {', '.join(sorted(ALLOWED_WRITE_SCHEMAS))}"
+        )
+
     # 检查 1：目标表 schema
     target = manifest.target_table.strip() if manifest.target_table else ""
     if not target:
@@ -374,6 +382,7 @@ def generate_deploy_spark(
 def build_deployment_manifest(
     request_id: str,
     verified_sql_hash: str,
+    verified_spark_hash: str = "",
     target_table: str = "",
     write_strategy: str = "",
     partition_columns: Optional[list[str]] = None,
@@ -384,6 +393,7 @@ def build_deployment_manifest(
     Args:
         request_id: 请求标识
         verified_sql_hash: sql/main.sql 的 SHA-256 哈希
+        verified_spark_hash: spark/main.py 的 SHA-256 哈希
         target_table: 目标写入表（完全限定名，如 generated.daily_trip_summary）
         write_strategy: 写入策略（DeployWriteStrategy 值）
         partition_columns: 分区列列表
@@ -418,6 +428,11 @@ def build_deployment_manifest(
 
     return DeploymentManifest(
         request_id=request_id,
+        mode="MATERIALIZE",
+        source_sql_ref="sql/main.sql",
+        source_sql_hash=verified_sql_hash,
+        source_spark_ref="spark/main.py",
+        source_spark_hash=verified_spark_hash,
         source_query_ref="sql/main.sql",
         source_query_hash=verified_sql_hash,
         target_environment="STAGING",
@@ -426,6 +441,8 @@ def build_deployment_manifest(
         partition_columns=partition_cols,
         sql_deploy_artifact="deploy/main.sql",
         spark_deploy_artifact="deploy/main.py",
+        allowed_write_schema="generated",
+        materialization_status="PENDING",
         human_review_required=True,
         release_status=ReleaseStatus.DRAFT.value,
         warnings=warnings,

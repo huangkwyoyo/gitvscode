@@ -246,6 +246,7 @@ class ReleaseStatus(str, Enum):
     PENDING_RELEASE_REVIEW = "PENDING_RELEASE_REVIEW"  # 等待发布审批
     RELEASE_APPROVED = "RELEASE_APPROVED"   # 发布已批准（仅人可设置）
     RELEASE_REJECTED = "RELEASE_REJECTED"   # 发布被拒绝（仅人可设置）
+    SUPERSEDED = "SUPERSEDED"               # 已批准制品发生变化，旧批准失效
 
 
 
@@ -286,6 +287,11 @@ class DeploymentManifest:
     所有字段默认为空或 DRAFT——不包含任何生产连接信息。
     """
     request_id: str = ""
+    mode: str = "MATERIALIZE"                    # 仅生成物化外壳，不代表执行权限
+    source_sql_ref: str = "sql/main.sql"         # SQL 转换内核权威路径
+    source_sql_hash: str = ""                    # SQL 转换内核 SHA-256
+    source_spark_ref: str = "spark/main.py"      # Spark 转换内核权威路径
+    source_spark_hash: str = ""                  # Spark 转换内核 SHA-256
     source_query_ref: str = "sql/main.sql"      # 已验证查询的路径引用
     source_query_hash: str = ""                  # sql/main.sql 的 SHA-256
     target_environment: str = "STAGING"          # 目标环境（占位值，非生产）
@@ -294,6 +300,8 @@ class DeploymentManifest:
     partition_columns: list[str] = field(default_factory=list)  # 分区列列表
     sql_deploy_artifact: str = "deploy/main.sql"  # SQL 部署脚本路径
     spark_deploy_artifact: str = "deploy/main.py"  # Spark 部署脚本路径
+    allowed_write_schema: str = "generated"      # 当前唯一允许写入的 schema
+    materialization_status: str = "PENDING"      # M5a 仅静态验证，不执行写入
     human_review_required: bool = True           # 必须人审
     release_status: str = "DRAFT"                # ReleaseStatus 值——默认 DRAFT
     warnings: list[str] = field(default_factory=list)  # 人审提醒
@@ -303,6 +311,11 @@ class DeploymentManifest:
         """序列化为字典"""
         return {
             "request_id": self.request_id,
+            "mode": self.mode,
+            "source_sql_ref": self.source_sql_ref,
+            "source_sql_hash": self.source_sql_hash,
+            "source_spark_ref": self.source_spark_ref,
+            "source_spark_hash": self.source_spark_hash,
             "source_query_ref": self.source_query_ref,
             "source_query_hash": self.source_query_hash,
             "target_environment": self.target_environment,
@@ -311,6 +324,8 @@ class DeploymentManifest:
             "partition_columns": self.partition_columns,
             "sql_deploy_artifact": self.sql_deploy_artifact,
             "spark_deploy_artifact": self.spark_deploy_artifact,
+            "allowed_write_schema": self.allowed_write_schema,
+            "materialization_status": self.materialization_status,
             "human_review_required": self.human_review_required,
             "release_status": self.release_status,
             "warnings": self.warnings,

@@ -431,6 +431,8 @@ def test_agent_cannot_set_release_approval():
 def test_only_human_can_set_release_approval(tmp_path):
     """人可以通过 CLI release 子命令设置 RELEASE_APPROVED。"""
     package_dir = _build_and_verify(tmp_path)
+    logic_result = _approve_logic(package_dir)
+    assert logic_result.returncode == 0, logic_result.stderr
 
     result = subprocess.run(
         [sys.executable, str(REVIEW_CLI), "release", str(package_dir),
@@ -575,3 +577,215 @@ def test_no_deployment_executed(tmp_path):
     assert deploy_manifest["target_environment"] != "PRODUCTION", (
         "target_environment 不得为 PRODUCTION"
     )
+
+
+# ═══════════════════════════════════════════════════════════════
+# M5a：双内核绑定、严格发布审批与篡改失效
+# ═══════════════════════════════════════════════════════════════
+
+
+def test_deployment_manifest_binds_sql_and_spark_kernels(tmp_path):
+    """部署清单必须同时绑定 SQL 与 Spark 转换内核。"""
+    package_dir = _build_package(tmp_path)
+    manifest = yaml.safe_load(
+        (package_dir / "deployment_manifest.yml").read_text(encoding="utf-8")
+    )
+
+    assert manifest["mode"] == "MATERIALIZE"
+    assert manifest["source_sql_ref"] == "sql/main.sql"
+    assert manifest["source_spark_ref"] == "spark/main.py"
+    assert manifest["allowed_write_schema"] == "generated"
+    assert manifest["materialization_status"] == "PENDING"
+
+    sql_hash = hashlib.sha256(
+        (package_dir / manifest["source_sql_ref"]).read_bytes()
+    ).hexdigest()
+    spark_hash = hashlib.sha256(
+        (package_dir / manifest["source_spark_ref"]).read_bytes()
+    ).hexdigest()
+    assert manifest["source_sql_hash"] == sql_hash
+    assert manifest["source_spark_hash"] == spark_hash
+
+
+def test_release_approval_requires_logic_approval(tmp_path):
+    """发布审批必须以人工逻辑审批为前置条件。"""
+    package_dir = _build_and_verify(tmp_path)
+
+    result = subprocess.run(
+        [sys.executable, str(REVIEW_CLI), "release", str(package_dir),
+         "--state", "RELEASE_APPROVED", "--message", "越过逻辑审批"],
+        cwd=PROJECT_ROOT, text=True, capture_output=True, check=False,
+    )
+
+    assert result.returncode != 0
+    assert "LOGIC_APPROVED" in result.stderr
+
+
+def test_release_approval_requires_all_artifact_hashes(tmp_path):
+    """旧格式缺少任一发布哈希时必须阻断发布审批。"""
+    package_dir = _build_and_verify(tmp_path)
+    _approve_logic(package_dir)
+    decision_path = package_dir / "decision.yml"
+    decision = yaml.safe_load(decision_path.read_text(encoding="utf-8"))
+    decision["artifact_hashes"].pop("deploy_spark")
+    decision_path.write_text(
+        yaml.safe_dump(decision, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
+
+    result = _approve_release(package_dir)
+
+    assert result.returncode != 0
+    assert "deploy_spark" in result.stderr
+
+
+def test_release_approval_records_hash_snapshot(tmp_path):
+    """发布审批必须在 decision 和审计日志中记录完整制品快照。"""
+    package_dir = _build_and_verify(tmp_path)
+    _approve_logic(package_dir)
+
+    result = _approve_release(package_dir)
+
+    assert result.returncode == 0, result.stderr
+    decision = yaml.safe_load((package_dir / "decision.yml").read_text(encoding="utf-8"))
+    snapshot = decision["release_approval_artifact_hashes"]
+    for key in [
+        "sql_main", "spark_main", "lineage_source_refs", "verification_summary",
+        "deployment_manifest", "deploy_sql", "deploy_spark",
+    ]:
+        assert len(snapshot[key]) == 64, f"发布审批快照缺少 {key}"
+    assert decision["logic_approval_state"] == "LOGIC_APPROVED"
+    assert decision["release_approval_state"] == "RELEASE_APPROVED"
+
+    log = yaml.safe_load((package_dir / "decision_log.yml").read_text(encoding="utf-8"))
+    assert log["entries"][-1]["artifact_hashes"] == snapshot
+
+
+def test_modified_deploy_sql_supersedes_only_release_approval(tmp_path):
+    """部署外壳变化只使发布批准失效，不影响逻辑批准。"""
+    package_dir = _build_and_verify(tmp_path)
+    _approve_logic(package_dir)
+    assert _approve_release(package_dir).returncode == 0
+    deploy_path = package_dir / "deploy" / "main.sql"
+    deploy_path.write_text(
+        deploy_path.read_text(encoding="utf-8") + "\n-- tampered\n",
+        encoding="utf-8",
+    )
+
+    result = _approve_release(package_dir)
+
+    assert result.returncode != 0
+    decision = yaml.safe_load((package_dir / "decision.yml").read_text(encoding="utf-8"))
+    manifest = yaml.safe_load(
+        (package_dir / "deployment_manifest.yml").read_text(encoding="utf-8")
+    )
+    assert decision["current_state"] == "APPROVED"
+    assert decision["logic_approval_state"] == "LOGIC_APPROVED"
+    assert decision["release_approval_state"] == "SUPERSEDED"
+    assert manifest["release_status"] == "SUPERSEDED"
+
+
+def test_modified_query_supersedes_logic_and_release_approvals(tmp_path):
+    """转换内核变化必须同时使逻辑批准与发布批准失效。"""
+    package_dir = _build_and_verify(tmp_path)
+    _approve_logic(package_dir)
+    assert _approve_release(package_dir).returncode == 0
+    sql_path = package_dir / "sql" / "main.sql"
+    sql_path.write_text(
+        sql_path.read_text(encoding="utf-8") + "\n-- query changed\n",
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        [sys.executable, str(VERIFY_CLI), "-p", str(package_dir), "--no-sql-run"],
+        cwd=PROJECT_ROOT, text=True, capture_output=True, check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    decision = yaml.safe_load((package_dir / "decision.yml").read_text(encoding="utf-8"))
+    manifest = yaml.safe_load(
+        (package_dir / "deployment_manifest.yml").read_text(encoding="utf-8")
+    )
+    assert decision["current_state"] == "SUPERSEDED"
+    assert decision["logic_approval_state"] == "SUPERSEDED"
+    assert decision["release_approval_state"] == "SUPERSEDED"
+    assert manifest["release_status"] == "SUPERSEDED"
+
+
+def _approve_logic(package_dir: Path) -> subprocess.CompletedProcess[str]:
+    """通过 CLI 执行人工逻辑审批。"""
+    return subprocess.run(
+        [sys.executable, str(REVIEW_CLI), "set", str(package_dir),
+         "--state", "APPROVED", "--message", "逻辑已人工审查", "--user", "reviewer"],
+        cwd=PROJECT_ROOT, text=True, capture_output=True, check=False,
+    )
+
+
+def _approve_release(package_dir: Path) -> subprocess.CompletedProcess[str]:
+    """通过 CLI 执行人工发布审批。"""
+    return subprocess.run(
+        [sys.executable, str(REVIEW_CLI), "release", str(package_dir),
+         "--state", "RELEASE_APPROVED", "--message", "部署制品已人工审查",
+         "--user", "release_reviewer"],
+        cwd=PROJECT_ROOT, text=True, capture_output=True, check=False,
+    )
+
+
+def test_deployment_manifest_contract_declares_m5a_fields():
+    """部署清单 Schema 必须声明双内核和双审批边界字段。"""
+    schema_path = PROJECT_ROOT / "contracts" / "deployment_manifest_schema.yml"
+    assert schema_path.is_file()
+    schema = yaml.safe_load(schema_path.read_text(encoding="utf-8"))
+    required = set(schema["required"])
+    assert {
+        "request_id", "mode", "source_sql_ref", "source_sql_hash",
+        "source_spark_ref", "source_spark_hash", "target_table",
+        "write_strategy", "allowed_write_schema", "materialization_status",
+        "release_status",
+    } <= required
+
+
+def test_rewritten_deploy_query_fails_static_validation(tmp_path):
+    """部署 SQL 改写业务查询后必须在静态验证中失败。"""
+    package_dir = _build_package(tmp_path)
+    deploy_path = package_dir / "deploy" / "main.sql"
+    deploy_path.write_text(
+        deploy_path.read_text(encoding="utf-8").replace(
+            "GROUP BY trip_date",
+            "WHERE trip_count > 10\nGROUP BY trip_date",
+        ),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        [sys.executable, str(VERIFY_CLI), "-p", str(package_dir), "--no-sql-run"],
+        cwd=PROJECT_ROOT, text=True, capture_output=True, check=False,
+    )
+    summary = yaml.safe_load(
+        (package_dir / "reports" / "verification_summary.yml").read_text(encoding="utf-8")
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert summary["deploy_static_status"] == "FAIL"
+
+
+@pytest.mark.parametrize("relative_path", [
+    "deploy/main.py",
+    "deployment_manifest.yml",
+])
+def test_tampered_release_artifact_blocks_existing_approval(tmp_path, relative_path):
+    """任一发布制品被篡改后，旧发布批准必须失效。"""
+    package_dir = _build_and_verify(tmp_path)
+    assert _approve_logic(package_dir).returncode == 0
+    assert _approve_release(package_dir).returncode == 0
+    target = package_dir / relative_path
+    target.write_text(
+        target.read_text(encoding="utf-8") + "\n# tampered\n",
+        encoding="utf-8",
+    )
+
+    result = _approve_release(package_dir)
+
+    assert result.returncode != 0
+    decision = yaml.safe_load((package_dir / "decision.yml").read_text(encoding="utf-8"))
+    assert decision["release_approval_state"] == "SUPERSEDED"

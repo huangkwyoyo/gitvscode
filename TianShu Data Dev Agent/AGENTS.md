@@ -281,6 +281,16 @@ generated/review_packages/{request_id}/
 - WARN / UNCERTAIN 项
 - 人需要确认的上线决策
 
+### 4.4 M5a 查询内核与写入外壳
+
+- `sql/main.sql` 与 `spark/main.py` 是兼容路径，也是唯一权威转换内核；禁止创建可独立修改的业务逻辑副本。
+- `deploy/main.sql` 与 `deploy/main.py` 只能由确定性生成器封装，LLM 不得自由生成最终写入脚本。
+- `deployment_manifest.yml` 必须同时记录 SQL/Spark 内核哈希、目标表、写入策略、分区列和允许写入 schema。
+- `APPROVED` 仅表示 `LOGIC_APPROVED`；只有人工 `RELEASE_APPROVED` 才表示具体部署制品可以进入外部发布流程。
+- 发布批准必须绑定 SQL/Spark 内核、lineage、验证摘要、Manifest 和两份部署外壳的 SHA-256 快照。
+- 任一转换内核变化使逻辑批准和发布批准失效；仅部署外壳或 Manifest 变化只使发布批准失效。
+- M5a 只生成和静态验证写入外壳，不执行 CTAS、INSERT 或 Spark Writer。
+
 ---
 
 ## 5. Failure Policy（失败策略）
@@ -547,6 +557,7 @@ scripts/dev_agent/                 ← v2 CLI 入口
 | **M4a 人审状态机最小实现** | ✅ | DecisionStatus enum + decision.yml + decision_log.yml + verification_summary.yml |
 | **M4b 状态机完整实现** | ✅ | SUPERSEDED 自动转换 + artifact_hashes + decision_manager + 人审 CLI |
 | **M4c 跨 package 注册表** | ✅ | package_registry + list/deps/status + SUPERSEDED 传播 + 一致性检查 |
+| **M5a 查询内核与写入外壳分离** | ✅ | 双内核 Manifest、确定性部署外壳、双审批快照、篡改失效 |
 | v1 pipeline 保留 | ✅ | `scripts/pipeline/` 完整保留，143 测试通过 |
 | 测试 | ✅ | 629 passed，零回归 |
 

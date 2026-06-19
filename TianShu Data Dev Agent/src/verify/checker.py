@@ -172,6 +172,8 @@ class Validator:
             ALLOWED_WRITE_SCHEMAS,
             FORBIDDEN_DEPLOY_KEYWORDS,
             FORBIDDEN_WRITE_SCHEMAS,
+            generate_deploy_spark,
+            generate_deploy_sql,
             validate_write_boundary,
         )
         from src.ir.types import DeploymentManifest
@@ -187,8 +189,14 @@ class Validator:
             manifest_errors.append("deployment_manifest.yml 缺少 target_table")
         if not manifest_dict.get("write_strategy"):
             manifest_errors.append("deployment_manifest.yml 缺少 write_strategy")
-        if not manifest_dict.get("source_query_hash"):
-            manifest_errors.append("deployment_manifest.yml 缺少 source_query_hash")
+        for required_field in (
+            "mode", "source_sql_ref", "source_sql_hash", "source_spark_ref",
+            "source_spark_hash", "allowed_write_schema", "materialization_status",
+        ):
+            if not manifest_dict.get(required_field):
+                manifest_errors.append(
+                    f"deployment_manifest.yml 缺少 {required_field}"
+                )
 
         if manifest_errors:
             checks.append(CheckResult(
@@ -205,6 +213,11 @@ class Validator:
         try:
             manifest = DeploymentManifest(
                 request_id=manifest_dict.get("request_id", ""),
+                mode=manifest_dict.get("mode", ""),
+                source_sql_ref=manifest_dict.get("source_sql_ref", ""),
+                source_sql_hash=manifest_dict.get("source_sql_hash", ""),
+                source_spark_ref=manifest_dict.get("source_spark_ref", ""),
+                source_spark_hash=manifest_dict.get("source_spark_hash", ""),
                 source_query_ref=manifest_dict.get("source_query_ref", "sql/main.sql"),
                 source_query_hash=manifest_dict.get("source_query_hash", ""),
                 target_environment=manifest_dict.get("target_environment", "STAGING"),
@@ -213,6 +226,8 @@ class Validator:
                 partition_columns=manifest_dict.get("partition_columns", []),
                 sql_deploy_artifact=manifest_dict.get("sql_deploy_artifact", "deploy/main.sql"),
                 spark_deploy_artifact=manifest_dict.get("spark_deploy_artifact", "deploy/main.py"),
+                allowed_write_schema=manifest_dict.get("allowed_write_schema", ""),
+                materialization_status=manifest_dict.get("materialization_status", ""),
                 human_review_required=manifest_dict.get("human_review_required", True),
                 release_status=manifest_dict.get("release_status", "DRAFT"),
                 warnings=list(manifest_dict.get("warnings", [])),
@@ -310,24 +325,70 @@ class Validator:
                 "WARN",
             ))
 
-        # ── 检查 6：source_query_hash 一致性 ──
-        stored_hash = manifest_dict.get("source_query_hash", "")
+        # ── 检查 6：SQL 转换内核哈希一致性 ──
+        stored_hash = manifest_dict.get("source_sql_hash", "")
         if stored_hash and verified_sql.strip():
             import hashlib
             actual_hash = hashlib.sha256(verified_sql.encode("utf-8")).hexdigest()
             if actual_hash != stored_hash:
                 checks.append(CheckResult(
-                    206, "source_query_hash 一致性", ValidationStatus.FAILED,
-                    f"source_query_hash 不一致——清单记录 {stored_hash[:16]}..."
+                    206, "source_sql_hash 一致性", ValidationStatus.FAILED,
+                    f"source_sql_hash 不一致——清单记录 {stored_hash[:16]}..."
                     f"，实际 sql/main.sql 哈希 {actual_hash[:16]}...",
                     "FAIL",
                 ))
             else:
                 checks.append(CheckResult(
-                    206, "source_query_hash 一致性", ValidationStatus.PASSED,
-                    f"source_query_hash 与 sql/main.sql 一致（{stored_hash[:16]}...）",
+                    206, "source_sql_hash 一致性", ValidationStatus.PASSED,
+                    f"source_sql_hash 与 sql/main.sql 一致（{stored_hash[:16]}...）",
                     "FAIL",
                 ))
+
+        # ── 检查 7：Spark 转换内核哈希一致性 ──
+        spark_hash = manifest_dict.get("source_spark_hash", "")
+        if spark_hash and verified_spark.strip():
+            import hashlib
+            actual_spark_hash = hashlib.sha256(
+                verified_spark.encode("utf-8")
+            ).hexdigest()
+            if actual_spark_hash != spark_hash:
+                checks.append(CheckResult(
+                    207, "source_spark_hash 一致性", ValidationStatus.FAILED,
+                    f"source_spark_hash 不一致——清单记录 {spark_hash[:16]}..."
+                    f"，实际 spark/main.py 哈希 {actual_spark_hash[:16]}...",
+                    "FAIL",
+                ))
+            else:
+                checks.append(CheckResult(
+                    207, "source_spark_hash 一致性", ValidationStatus.PASSED,
+                    f"source_spark_hash 与 spark/main.py 一致（{spark_hash[:16]}...）",
+                    "FAIL",
+                ))
+
+        # ── 检查 8：部署外壳必须是当前内核的确定性编译结果 ──
+        if 'manifest' in locals() and deploy_sql.strip() and verified_sql.strip():
+            expected_sql = generate_deploy_sql(verified_sql, manifest)
+            checks.append(CheckResult(
+                208,
+                "SQL 部署外壳确定性",
+                ValidationStatus.PASSED if deploy_sql == expected_sql else ValidationStatus.FAILED,
+                "SQL 部署外壳与转换内核确定性编译结果一致"
+                if deploy_sql == expected_sql
+                else "SQL 部署外壳不是当前转换内核的确定性编译结果",
+                "FAIL",
+            ))
+
+        if 'manifest' in locals() and deploy_spark.strip():
+            expected_spark = generate_deploy_spark(manifest)
+            checks.append(CheckResult(
+                209,
+                "Spark 部署外壳确定性",
+                ValidationStatus.PASSED if deploy_spark == expected_spark else ValidationStatus.FAILED,
+                "Spark 部署外壳仅调用已绑定 build_dataframe()"
+                if deploy_spark == expected_spark
+                else "Spark 部署外壳不是 Manifest 的确定性编译结果",
+                "FAIL",
+            ))
 
         return ValidationReport(overall_status=self._aggregate(checks), checks=checks)
 

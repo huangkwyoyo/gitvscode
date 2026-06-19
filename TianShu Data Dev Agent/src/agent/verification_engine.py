@@ -39,6 +39,8 @@ from src.verify.cross_validation import compare_results
 from .decision_manager import (
     check_artifact_integrity,
     compute_artifact_hashes,
+    invalidate_release_approval,
+    mark_logic_approval_superseded,
     read_decision,
     transition_state,
     update_artifact_hashes_in_decision,
@@ -101,6 +103,34 @@ def verify_review_package(
     decision = read_decision(package_dir)
     decision_state_before = decision.get("current_state", "PENDING_REVIEW")
     stored_hashes = decision.get("artifact_hashes", {})
+    current_hashes_before = compute_artifact_hashes(package_dir).to_dict()
+    logic_snapshot = decision.get("logic_approval_artifact_hashes", {})
+    release_snapshot = decision.get("release_approval_artifact_hashes", {})
+    logic_stale = (
+        decision.get("logic_approval_state") == "LOGIC_APPROVED"
+        and _snapshot_changed(
+            logic_snapshot,
+            current_hashes_before,
+            {"sql_main", "spark_main", "lineage_source_refs"},
+        )
+    )
+    release_stale = (
+        decision.get("release_approval_state") == "RELEASE_APPROVED"
+        and _snapshot_changed(
+            release_snapshot,
+            current_hashes_before,
+            {
+                "sql_main", "spark_main", "lineage_source_refs",
+                "verification_summary", "deployment_manifest",
+                "deploy_sql", "deploy_spark",
+            },
+        )
+    )
+    if release_stale or decision.get("release_approval_state") == "RELEASE_APPROVED":
+        invalidate_release_approval(
+            package_dir,
+            "重新验证或制品变化使旧发布批准失效",
+        )
 
     # M4b：生成本次验证的唯一标识
     now_iso = datetime.now(timezone.utc).isoformat()
@@ -226,13 +256,17 @@ def verify_review_package(
         failures=failures,
     )
 
-    # M4b：SUPERSEDED 自动转换逻辑
-    # 仅在旧状态为 APPROVED 且验证实际执行（PASS 或 FAIL）时触发
-    # SKIPPED/PENDING 不触发——环境抖动不应导致批准失效
+    # M5a：只在转换内核变化或逻辑验证失败时使逻辑批准失效。
+    # 部署外壳失败只影响发布批准，不能污染已批准的查询逻辑。
     decision_state_after = decision_state_before
+    logic_validation_failed = any(status == "FAIL" for status in (
+        sql_static_status,
+        sql_sample_status,
+        spark_static_status,
+    ))
     if (
         decision_state_before == "APPROVED"
-        and overall_status in {"PASS", "FAIL"}
+        and (logic_stale or logic_validation_failed)
     ):
         try:
             transition_state(
@@ -246,6 +280,7 @@ def verify_review_package(
                 verification_id=verification_id,
                 actor_id="agent",
             )
+            mark_logic_approval_superseded(package_dir)
             decision_state_after = "SUPERSEDED"
             warnings.append(
                 f"M4b SUPERSEDED：旧 APPROVED 已自动过渡至 SUPERSEDED"
@@ -366,6 +401,18 @@ def _require_file(path: Path) -> None:
     """确保 Review Package 必备文件存在。"""
     if not path.is_file():
         raise FileNotFoundError(f"Review Package 缺少文件: {path}")
+
+
+def _snapshot_changed(
+    snapshot: dict[str, Any],
+    current: dict[str, Any],
+    keys: set[str],
+) -> bool:
+    """判断审批快照中的指定制品是否缺失或发生变化。"""
+    return any(
+        not snapshot.get(key) or snapshot.get(key) != current.get(key)
+        for key in keys
+    )
 
 
 def _build_verification_summary_yml(
