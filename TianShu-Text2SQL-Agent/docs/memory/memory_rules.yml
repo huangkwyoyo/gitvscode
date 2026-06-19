@@ -295,8 +295,8 @@ rules:
   # ═════════════════════════════════════════════════════════════════════════════
   - rule_id: TA-R019
     title: "PlanExecutor 安全链路不可绕过——read_only、离线阻断、validate_sql_safety、execution trace"
-    status: proposed
-    blocking: false
+    status: active
+    blocking: true
     severity: high
     source_memory: "Phase 3 架构设计——PlanExecutor 执行层安全"
     risk_ids:
@@ -310,7 +310,7 @@ rules:
       - tests/test_plan_executor.py
     required_evals:
       - evals/e2e_cases.yml
-    notes: "新功能必须走 PlanExecutor，不可绕过安全链路。"
+    notes: "2026-06-19 晋升 active+blocking=true，审批人: huangkwyoyo (HAR-TA-R019-20260619T224802)，基于 Step 25 Blocking Expansion Readiness Review。新功能必须走 PlanExecutor，不可绕过安全链路。"
 
   # ═════════════════════════════════════════════════════════════════════════════
   # TA-R020: ExecutionStrategy 并发安全边界

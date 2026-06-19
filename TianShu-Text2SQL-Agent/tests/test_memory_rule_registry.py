@@ -297,9 +297,9 @@ class TestProposedNotBlocking:
     """验证 proposed/active/blocking 语义正确"""
 
     def test_all_rules_are_proposed_not_active(self):
-        """除已晋升的 TA-R018 外，其余规则必须为 proposed"""
+        """除已晋升的 TA-R018/TA-R019 外，其余规则必须为 proposed"""
         rules = load_rules(RULES_YAML_PATH)
-        active_rules = {"TA-R018"}  # Step 8b 已晋升为 active
+        active_rules = {"TA-R018", "TA-R019"}  # Step 8b/Step 26 已晋升为 active
         for rule in rules:
             rid = rule["rule_id"]
             if rid in active_rules:
@@ -312,9 +312,9 @@ class TestProposedNotBlocking:
                 )
 
     def test_no_rule_is_blocking(self):
-        """除已晋升的 TA-R018 外，其余规则 blocking 必须为 false"""
+        """除已晋升的 TA-R018/TA-R019 外，其余规则 blocking 必须为 false"""
         rules = load_rules(RULES_YAML_PATH)
-        blocking_rules = {"TA-R018"}  # Step 8b 已晋升为 blocking=true
+        blocking_rules = {"TA-R018", "TA-R019"}  # Step 8b/Step 26 已晋升为 blocking=true
         for rule in rules:
             rid = rule["rule_id"]
             if rid in blocking_rules:

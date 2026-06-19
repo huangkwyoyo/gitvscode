@@ -1,0 +1,11 @@
+{
+  "approval_id": "HAR-TA-R019-20260619T224802",
+  "approved_by": "huangkwyoyo",
+  "rule_id": "TA-R019",
+  "approved_action": "activate_and_enable_fast_gate_blocking",
+  "scope": "TA-R019 only",
+  "based_on_review": "Step 25 Blocking Expansion Readiness Review",
+  "rollback_plan": "Set TA-R019 blocking=false or status=proposed in docs/memory/memory_rules.yml",
+  "not_approved": ["TA-R020", "TA-R023"],
+  "created_at": "2026-06-19T22:48:02+08:00"
+}
