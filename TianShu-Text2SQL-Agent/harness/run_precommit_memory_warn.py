@@ -712,6 +712,13 @@ def run_precommit_warn(
     Returns:
         warn 模式始终返回 0；blocking 模式在 active+blocking=true 规则失败时返回 1
     """
+    # Windows 控制台编码修复：确保能输出 emoji 等 Unicode 字符
+    if sys.platform == "win32":
+        try:
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
     t_start = time.perf_counter()
     report = None
     analysis: dict = {}
