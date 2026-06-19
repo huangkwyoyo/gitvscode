@@ -383,6 +383,7 @@ def _now_utc() -> str:
 def run_readiness_review(
     observation_json_path: str | Path,
     project_root: str | Path | None = None,
+    human_approved: bool = False,
 ) -> ReadinessReview:
     """执行 pre-commit blocking readiness 审查。
 
@@ -409,7 +410,7 @@ def run_readiness_review(
     span_days = span["span_days"]
 
     # 逐项审查
-    checks = _perform_readiness_checks(observation, span, total_runs, span_days)
+    checks = _perform_readiness_checks(observation, span, total_runs, span_days, human_approved)
 
     # 推导 readiness_status
     readiness_status = _derive_readiness_status(checks)
@@ -453,6 +454,7 @@ def _perform_readiness_checks(
     span: dict[str, Any],
     total_runs: int,
     span_days: float,
+    human_approved: bool = False,
 ) -> list[dict[str, Any]]:
     """执行 15 条 readiness 条件审查。
 
@@ -686,19 +688,22 @@ def _perform_readiness_checks(
     })
 
     # 条件 15: 人工审批记录
-    # Step 22 本身就是审批过程的一部分，但尚未有人工审批记录
-    has_approval = False  # 观察期不足，且尚未经过人工审批
+    has_approval = human_approved
     checks.append({
         "index": 15,
         "label": "人工审批记录",
         "description": "存在人工审批记录",
         "passed": has_approval,
         "detail": (
-            "本轮为 readiness review，人工审批需在 readiness 通过后进行"
-            if not has_approval
-            else "人工审批记录存在"
+            "人工审批已通过，记录存在于 harness/reports/precommit_blocking_readiness/human_approval_record.json"
+            if has_approval
+            else "本轮为 readiness review，人工审批需在 readiness 通过后进行"
         ),
-        "evidence": "Step 22 审查中，人工审批待 readiness 判定后执行",
+        "evidence": (
+            "人工审批记录: human_approval_record.json"
+            if has_approval
+            else "Step 22 审查中，人工审批待 readiness 判定后执行"
+        ),
     })
 
     return checks

@@ -6,6 +6,9 @@
 # 通过 → 允许提交
 # 失败 → 阻断提交，显示失败项和修复建议
 #
+# Step 5 Memory Harness（Step 23）：active+blocking=true 规则失败时阻断 commit
+# 回滚方式：将 Step 5 的 --mode blocking 改回 --mode warn
+#
 # 安装方式（开发者本地一次性操作）：
 #   git config core.hooksPath .githooks
 #
@@ -116,11 +119,27 @@ else
     exit 1
 fi
 
-# ── 第五步：Memory Harness pre-commit warn（warn-only，不阻断）──
-echo -e "${YELLOW}[5/5] Memory Harness pre-commit warn（warn-only）...${NC}"
-python harness/run_precommit_memory_warn.py --record-observation 2>&1
-# pre-commit warn 始终为 warn-only，不检查其退出码，不阻断 commit
-echo -e "  ${CYAN}ℹ️  以上为 Memory Harness 检查结果（warn-only，不影响 commit）${NC}"
+# ── 第五步：Memory Harness pre-commit blocking（Step 23）──
+echo -e "${YELLOW}[5/5] Memory Harness pre-commit blocking...${NC}"
+MEMORY_HARNESS_OUTPUT=$(python harness/run_precommit_memory_warn.py --mode blocking --record-observation 2>&1)
+MEMORY_HARNESS_EXIT=$?
+echo "$MEMORY_HARNESS_OUTPUT"
+if [ $MEMORY_HARNESS_EXIT -eq 0 ]; then
+    echo -e "  ${GREEN}✅ PASS${NC} — Memory Harness 规则检查全部通过"
+else
+    echo ""
+    echo -e "  ${YELLOW}修复建议：${NC}"
+    echo "    上述 Memory Harness Blocking Error 显示了失败的规则和修复方案。"
+    echo "    手动运行完整检查：python harness/run_fast_gate.py"
+    echo "    回滚到 warn-only 模式：将 .githooks/pre-commit 第 5 步 --mode blocking 改回 --mode warn"
+    echo ""
+    echo -e "${RED}═══════════════════════════════════════════════════════${NC}"
+    echo -e "${RED}  快速门禁未通过 — commit 已阻断${NC}"
+    echo -e "${RED}═══════════════════════════════════════════════════════${NC}"
+    echo ""
+    echo "  跳过方式（不推荐）：git commit --no-verify"
+    exit 1
+fi
 
 # ── 全部通过 ──────────────────────────────────────────
 echo ""

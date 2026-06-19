@@ -1,25 +1,31 @@
-"""Memory Harness pre-commit warn-only 脚本（Step 20 + Step 21b）。
+"""Memory Harness pre-commit 检查脚本（Step 20 + Step 21b + Step 23）。
 
 职责：
     在 git commit 前运行轻量 Memory Rule Enforcement 检查。
-    发现 active+blocking=true 规则失败时输出 WARNING，但始终 exit 0，
-    不阻断 commit。
+    支持两种模式：
+    - warn（默认）：发现 active+blocking=true 规则失败时输出 WARNING，始终 exit 0，不阻断 commit
+    - blocking（Step 23）：发现 active+blocking=true 规则失败时输出 BLOCKING ERROR，exit code 非 0，阻断 commit
 
     可选：--record-observation 在每次运行时生成 timestamp observation snapshot，
     用于 Step 22 readiness review 收集观察证据。
 
 用法：
-    python harness/run_precommit_memory_warn.py
-    python harness/run_precommit_memory_warn.py --record-observation
+    python harness/run_precommit_memory_warn.py                          # warn-only（默认）
+    python harness/run_precommit_memory_warn.py --mode blocking          # blocking 模式
+    python harness/run_precommit_memory_warn.py --mode blocking --record-observation
 
 关键边界：
-    - 始终 exit 0（不阻断 commit）
+    - warn 模式始终 exit 0（不阻断 commit）
+    - blocking 模式在 active+blocking=true 规则失败时 exit code 非 0
     - 使用临时 report dir，不污染 harness/reports/*
     - 不生成 latest
     - 不修改 docs/memory/*
     - 不修改 memory_rules.yml
     - 不调用真实 LLM
     - 不改变任何规则状态
+
+回滚方式：
+    将 .githooks/pre-commit 第 5 步从 --mode blocking 改回 --mode warn 即可。
 """
 
 from __future__ import annotations
@@ -172,6 +178,8 @@ def _record_observation(
     observation_dir: str,
     git_commit: str = "unknown",
     branch: str = "unknown",
+    mode: str = "warn",
+    actual_exit_code: int = 0,
 ) -> str | None:
     """生成 timestamp observation snapshot（JSON + MD）。
 
@@ -185,6 +193,8 @@ def _record_observation(
         observation_dir: 输出目录
         git_commit: git commit SHA
         branch: 分支名
+        mode: "warn" 或 "blocking"
+        actual_exit_code: 脚本实际 exit code（blocking 模式可能非 0）
 
     Returns:
         生成的 JSON 文件路径，失败返回 None
@@ -225,7 +235,7 @@ def _record_observation(
         # 运行后工作区状态
         worktree_dirty_after = _get_worktree_dirty()
 
-        # 构建 observation 数据
+        # 构建 observation 数据（Step 23：mode 和 exit_code 跟随实际运行模式）
         observation = {
             "report_type": "precommit_memory_warn_single_observation",
             "run_id": run_id,
@@ -233,12 +243,12 @@ def _record_observation(
             "git_commit": git_commit,
             "branch": branch,
             "duration_ms": round(duration_ms, 1),
-            "exit_code": 0,
+            "exit_code": actual_exit_code,
             "warning_count": analysis.get("blocking_failures", 0),
             "active_blocking_rules": active_blocking_rules,
             "ta_r018_result": ta_r018_result,
-            "memory_warn_exit_code": 0,
-            "precommit_mode": "warn_only",
+            "memory_warn_exit_code": actual_exit_code,
+            "precommit_mode": "blocking" if mode == "blocking" else "warn_only",
             "polluted_reports": False,
             "generated_latest": False,
             "worktree_dirty_before": worktree_dirty_before,
@@ -251,7 +261,7 @@ def _record_observation(
                 "active_blocking": enf_summary.get("active_blocking", 0),
             },
             "boundary_confirmations": {
-                "no_blocking": True,
+                "no_blocking": mode != "blocking",  # blocking 模式时此边界不适用
                 "no_latest": True,
                 "no_docs_memory_modification": True,
                 "no_memory_rules_yml_modification": True,
@@ -558,22 +568,149 @@ def render_warn_output(analysis: dict) -> str:
     return "\n".join(lines)
 
 
+def render_blocking_output(analysis: dict) -> str:
+    """渲染 pre-commit blocking 错误输出（Step 23）。
+
+    与 warn 输出不同，blocking 输出必须包含：
+    - "Memory Harness Blocking Error" 标识
+    - rule_id、title、failed check、failure message
+    - rollback plan、suggested fix
+    - 阻断 commit 的明确提示
+
+    Args:
+        analysis: _analyze_enforcement 返回的分析结果
+
+    Returns:
+        预格式化的终端输出字符串
+    """
+    lines: list[str] = []
+
+    if not analysis["enforcement_available"]:
+        lines.append(
+            _color("[WARN] Memory Rule Enforcement 未能生成报告，跳过阻断检查。", _YELLOW)
+        )
+        return "\n".join(lines)
+
+    enf_summary = analysis["summary"]
+    failure_rules = analysis["failure_rules"]
+    blocking_failures = analysis["blocking_failures"]
+
+    total = enf_summary.get("total_rules", 0)
+    passed = enf_summary.get("passed", 0)
+    warnings = enf_summary.get("warnings", 0)
+    active_blocking = enf_summary.get("active_blocking", 0)
+
+    if blocking_failures == 0:
+        lines.append(
+            _color(
+                f"  Memory Rule Enforcement: {total} 规则, "
+                f"{passed} passed, {warnings} warn, "
+                f"{active_blocking} active+blocking — 全部通过",
+                _GREEN,
+            )
+        )
+        return "\n".join(lines)
+
+    # 有阻断失败 → BLOCKING ERROR
+    lines.append("")
+    lines.append(
+        _color(
+            "╔══════════════════════════════════════════════════════════╗",
+            _RED,
+        )
+    )
+    lines.append(
+        _color(
+            "║  🚫  Memory Harness Blocking Error                       ║",
+            _RED,
+        )
+    )
+    lines.append(
+        _color(
+            "╚══════════════════════════════════════════════════════════╝",
+            _RED,
+        )
+    )
+    lines.append("")
+    lines.append(
+        _color(
+            f"  Memory Harness Blocking Error: 检测到 {blocking_failures} 项 "
+            f"active+blocking=true 规则失败，commit 已阻断。",
+            _RED,
+        )
+    )
+    lines.append("")
+
+    for rr in failure_rules:
+        rule_id = rr.get("rule_id", "?")
+        title = rr.get("title", "")
+        failed_checks = rr.get("failed_required_checks", [])
+        failure_msg = rr.get("failure_message", "")
+        suggested_fix = rr.get("suggested_fix", "")
+        rollback_plan = rr.get("rollback_plan", "")
+
+        lines.append(f"  📌 rule_id: {rule_id}")
+        lines.append(f"     title: {title}")
+        if failed_checks:
+            lines.append(
+                f"     failed required_check: {', '.join(str(c) for c in failed_checks)}"
+            )
+        if failure_msg:
+            lines.append(f"     failure message: {failure_msg}")
+        if rollback_plan:
+            lines.append(f"     rollback plan: {rollback_plan}")
+        if suggested_fix:
+            lines.append(f"     suggested fix: {suggested_fix}")
+        lines.append("")
+
+    lines.append(
+        _color(
+            "  💡 可手动运行完整检查确认问题：",
+            _CYAN,
+        )
+    )
+    lines.append(
+        _color(
+            "     python harness/run_fast_gate.py",
+            _CYAN,
+        )
+    )
+    lines.append("")
+    lines.append(
+        _color(
+            "  🚫  commit 已阻断。请修复以上问题后重新提交。",
+            _RED,
+        )
+    )
+    lines.append(
+        _color(
+            "     紧急情况可跳过（不推荐）：git commit --no-verify",
+            _YELLOW,
+        )
+    )
+    lines.append("")
+
+    return "\n".join(lines)
+
+
 def run_precommit_warn(
     temp_root: str | None = None,
     quiet: bool = False,
     record_observation: bool = False,
     observation_dir: str | None = None,
+    mode: str = "warn",
 ) -> int:
-    """执行 pre-commit warn 检查，始终返回 0。
+    """执行 pre-commit Memory Harness 检查（Step 20 + Step 21b + Step 23）。
 
     Args:
         temp_root: 临时目录父路径，None 则使用系统默认
         quiet: True 则在全部通过时不输出任何内容
         record_observation: True 则在检查后生成 observation snapshot（Step 21b）
         observation_dir: observation 输出目录，None 使用默认目录
+        mode: "warn"（默认，始终 exit 0）或 "blocking"（规则失败时 exit code 非 0）
 
     Returns:
-        始终返回 0
+        warn 模式始终返回 0；blocking 模式在 active+blocking=true 规则失败时返回 1
     """
     t_start = time.perf_counter()
     report = None
@@ -581,6 +718,7 @@ def run_precommit_warn(
     worktree_dirty_before = False
     git_commit = "unknown"
     branch = "unknown"
+    exit_code: int = 0  # Step 23：blocking 模式下可能变为非 0
 
     # 观察记录的前置采集（运行前）
     if record_observation:
@@ -600,7 +738,7 @@ def run_precommit_warn(
         report = _run_fast_gate_step3(temp_dir)
 
         if report is None:
-            # fast gate 运行失败 → WARN 但不阻断（quiet 也输出）
+            # fast gate 运行失败 → WARN 但不阻断（基础设施故障不阻断 commit）
             print(
                 _color(
                     "[WARN] fast gate step 3 执行异常，跳过 Memory Rule Enforcement。"
@@ -618,12 +756,23 @@ def run_precommit_warn(
         has_issues = analysis.get("blocking_failures", 0) > 0
         lack_enforcement = not analysis.get("enforcement_available", False)
 
-        if not quiet or has_issues or lack_enforcement:
-            output = render_warn_output(analysis)
-            if output.strip():
-                print(output)
+        if mode == "blocking":
+            # blocking 模式：用 blocking renderer 输出
+            if not quiet or has_issues or lack_enforcement:
+                output = render_blocking_output(analysis)
+                if output.strip():
+                    print(output)
+            # blocking 模式下，active+blocking=true 规则失败 → exit code 非 0
+            if has_issues:
+                exit_code = 1
+        else:
+            # warn 模式（默认）：用 warn renderer 输出，始终 exit 0
+            if not quiet or has_issues or lack_enforcement:
+                output = render_warn_output(analysis)
+                if output.strip():
+                    print(output)
 
-        return 0
+        return exit_code
 
     except Exception as exc:
         # 任何未预料的异常 → WARN 但不阻断（quiet 也输出）
@@ -639,7 +788,7 @@ def run_precommit_warn(
         return 0
 
     finally:
-        # 观察记录（Step 21b）—— 在清理临时目录前执行（不影响 exit code）
+        # 观察记录（Step 21b + Step 23）—— 在清理临时目录前执行（不影响 exit code）
         if record_observation:
             try:
                 duration_ms = (time.perf_counter() - t_start) * 1000.0
@@ -652,6 +801,8 @@ def run_precommit_warn(
                     observation_dir=obs_dir,
                     git_commit=git_commit,
                     branch=branch,
+                    mode=mode,
+                    actual_exit_code=exit_code,
                 )
             except Exception as obs_exc:
                 # 观察记录写入失败绝不影响 exit code
@@ -672,7 +823,7 @@ def run_precommit_warn(
 
 
 def main(argv: list[str] | None = None) -> int:
-    """CLI 入口 — pre-commit warn-only Memory Harness（Step 20 + Step 21b）。"""
+    """CLI 入口 — pre-commit Memory Harness（Step 20 + Step 21b + Step 23）。"""
     if sys.platform == "win32":
         try:
             sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -680,7 +831,7 @@ def main(argv: list[str] | None = None) -> int:
             pass
 
     parser = argparse.ArgumentParser(
-        description="Memory Harness pre-commit warn-only 检查（Step 20 + Step 21b）"
+        description="Memory Harness pre-commit 检查（Step 20 + Step 21b + Step 23）"
     )
     parser.add_argument(
         "--temp-root",
@@ -702,6 +853,12 @@ def main(argv: list[str] | None = None) -> int:
         default=_DEFAULT_OBSERVATION_DIR,
         help=f"observation 输出目录（默认 {_DEFAULT_OBSERVATION_DIR}）",
     )
+    parser.add_argument(
+        "--mode",
+        choices=["warn", "blocking"],
+        default="warn",
+        help="运行模式：warn（默认，始终 exit 0）或 blocking（规则失败时 exit code 非 0）",
+    )
     args = parser.parse_args(argv)
 
     return run_precommit_warn(
@@ -709,6 +866,7 @@ def main(argv: list[str] | None = None) -> int:
         quiet=args.quiet,
         record_observation=args.record_observation,
         observation_dir=args.observation_dir,
+        mode=args.mode,
     )
 
 

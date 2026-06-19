@@ -1,16 +1,25 @@
-"""Memory Harness Step 20 —— pre-commit warn 模式测试。
+"""Memory Harness pre-commit 检查测试（Step 20 + Step 21b + Step 23）。
 
 覆盖场景：
-    1. 正常通过时 exit code = 0
-    2. fast gate 失败时 exit code 仍为 0
-    3. 失败时输出 WARNING
-    4. 失败时输出 rule_id
-    5. 失败时提示运行 python harness/run_fast_gate.py
-    6. 脚本异常时 exit code 仍为 0
-    7. 使用临时 report dir，不污染 harness/reports/*
-    8. 不生成 latest
-    9. 不修改 docs/memory/*
-    10. 不修改 memory_rules.yml
+    warn 模式：
+        1. 正常通过时 exit code = 0
+        2. fast gate 失败时 exit code 仍为 0
+        3. 失败时输出 WARNING
+        4. 失败时输出 rule_id
+        5. 失败时提示运行 python harness/run_fast_gate.py
+        6. 脚本异常时 exit code 仍为 0
+        7. 使用临时 report dir，不污染 harness/reports/*
+        8. 不生成 latest
+        9. 不修改 docs/memory/*
+        10. 不修改 memory_rules.yml
+
+    blocking 模式（Step 23）：
+        11. 正常通过时 exit code = 0
+        12. active+blocking=true 失败时 exit code 非 0
+        13. 失败时输出 Memory Harness Blocking Error
+        14. 失败时输出 rule_id
+        15. 失败时输出 rollback plan
+        16. 基础设施故障时不阻断（exit 0）
 """
 
 from __future__ import annotations
@@ -34,6 +43,7 @@ from harness.run_precommit_memory_warn import (
     _get_worktree_dirty,
     _record_observation,
     _run_fast_gate_step3,
+    render_blocking_output,
     render_warn_output,
     run_precommit_warn,
 )
@@ -1028,6 +1038,266 @@ class TestObservationRecording:
         # 验证确实生成了 observation 文件
         json_files = list(Path(obs_dir).glob("*.json"))
         assert len(json_files) == 1
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 测试：render_blocking_output — blocking 模式输出格式
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+def test_render_blocking_output_pass():
+    """blocking 模式全部通过时应输出简洁的 PASS 摘要。"""
+    report = _make_pass_report()
+    analysis = _analyze_enforcement(report)
+    output = render_blocking_output(analysis)
+
+    assert "全部通过" in output
+
+
+def test_render_blocking_output_failure_shows_blocking_error():
+    """blocking 模式失败时必须输出 Memory Harness Blocking Error。"""
+    report = _make_blocking_failure_report()
+    analysis = _analyze_enforcement(report)
+    output = render_blocking_output(analysis)
+
+    assert "Memory Harness Blocking Error" in output
+
+
+def test_render_blocking_output_failure_shows_rule_id():
+    """blocking 模式失败时必须输出 rule_id。"""
+    report = _make_blocking_failure_report()
+    analysis = _analyze_enforcement(report)
+    output = render_blocking_output(analysis)
+
+    assert "TA-R018" in output
+    assert "rule_id" in output.lower()
+
+
+def test_render_blocking_output_failure_shows_rollback_plan():
+    """blocking 模式失败时必须输出 rollback plan。"""
+    report = _make_blocking_failure_report()
+    analysis = _analyze_enforcement(report)
+    output = render_blocking_output(analysis)
+
+    assert "rollback plan" in output.lower()
+
+
+def test_render_blocking_output_failure_shows_failed_check():
+    """blocking 模式失败时必须列出失败的检查项。"""
+    report = _make_blocking_failure_report()
+    analysis = _analyze_enforcement(report)
+    output = render_blocking_output(analysis)
+
+    assert "check_result_fusion_safety" in output
+
+
+def test_render_blocking_output_failure_shows_commit_blocked():
+    """blocking 模式失败时必须明确说明 commit 已阻断。"""
+    report = _make_blocking_failure_report()
+    analysis = _analyze_enforcement(report)
+    output = render_blocking_output(analysis)
+
+    assert "阻断" in output
+
+
+def test_render_blocking_output_failure_suggests_fast_gate():
+    """blocking 模式失败时必须提示运行 run_fast_gate.py。"""
+    report = _make_blocking_failure_report()
+    analysis = _analyze_enforcement(report)
+    output = render_blocking_output(analysis)
+
+    assert "python harness/run_fast_gate.py" in output
+
+
+def test_render_blocking_output_no_enforcement():
+    """blocking 模式无 enforcement 报告时应输出 WARN 跳过信息（基础设施故障不阻断）。"""
+    report = _make_no_enforcement_report()
+    analysis = _analyze_enforcement(report)
+    output = render_blocking_output(analysis)
+
+    assert "WARN" in output
+    assert "跳过" in output
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 测试：blocking 模式 —— exit code 与行为
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestBlockingMode:
+    """Step 23 pre-commit blocking 模式测试。"""
+
+    def test_blocking_mode_pass_returns_zero(self, monkeypatch):
+        """blocking 模式全部通过时 exit code 为 0。"""
+        monkeypatch.setattr(
+            "harness.run_precommit_memory_warn._run_fast_gate_step3",
+            lambda report_dir: _make_pass_report(),
+        )
+        exit_code = run_precommit_warn(mode="blocking")
+        assert exit_code == 0
+
+    def test_blocking_mode_failure_returns_nonzero(self, monkeypatch):
+        """blocking 模式 active+blocking=true 规则失败时 exit code 非 0。"""
+        monkeypatch.setattr(
+            "harness.run_precommit_memory_warn._run_fast_gate_step3",
+            lambda report_dir: _make_blocking_failure_report(),
+        )
+        exit_code = run_precommit_warn(mode="blocking")
+        assert exit_code != 0
+        assert exit_code == 1
+
+    def test_blocking_mode_failure_output_blocking_error(self, capsys, monkeypatch):
+        """blocking 模式失败时输出必须包含 Memory Harness Blocking Error。"""
+        monkeypatch.setattr(
+            "harness.run_precommit_memory_warn._run_fast_gate_step3",
+            lambda report_dir: _make_blocking_failure_report(),
+        )
+        run_precommit_warn(mode="blocking")
+        captured = capsys.readouterr()
+        assert "Memory Harness Blocking Error" in captured.out
+
+    def test_blocking_mode_failure_output_rule_id(self, capsys, monkeypatch):
+        """blocking 模式失败时输出必须包含 rule_id。"""
+        monkeypatch.setattr(
+            "harness.run_precommit_memory_warn._run_fast_gate_step3",
+            lambda report_dir: _make_blocking_failure_report(),
+        )
+        run_precommit_warn(mode="blocking")
+        captured = capsys.readouterr()
+        assert "TA-R018" in captured.out
+
+    def test_blocking_mode_failure_output_rollback_plan(self, capsys, monkeypatch):
+        """blocking 模式失败时输出必须包含 rollback plan。"""
+        monkeypatch.setattr(
+            "harness.run_precommit_memory_warn._run_fast_gate_step3",
+            lambda report_dir: _make_blocking_failure_report(),
+        )
+        run_precommit_warn(mode="blocking")
+        captured = capsys.readouterr()
+        assert "rollback plan" in captured.out.lower()
+
+    def test_blocking_mode_infra_error_returns_zero(self, monkeypatch):
+        """blocking 模式下 fast gate 基础设施故障时 exit code 仍为 0。"""
+        monkeypatch.setattr(
+            "harness.run_precommit_memory_warn._run_fast_gate_step3",
+            lambda report_dir: None,
+        )
+        exit_code = run_precommit_warn(mode="blocking")
+        assert exit_code == 0
+
+    def test_blocking_mode_exception_returns_zero(self, monkeypatch):
+        """blocking 模式下内部异常时 exit code 仍为 0（基础设施故障不阻断）。"""
+        def _raise_exception(report_dir):
+            raise RuntimeError("模拟内部异常")
+        monkeypatch.setattr(
+            "harness.run_precommit_memory_warn._run_fast_gate_step3",
+            _raise_exception,
+        )
+        exit_code = run_precommit_warn(mode="blocking")
+        assert exit_code == 0
+
+    def test_blocking_mode_pass_quiet(self, capsys, monkeypatch):
+        """blocking 模式 quiet + 全部通过时不应输出。"""
+        monkeypatch.setattr(
+            "harness.run_precommit_memory_warn._run_fast_gate_step3",
+            lambda report_dir: _make_pass_report(),
+        )
+        run_precommit_warn(mode="blocking", quiet=True)
+        captured = capsys.readouterr()
+        assert captured.out.strip() == ""
+
+    def test_blocking_mode_failure_still_outputs_in_quiet(self, capsys, monkeypatch):
+        """blocking 模式 quiet 但有阻断失败时仍应输出。"""
+        monkeypatch.setattr(
+            "harness.run_precommit_memory_warn._run_fast_gate_step3",
+            lambda report_dir: _make_blocking_failure_report(),
+        )
+        run_precommit_warn(mode="blocking", quiet=True)
+        captured = capsys.readouterr()
+        assert "Memory Harness Blocking Error" in captured.out
+
+    def test_blocking_mode_records_observation(self, monkeypatch, tmp_path):
+        """blocking 模式 + --record-observation 应生成 observation 文件。"""
+        monkeypatch.setattr(
+            "harness.run_precommit_memory_warn._run_fast_gate_step3",
+            lambda report_dir: _make_pass_report(),
+        )
+        monkeypatch.setattr(
+            "harness.run_precommit_memory_warn._get_worktree_dirty",
+            lambda: False,
+        )
+        monkeypatch.setattr(
+            "harness.run_precommit_memory_warn._get_git_info",
+            lambda: {"commit": "abc123", "branch": "main"},
+        )
+
+        obs_dir = str(tmp_path / "history")
+        exit_code = run_precommit_warn(
+            mode="blocking",
+            record_observation=True,
+            observation_dir=obs_dir,
+        )
+        assert exit_code == 0
+
+        json_files = list(Path(obs_dir).glob("*.json"))
+        assert len(json_files) == 1
+        assert "latest" not in json_files[0].name.lower()
+
+        # 验证 observation 记录了 blocking 模式
+        data = json.loads(json_files[0].read_text(encoding="utf-8"))
+        assert data["precommit_mode"] == "blocking"
+
+    def test_blocking_mode_observation_on_failure(self, monkeypatch, tmp_path):
+        """blocking 模式失败时 observation 应记录 exit_code 非 0。"""
+        monkeypatch.setattr(
+            "harness.run_precommit_memory_warn._run_fast_gate_step3",
+            lambda report_dir: _make_blocking_failure_report(),
+        )
+        monkeypatch.setattr(
+            "harness.run_precommit_memory_warn._get_worktree_dirty",
+            lambda: False,
+        )
+        monkeypatch.setattr(
+            "harness.run_precommit_memory_warn._get_git_info",
+            lambda: {"commit": "abc123", "branch": "main"},
+        )
+
+        obs_dir = str(tmp_path / "history")
+        exit_code = run_precommit_warn(
+            mode="blocking",
+            record_observation=True,
+            observation_dir=obs_dir,
+        )
+        assert exit_code == 1
+
+        json_files = list(Path(obs_dir).glob("*.json"))
+        data = json.loads(json_files[0].read_text(encoding="utf-8"))
+        assert data["exit_code"] == 1
+        assert data["memory_warn_exit_code"] == 1
+        assert data["precommit_mode"] == "blocking"
+        assert data["boundary_confirmations"]["no_blocking"] is False
+
+    def test_main_blocking_flag(self, monkeypatch):
+        """main() 的 --mode blocking 标志应正确传递。"""
+        from harness.run_precommit_memory_warn import main
+
+        monkeypatch.setattr(
+            "harness.run_precommit_memory_warn._run_fast_gate_step3",
+            lambda report_dir: _make_pass_report(),
+        )
+        result = main(["--mode", "blocking"])
+        assert result == 0
+
+    def test_main_blocking_flag_quiet(self, monkeypatch):
+        """main() --mode blocking --quiet 应正确传递。"""
+        from harness.run_precommit_memory_warn import main
+
+        monkeypatch.setattr(
+            "harness.run_precommit_memory_warn._run_fast_gate_step3",
+            lambda report_dir: _make_blocking_failure_report(),
+        )
+        result = main(["--mode", "blocking", "--quiet"])
+        assert result == 1
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
