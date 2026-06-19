@@ -28,10 +28,12 @@ properties:
   safety_tier:
     type: string
     description: >
-      安全层级——控制管道可以执行的操作类型。
+      安全层级——控制管道可以编译和静态校验的操作类型。
       'query' 是 Phase 1 的只读模式（SELECT ONLY）。
-      'pipeline' 是 Phase 2 扩展模式（可写 generated.*）。
-      不是"模式切换"——pipeline 包含 query 的所有约束，再叠加写入限制。
+      'pipeline' 是 Phase 2 扩展模式（允许编译和静态校验写操作，目标 generated.*）。
+      注意：safety_tier=pipeline 允许写操作通过编译和静态校验，但不是运行时写权限开关——
+      当前 Layer 6 执行器对所有 safety_tier 均使用 read_only=True，项目没有可写执行入口。
+      不是"模式切换"——pipeline 包含 query 的所有约束，再叠加写入编译/校验规则。
     enum: [query, pipeline]
     default: "query"
 
@@ -107,7 +109,7 @@ properties:
         description: "DuckDB 数据库文件路径"
       read_only:
         type: boolean
-        description: "是否强制 read_only 模式。safety_tier=query 时必须为 true。"
+        description: "是否强制 read_only 模式。当前所有 safety_tier 均强制 true——项目没有可写执行入口。"
         default: true
     additionalProperties: false
 
@@ -173,7 +175,7 @@ $defs:
 
       pipeline:
         type: object
-        description: "管道层——Phase 2 扩展，可写 generated.*"
+        description: "管道层——Phase 2 扩展，允许编译和静态校验写 generated.* 操作（CTAS/INSERT/VIEW）。注意：此层级定义的是编译和校验权限，不是运行时写权限——当前执行器为 read_only=True"
         properties:
           allowed_operations:
             type: array
@@ -199,7 +201,7 @@ $defs:
             type: array
             items:
               enum: [generated]
-            description: "只能写入 generated schema"
+            description: "静态校验时只允许写入 generated schema（编译和校验权限，不是运行时写入能力——当前执行器为只读）"
           forbidden_write_schemas:
             type: array
             items:

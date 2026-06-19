@@ -453,9 +453,11 @@ src/
 
 ### 8.2 允许与禁止的 SQL 操作
 
-**业务草案执行链只允许**：`SELECT` 和 `WITH ... SELECT ...`（CTE 查询）。
+**v2 业务草案执行链只允许**：`SELECT` 和 `WITH ... SELECT ...`（CTE 查询）。
 
 > EXPLAIN / DESCRIBE / SHOW 虽为只读诊断语句，但不产生业务数据，已从业务执行链移除（2026-06-17 安全口径收窄）。未来可通过独立 diagnostic mode 使用。
+
+**v1 Phase 2/DAG 编译器保留**：`compile_operation()` 可编译 CTAS/INSERT OVERWRITE/INSERT INTO/CREATE VIEW + 3 方言。`safety_tier=pipeline` 允许这些操作通过静态校验。但 `run_pipeline.py` 只调用 `compile_sql()`（SELECT），Layer 6 执行器为 `read_only=True`——**v1 可编译写操作，但当前不可执行**。
 
 **禁止**：
 - INSERT、UPDATE、DELETE、MERGE、REPLACE、TRUNCATE
@@ -517,6 +519,8 @@ scripts/dev_agent/                 ← v2 CLI 入口
 ```
 
 **规则**：v1 pipeline 保留、不删除、不重构。v2 workflow 是当前开发主线。
+
+> **v1 写操作编译器说明**：v1 Phase 2/DAG 保留 `compile_operation()`（CTAS/INSERT/VIEW）的编译能力和 `validate_pipeline()` 的静态校验能力，`safety_tier=pipeline` 允许写操作通过编译和静态校验。但 `run_pipeline.py` 只调用 `compile_sql()`（SELECT），Layer 6 执行器使用 `read_only=True`——**当前项目没有可写执行入口**。`safety_tier=pipeline` 不是运行时写权限开关。（详见 PROJECT_STATUS.md v1/v2 能力矩阵）
 
 ### 10.2 已完成（DONE）
 

@@ -162,7 +162,9 @@ Obsidian/
 
 | 组件 | 定位 |
 |------|------|
-| `scripts/pipeline/run_pipeline.py` | v1 legacy：8 层确定性管道，保留为验证底座 + fallback 编译器 |
+| `scripts/pipeline/run_pipeline.py` | v1 legacy：8 层确定性管道，保留为验证底座 + fallback 编译器。只调用 `compile_sql()`（SELECT），Layer 6 `read_only=True` |
+| `scripts/pipeline/layer4_operation.py` | v1 写操作编译器：`compile_operation()` 可编译 CTAS/INSERT/VIEW，3 方言。**可编译、可静态校验，但当前未接入可写执行器** |
+| `scripts/pipeline/layer5_validate_pipeline.py` | v1 DAG + safety_tier 静态校验：`validate_pipeline()` 允许 pipeline tier 写操作通过编译时校验。**safety_tier 不是运行时写权限** |
 | `scripts/dev_agent/build_review_package.py` | v2 主入口：M2 Review Package 生成 |
 | `scripts/dev_agent/verify_review_package.py` | v2 主入口：M3 验证引擎 |
 

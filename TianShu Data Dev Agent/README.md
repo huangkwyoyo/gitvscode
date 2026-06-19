@@ -8,7 +8,7 @@
 - **最终产物不是生产数据**：Agent 的最终产物是 Review Package（审查材料包）
 - **人是最终决策者**：人审查 SQL、Spark DSL、测试结果和不确定项后决定是否上线
 - **LLM 可生成代码草案**：SQL、Spark DSL、Python 测试、配置、文档都属于不可信草案
-- **数据执行必须过 Validator**：任何 SQL/Spark 代码执行前都必须通过安全校验，只允许 SELECT 和 WITH SELECT（CTE 查询），只能连接开发环境，只读、限行、限时
+- **数据执行必须过 Validator**：v2 主链路任何 SQL/Spark 代码执行前都必须通过安全校验，只允许 SELECT 和 WITH SELECT（CTE 查询），只能连接开发环境，只读、限行、限时。v1 pipeline 保留写操作编译和静态校验能力，但当前未接入可写执行器（`read_only=True`）
 - **Agent 不越权**：Agent 不能上线、不能写生产库、不能绕过人审
 - **代码可追溯**：所有表/字段引用标注来源
 - **禁止查询 Bronze/Silver 层**
@@ -71,7 +71,7 @@ python -m pytest tests\test_pipeline.py -v
 核心边界：
 
 - **代码生成边界**：LLM 可以写 SQL、Spark DSL、Python 测试、配置和文档，但全部是不可信草案。
-- **数据执行边界**：任何 SQL/Spark 代码执行前必须过 Validator，只允许 SELECT 和 WITH SELECT（CTE 查询），只能连接开发环境，只读、限行、限时。Agent 不能上线、不能写生产库、不能绕过人审。
+- **数据执行边界**：v2 主链路任何 SQL/Spark 代码执行前必须过 Validator，只允许 SELECT 和 WITH SELECT（CTE 查询），只能连接开发环境，只读、限行、限时。Agent 不能上线、不能写生产库、不能绕过人审。v1 pipeline 保留写操作（CTAS/INSERT/VIEW）编译和静态校验能力，但当前未接入可写执行器（Layer 6 `read_only=True`）。
 
 ## 目录结构
 

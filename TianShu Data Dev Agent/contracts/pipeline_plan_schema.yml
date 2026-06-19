@@ -140,7 +140,7 @@ $defs:
   # ═══════════════════════════════════════════════════════
   StepOperation:
     type: string
-    description: "步骤的 SQL 操作类型"
+    description: "步骤的 SQL 操作类型（编译时操作——执行器 read_only=True 限制所有操作为只读）"
     enum:
       - SELECT_ONLY                    # 只读查询（Phase 1 模式）
       - CREATE_TABLE_AS_SELECT         # 创建表并填充数据
