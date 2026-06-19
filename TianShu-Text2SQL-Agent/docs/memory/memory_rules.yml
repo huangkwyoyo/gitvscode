@@ -383,8 +383,8 @@ rules:
   # ═════════════════════════════════════════════════════════════════════════════
   - rule_id: TA-R023
     title: "CrossDomainPolicy 不得削弱跨域拒绝和因果边界——unknown 反问、traffic+safety 禁止因果、standard_fine_total 非实际收入"
-    status: proposed
-    blocking: false
+    status: active
+    blocking: true
     severity: high
     source_memory: "Phase 3B/3D 架构设计——CrossDomainPolicy 跨域策略"
     risk_ids:
@@ -398,7 +398,7 @@ rules:
       - tests/test_cross_domain_policy.py
     required_evals:
       - evals/e2e_cases.yml
-    notes: "跨域隐私保护、因果禁止、unknown 反问不可削弱。decision.reason 必须清晰可追溯。"
+    notes: "2026-06-19 晋升 active+blocking=true，审批人: huangkwyoyo (HAR-TA-R023-20260619T230600)，基于 Step 25 Blocking Expansion Readiness Review。跨域隐私保护、因果禁止、unknown 反问不可削弱。decision.reason 必须清晰可追溯。"
 
   # ═════════════════════════════════════════════════════════════════════════════
   # TA-R024: ChartSpec 不生成前端代码

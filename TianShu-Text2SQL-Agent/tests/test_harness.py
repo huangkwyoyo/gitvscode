@@ -1022,10 +1022,10 @@ class TestStep7FullCoverage:
         )
 
     def test_all_new_rules_are_proposed_not_blocking(self):
-        """除已晋升的 TA-R018/TA-R019/TA-R020 外，其余规则保持 proposed + blocking=false"""
+        """除已晋升的 TA-R018/TA-R019/TA-R020/TA-R023 外，其余规则保持 proposed + blocking=false"""
         from harness.checks.check_memory_update import load_memory_rules_registry
 
-        active_rules = {"TA-R018", "TA-R019", "TA-R020"}  # Step 8b/Step 26/Step 26b 已晋升
+        active_rules = {"TA-R018", "TA-R019", "TA-R020", "TA-R023"}  # Step 8b/26/26b/26c 已晋升
         registry = load_memory_rules_registry()
         for rule in registry["rules"]:
             rid = rule["rule_id"]

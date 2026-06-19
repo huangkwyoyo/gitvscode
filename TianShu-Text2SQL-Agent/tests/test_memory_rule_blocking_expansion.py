@@ -417,8 +417,8 @@ def test_ready_candidates_have_complete_assets():
 
 
 def test_ready_candidates_count_reasonable():
-    """ready candidates 数量应在 1~3 之间。"""
+    """ready candidates 数量应在 0~3 之间（0 表示所有候选已晋升完毕）。"""
     review = review_rules()
-    assert 1 <= len(review.ready_candidates) <= 3, (
-        f"ready candidates 数量 {len(review.ready_candidates)} 不在 1~3 范围内"
+    assert 0 <= len(review.ready_candidates) <= 3, (
+        f"ready candidates 数量 {len(review.ready_candidates)} 不在 0~3 范围内"
     )
