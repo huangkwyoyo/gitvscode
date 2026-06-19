@@ -249,6 +249,20 @@ class ReleaseStatus(str, Enum):
     SUPERSEDED = "SUPERSEDED"               # 已批准制品发生变化，旧批准失效
 
 
+class MaterializationStatus(str, Enum):
+    """物化验证状态——M5b 新增。
+
+    跟踪一次性可写 Sandbox 中部署写入代码的执行验证状态。
+    只有清理成功后状态才能转为 MATERIALIZATION_VALIDATED。
+    CLEANUP_FAILED 优先级高于 FAILED——因为系统处于不干净状态。
+    """
+    PENDING = "PENDING"                           # 尚未执行物化验证
+    RUNNING = "RUNNING"                           # 正在执行物化验证
+    MATERIALIZATION_VALIDATED = "MATERIALIZATION_VALIDATED"  # 物化验证通过 + 清理成功
+    FAILED = "FAILED"                             # 物化验证失败
+    CLEANUP_FAILED = "CLEANUP_FAILED"             # 清理失败（优先级高于 FAILED）
+
+
 
 @dataclass
 class ArtifactHashes:
@@ -276,6 +290,111 @@ class ArtifactHashes:
             "deploy_sql": self.deploy_sql,
             "deploy_spark": self.deploy_spark,
             "deployment_manifest": self.deployment_manifest,
+        }
+
+
+@dataclass
+class MaterializationCheckResult:
+    """单条物化验证检查的结果——M5b 新增。
+
+    每条检查有独立状态和详细信息，支持 PENDING/WARN/FAIL/PASS。
+    """
+    check_id: str                                   # 检查项标识（如 "output_object_exists"）
+    name: str                                       # 人类可读的检查名（如 "目标对象存在"）
+    status: str = "PENDING"                         # PASS | FAIL | WARN | PENDING | SKIPPED
+    detail: str = ""                                # 详细信息
+    severity: str = "FAIL"                          # FAIL | WARN
+
+    def to_dict(self) -> dict[str, Any]:
+        """序列化为字典"""
+        return {
+            "check_id": self.check_id,
+            "name": self.name,
+            "status": self.status,
+            "detail": self.detail,
+            "severity": self.severity,
+        }
+
+
+@dataclass
+class MaterializationResult:
+    """物化验证完整结果——M5b 新增。
+
+    包含 Sandbox 执行结果、所有检查项、报告路径和清理状态。
+    overall_status 聚合规则：
+      - 任一 FAIL → FAIL
+      - CLEANUP_FAILED → FAIL（优先级最高）
+      - 全 PASS 但有 WARN → WARN
+      - 全 PASS 且清理成功 → PASS
+    """
+    verification_id: str = ""                       # 本次验证的唯一标识
+    request_id: str = ""                            # Review Package 标识
+    sandbox_id: str = ""                            # Sandbox 唯一标识（UUID）
+    sandbox_path: str = ""                          # Sandbox 临时目录路径
+    declared_target: str = ""                       # 原始声明目标表
+    sandbox_target: str = ""                        # Sandbox 内部重写目标表
+    engine: str = "duckdb"                          # 执行引擎
+    operation: str = "CTAS"                         # 写入操作类型
+    started_at: str = ""                            # 开始时间（ISO8601）
+    finished_at: str = ""                           # 结束时间（ISO8601）
+    overall_status: str = "PENDING"                 # PASS | FAIL | WARN | PENDING
+    cleanup_status: str = "PENDING"                 # 清理状态
+    source_query_hash_status: str = "PENDING"       # source_query_hash 校验状态
+    deploy_artifact_hash_status: str = "PENDING"    # deploy artifact hash 校验状态
+    static_validation_status: str = "PENDING"       # 静态校验状态
+    execution_status: str = "PENDING"               # CTAS 执行状态
+    output_schema_status: str = "PENDING"           # 输出 schema 校验状态
+    row_count_status: str = "PENDING"               # 行数校验状态
+    null_check_status: str = "PENDING"              # 空值校验状态
+    uniqueness_status: str = "PENDING"              # 唯一键校验状态
+    idempotency_status: str = "PENDING"             # 幂等性校验状态
+    checks: list[MaterializationCheckResult] = field(default_factory=list)
+    output_row_count: int = 0                       # 物化表行数
+    select_row_count: int = 0                       # SELECT 行数
+    output_columns: list[str] = field(default_factory=list)       # 输出列名
+    output_column_types: list[str] = field(default_factory=list)  # 输出列类型
+    null_rates: dict[str, float] = field(default_factory=dict)    # 各列空值率
+    numeric_sums: dict[str, float] = field(default_factory=dict)  # 数值列汇总
+    warnings: list[str] = field(default_factory=list)
+    failures: list[str] = field(default_factory=list)
+    human_review_required: bool = True
+    generated_at: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        """序列化为字典——供 materialization_verification.yml 使用"""
+        return {
+            "verification_id": self.verification_id,
+            "request_id": self.request_id,
+            "sandbox_id": self.sandbox_id,
+            "sandbox_path": self.sandbox_path,
+            "declared_target": self.declared_target,
+            "sandbox_target": self.sandbox_target,
+            "engine": self.engine,
+            "operation": self.operation,
+            "started_at": self.started_at,
+            "finished_at": self.finished_at,
+            "overall_status": self.overall_status,
+            "cleanup_status": self.cleanup_status,
+            "source_query_hash_status": self.source_query_hash_status,
+            "deploy_artifact_hash_status": self.deploy_artifact_hash_status,
+            "static_validation_status": self.static_validation_status,
+            "execution_status": self.execution_status,
+            "output_schema_status": self.output_schema_status,
+            "row_count_status": self.row_count_status,
+            "null_check_status": self.null_check_status,
+            "uniqueness_status": self.uniqueness_status,
+            "idempotency_status": self.idempotency_status,
+            "checks": [c.to_dict() for c in self.checks],
+            "output_row_count": self.output_row_count,
+            "select_row_count": self.select_row_count,
+            "output_columns": self.output_columns,
+            "output_column_types": self.output_column_types,
+            "null_rates": self.null_rates,
+            "numeric_sums": self.numeric_sums,
+            "warnings": self.warnings,
+            "failures": self.failures,
+            "human_review_required": self.human_review_required,
+            "generated_at": self.generated_at,
         }
 
 
