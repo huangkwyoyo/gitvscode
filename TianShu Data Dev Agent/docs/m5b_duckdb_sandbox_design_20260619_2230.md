@@ -154,19 +154,19 @@ M5a 已完成以下静态闭环：
 │     ├─ 开发库文件 hash 不变                                │
 │     └─ 开发库文件 mtime 不变                               │
 │                    ↓                                      │
-│  10. 写入物化验证报告                                      │
-│      ├─ reports/materialization_validation.md             │
-│      └─ reports/materialization_validation.yml            │
-│                    ↓                                      │
-│  11. materialization_status → MATERIALIZATION_VALIDATED   │
-│                    ↓                                      │
-│  12. 清理 Sandbox                                         │
+│  10. 清理 Sandbox                                         │
 │      ├─ 关闭 DuckDB 连接                                   │
 │      ├─ 删除 sandbox.db                                    │
 │      ├─ 删除 sandbox 临时目录                              │
 │      └─ 确认清理完成                                       │
+│                    ↓ 清理成功                              │
+│  11. 写入物化验证报告                                      │
+│      ├─ reports/materialization_validation.md             │
+│      └─ reports/materialization_validation.yml            │
+│                    ↓                                      │
+│  12. materialization_status → MATERIALIZATION_VALIDATED   │
 │                                                         │
-│  任一阶段失败 → 执行清理 → materialization_status = FAILED │
+│  任一验证失败 → 执行清理 → materialization_status = FAILED │
 │  清理本身失败 → materialization_status = CLEANUP_FAILED   │
 │                                                         │
 └─────────────────────────────────────────────────────────┘
