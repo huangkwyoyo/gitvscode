@@ -115,6 +115,39 @@ def verify_review_package(
     sql_static_status = _sql_static_status(static_report)
     spark_static_status = _spark_static_status(static_report)
 
+    # M5：部署产物静态检查
+    deploy_sql = ""
+    deploy_spark_code = ""
+    deploy_manifest_dict: dict[str, Any] = {}
+    deploy_static_status = "PENDING"
+    deploy_static_report: ValidationReport | None = None
+
+    deploy_sql_path = package_dir / "deploy" / "main.sql"
+    deploy_spark_path = package_dir / "deploy" / "main.py"
+    deploy_manifest_path = package_dir / "deployment_manifest.yml"
+
+    if deploy_sql_path.is_file():
+        deploy_sql = deploy_sql_path.read_text(encoding="utf-8")
+    if deploy_spark_path.is_file():
+        deploy_spark_code = deploy_spark_path.read_text(encoding="utf-8")
+    if deploy_manifest_path.is_file():
+        deploy_manifest_dict = (
+            yaml.safe_load(deploy_manifest_path.read_text(encoding="utf-8")) or {}
+        )
+
+    has_deploy_artifacts = deploy_sql_path.is_file() and deploy_manifest_path.is_file()
+    if has_deploy_artifacts:
+        deploy_static_report = validator.validate_deploy_static(
+            deploy_sql=deploy_sql,
+            deploy_spark=deploy_spark_code,
+            deployment_manifest=deploy_manifest_dict,
+            verified_sql=sql,
+            verified_spark=spark_code,
+        )
+        deploy_static_status = _status_from_checks(deploy_static_report.checks)
+    else:
+        deploy_static_status = "SKIPPED"
+
     sql_result: SQLResult | None = None
     sql_sample_status = "PENDING"
     if sql_static_status == "FAIL":
@@ -164,6 +197,19 @@ def verify_review_package(
         cross_detail=cross_result.detail,
     )
 
+    # M5：收集部署检查发现
+    deploy_warnings: list[str] = []
+    deploy_failures: list[str] = []
+    if deploy_static_report is not None:
+        for check in deploy_static_report.checks:
+            if check.status == ValidationStatus.FAILED:
+                deploy_failures.append(f"[部署] {check.name}: {check.detail}")
+            elif check.status == ValidationStatus.WARN:
+                deploy_warnings.append(f"[部署] {check.name}: {check.detail}")
+
+    warnings.extend(deploy_warnings)
+    failures.extend(deploy_failures)
+
     # M4b：合并 artifact 完整性警告
     warnings.extend(integrity_warnings)
 
@@ -173,6 +219,7 @@ def verify_review_package(
         spark_static_status=spark_static_status,
         spark_sample_status=spark_sample_status,
         cross_status=cross_status,
+        deploy_static_status=deploy_static_status,
         warnings=warnings,
         failures=failures,
     )
@@ -240,6 +287,10 @@ def verify_review_package(
             failures=failures,
             no_sql_run=no_sql_run,
             conn_provided=conn is not None,
+            deploy_static_status=deploy_static_status,
+            deploy_static_checks=(
+                deploy_static_report.checks if deploy_static_report else []
+            ),
         ),
         encoding="utf-8",
     )
@@ -271,6 +322,7 @@ def verify_review_package(
                 spark_static_status=spark_static_status,
                 spark_sample_status=spark_sample_status,
                 cross_status=cross_status,
+                deploy_static_status=deploy_static_status,
                 warnings=warnings,
                 failures=failures,
                 verification_id=verification_id,
@@ -327,6 +379,7 @@ def _build_verification_summary_yml(
     artifact_hashes_verified: dict[str, Any] | None = None,
     decision_state_before_verify: str = "",
     decision_state_after_verify: str | None = None,
+    deploy_static_status: str = "PENDING",
 ) -> dict[str, Any]:
     """构造 verification_summary.yml——结构化验证摘要（M4b）。
 
@@ -348,6 +401,7 @@ def _build_verification_summary_yml(
         "spark_static_status": spark_static_status,
         "spark_sample_status": spark_sample_status,
         "cross_validation_status": cross_status,
+        "deploy_static_status": deploy_static_status,
         "warnings": warnings,
         "failures": failures,
     }
@@ -481,6 +535,7 @@ def _overall_status(
     cross_status: str,
     warnings: list[str],
     failures: list[str],
+    deploy_static_status: str = "PENDING",
 ) -> str:
     """计算总体状态，任何跳过或待定都不能伪装 PASS。"""
     statuses = {
@@ -490,6 +545,9 @@ def _overall_status(
         spark_sample_status,
         cross_status,
     }
+    # M5：部署状态仅在 FAIL/WARN/SKIPPED 时纳入聚合（PASS 保持向后兼容）
+    if deploy_static_status in {"FAIL", "WARN", "SKIPPED"}:
+        statuses.add(deploy_static_status)
     if failures or "FAIL" in statuses:
         return "FAIL"
     if "WARN" in statuses or warnings:
@@ -513,6 +571,8 @@ def _build_verification_report(
     failures: list[str],
     no_sql_run: bool,
     conn_provided: bool,
+    deploy_static_status: str = "PENDING",
+    deploy_static_checks: list = None,
 ) -> str:
     """生成 verification.md。"""
     sql_static_status = _sql_static_status(static_report)
@@ -529,6 +589,7 @@ def _build_verification_report(
         f"- SQL sample run 状态：{sql_sample_status}",
         f"- Spark 静态检查状态：{spark_static_status}",
         f"- Spark sample run 状态：{spark_sample_status}",
+        f"- 部署静态检查状态：{deploy_static_status}",
         "",
         "## PENDING / SKIPPED 原因",
     ]
@@ -550,6 +611,16 @@ def _build_verification_report(
     ])
     for check in static_report.checks:
         lines.append(f"- {check.name}: {_status_text(check.status)}，{check.detail}")
+
+    # M5：部署静态检查明细
+    deploy_checks = deploy_static_checks or []
+    if deploy_checks:
+        lines.extend([
+            "",
+            "## 部署静态检查明细",
+        ])
+        for check in deploy_checks:
+            lines.append(f"- {check.name}: {_status_text(check.status)}，{check.detail}")
 
     lines.extend([
         "",

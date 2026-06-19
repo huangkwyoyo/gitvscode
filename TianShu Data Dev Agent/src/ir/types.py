@@ -110,12 +110,45 @@ class DecisionStatus(str, Enum):
     Agent 只能写入 PENDING_REVIEW。
     APPROVED / REQUEST_CHANGES / REJECTED 只能由人通过 CLI 设置。
     SUPERSEDED 由 M3 重新验证且旧状态为 APPROVED 时自动触发。
+
+    语义区分（M5 部署绑定）：
+      - APPROVED 仅表示 QUERY_LOGIC_APPROVED（只读查询逻辑已审查）
+      - RELEASE_APPROVED 才表示部署产物及配置已审查，可以上线
+      - 没有 RELEASE_APPROVED 时禁止声明"可上线"
     """
     PENDING_REVIEW = "PENDING_REVIEW"       # 等待人审（Agent 初始写入）
     APPROVED = "APPROVED"                   # 人审通过（仅人可设置）
     REQUEST_CHANGES = "REQUEST_CHANGES"     # 人审要求修改（仅人可设置）
     REJECTED = "REJECTED"                   # 人审拒绝（仅人可设置）
     SUPERSEDED = "SUPERSEDED"               # 被新验证替代（M4b 自动过渡）
+
+class DeployWriteStrategy(str, Enum):
+    """部署写入策略——M5 部署产物确定性封装。
+
+    复用现有 contract 和 operation compiler 已支持的写入策略。
+    禁止任意文件路径写入和未声明分区列的分区覆盖。
+    """
+    CREATE_TABLE_AS_SELECT = "CREATE_TABLE_AS_SELECT"       # CTAS 全量覆盖建表
+    INSERT_OVERWRITE_PARTITION = "INSERT_OVERWRITE_PARTITION" # 分区覆盖写入
+    INSERT_INTO_PARTITION = "INSERT_INTO_PARTITION"           # 分区追加写入
+    CREATE_VIEW = "CREATE_VIEW"                               # 创建视图
+
+
+class ReleaseStatus(str, Enum):
+    """发布审批状态——M5 部署绑定。
+
+    与 DecisionStatus 互补而非替代：
+      - DecisionStatus.APPROVED → 查询逻辑已审查
+      - ReleaseStatus.RELEASE_APPROVED → 部署产物已审查，可以上线
+
+    Agent 只能设置 DRAFT。
+    RELEASE_APPROVED / RELEASE_REJECTED 只能由人通过 CLI 设置。
+    """
+    DRAFT = "DRAFT"                         # 部署草案，尚未进入审批
+    PENDING_RELEASE_REVIEW = "PENDING_RELEASE_REVIEW"  # 等待发布审批
+    RELEASE_APPROVED = "RELEASE_APPROVED"   # 发布已批准（仅人可设置）
+    RELEASE_REJECTED = "RELEASE_REJECTED"   # 发布被拒绝（仅人可设置）
+
 
 
 @dataclass
@@ -130,6 +163,9 @@ class ArtifactHashes:
     spark_main: str = ""
     lineage_source_refs: str = ""
     verification_summary: Optional[str] = None
+    deploy_sql: str = ""                # M5：deploy/main.sql 哈希
+    deploy_spark: str = ""              # M5：deploy/main.py 哈希
+    deployment_manifest: str = ""       # M5：deployment_manifest.yml 哈希
 
     def to_dict(self) -> dict[str, Any]:
         """序列化为字典"""
@@ -138,7 +174,51 @@ class ArtifactHashes:
             "spark_main": self.spark_main,
             "lineage_source_refs": self.lineage_source_refs,
             "verification_summary": self.verification_summary,
+            "deploy_sql": self.deploy_sql,
+            "deploy_spark": self.deploy_spark,
+            "deployment_manifest": self.deployment_manifest,
         }
+
+
+@dataclass
+class DeploymentManifest:
+    """部署清单——M5 部署产物确定性封装的结构化配置。
+
+    描述如何从已验证的只读查询生成部署写入脚本。
+    所有字段默认为空或 DRAFT——不包含任何生产连接信息。
+    """
+    request_id: str = ""
+    source_query_ref: str = "sql/main.sql"      # 已验证查询的路径引用
+    source_query_hash: str = ""                  # sql/main.sql 的 SHA-256
+    target_environment: str = "STAGING"          # 目标环境（占位值，非生产）
+    target_table: str = ""                       # 目标写入表（完全限定名）
+    write_strategy: str = ""                     # 写入策略（DeployWriteStrategy 值）
+    partition_columns: list[str] = field(default_factory=list)  # 分区列列表
+    sql_deploy_artifact: str = "deploy/main.sql"  # SQL 部署脚本路径
+    spark_deploy_artifact: str = "deploy/main.py"  # Spark 部署脚本路径
+    human_review_required: bool = True           # 必须人审
+    release_status: str = "DRAFT"                # ReleaseStatus 值——默认 DRAFT
+    warnings: list[str] = field(default_factory=list)  # 人审提醒
+    human_review_points: list[str] = field(default_factory=list)  # 人审关注点
+
+    def to_dict(self) -> dict[str, Any]:
+        """序列化为字典"""
+        return {
+            "request_id": self.request_id,
+            "source_query_ref": self.source_query_ref,
+            "source_query_hash": self.source_query_hash,
+            "target_environment": self.target_environment,
+            "target_table": self.target_table,
+            "write_strategy": self.write_strategy,
+            "partition_columns": self.partition_columns,
+            "sql_deploy_artifact": self.sql_deploy_artifact,
+            "spark_deploy_artifact": self.spark_deploy_artifact,
+            "human_review_required": self.human_review_required,
+            "release_status": self.release_status,
+            "warnings": self.warnings,
+            "human_review_points": self.human_review_points,
+        }
+
 
 
 # ═══════════════════════════════════════════════════════════
@@ -714,11 +794,13 @@ class DecisionRecord:
 
 @dataclass
 class ReviewPackageManifest:
-    """Review Package 的落盘清单"""
+    """Review Package 的落盘清单——M5 扩展部署产物和发布审批"""
     request_id: str
     package_path: str
     files: list[str] = field(default_factory=list)
+    deploy_files: list[str] = field(default_factory=list)  # M5：部署产物文件列表
     status: DecisionStatus = DecisionStatus.PENDING_REVIEW
+    release_status: str = "DRAFT"           # M5：发布审批状态（ReleaseStatus 值）
     pending_items: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
@@ -727,7 +809,9 @@ class ReviewPackageManifest:
             "request_id": self.request_id,
             "package_path": self.package_path,
             "files": self.files,
+            "deploy_files": self.deploy_files,
             "status": self.status.value,
+            "release_status": self.release_status,
             "pending_items": self.pending_items,
         }
 

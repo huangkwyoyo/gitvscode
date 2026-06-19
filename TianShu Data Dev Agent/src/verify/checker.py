@@ -141,6 +141,189 @@ class Validator:
         ]
         return ValidationReport(overall_status=self._aggregate(checks), checks=checks)
 
+    def validate_deploy_static(
+        self,
+        deploy_sql: str = "",
+        deploy_spark: str = "",
+        deployment_manifest: Optional[dict[str, Any]] = None,
+        verified_sql: str = "",
+        verified_spark: str = "",
+    ) -> ValidationReport:
+        """M5：静态检查部署产物——目标表、写入策略、安全关键字、业务逻辑隔离。
+
+        Args:
+            deploy_sql: deploy/main.sql 内容
+            deploy_spark: deploy/main.py 内容
+            deployment_manifest: deployment_manifest.yml 解析后的 dict
+            verified_sql: sql/main.sql 已验证查询（用于对比）
+            verified_spark: spark/main.py 已验证查询（用于对比）
+
+        Returns:
+            ValidationReport——任一 FAIL 则部署草案不能进入发布审批
+        """
+        from src.agent.deploy_generator import (
+            ALLOWED_WRITE_SCHEMAS,
+            FORBIDDEN_DEPLOY_KEYWORDS,
+            FORBIDDEN_WRITE_SCHEMAS,
+            validate_write_boundary,
+        )
+        from src.ir.types import DeploymentManifest
+
+        manifest_dict = deployment_manifest or {}
+        checks: list[CheckResult] = []
+
+        # ── 检查 1：部署清单完整性 ──
+        manifest_errors: list[str] = []
+        if not manifest_dict.get("request_id"):
+            manifest_errors.append("deployment_manifest.yml 缺少 request_id")
+        if not manifest_dict.get("target_table"):
+            manifest_errors.append("deployment_manifest.yml 缺少 target_table")
+        if not manifest_dict.get("write_strategy"):
+            manifest_errors.append("deployment_manifest.yml 缺少 write_strategy")
+        if not manifest_dict.get("source_query_hash"):
+            manifest_errors.append("deployment_manifest.yml 缺少 source_query_hash")
+
+        if manifest_errors:
+            checks.append(CheckResult(
+                201, "部署清单完整性", ValidationStatus.FAILED,
+                "; ".join(manifest_errors), "FAIL",
+            ))
+        else:
+            checks.append(CheckResult(
+                201, "部署清单完整性", ValidationStatus.PASSED,
+                "部署清单必备字段完整", "FAIL",
+            ))
+
+        # ── 检查 2：写入边界校验（目标表、写入策略、分区列、环境）──
+        try:
+            manifest = DeploymentManifest(
+                request_id=manifest_dict.get("request_id", ""),
+                source_query_ref=manifest_dict.get("source_query_ref", "sql/main.sql"),
+                source_query_hash=manifest_dict.get("source_query_hash", ""),
+                target_environment=manifest_dict.get("target_environment", "STAGING"),
+                target_table=manifest_dict.get("target_table", ""),
+                write_strategy=manifest_dict.get("write_strategy", ""),
+                partition_columns=manifest_dict.get("partition_columns", []),
+                sql_deploy_artifact=manifest_dict.get("sql_deploy_artifact", "deploy/main.sql"),
+                spark_deploy_artifact=manifest_dict.get("spark_deploy_artifact", "deploy/main.py"),
+                human_review_required=manifest_dict.get("human_review_required", True),
+                release_status=manifest_dict.get("release_status", "DRAFT"),
+                warnings=list(manifest_dict.get("warnings", [])),
+                human_review_points=list(manifest_dict.get("human_review_points", [])),
+            )
+            boundary_errors = validate_write_boundary(manifest)
+            if boundary_errors:
+                checks.append(CheckResult(
+                    202, "部署写入边界", ValidationStatus.FAILED,
+                    "; ".join(boundary_errors), "FAIL",
+                ))
+            else:
+                checks.append(CheckResult(
+                    202, "部署写入边界", ValidationStatus.PASSED,
+                    f"目标表 {manifest.target_table}，策略 {manifest.write_strategy}，",
+                    "FAIL",
+                ))
+        except Exception as exc:
+            checks.append(CheckResult(
+                202, "部署写入边界", ValidationStatus.FAILED,
+                f"部署清单解析失败: {exc}", "FAIL",
+            ))
+
+        # ── 检查 3：目标表 schema 白名单 ──
+        target = manifest_dict.get("target_table", "")
+        if target:
+            parts = target.split(".")
+            if len(parts) >= 2:
+                schema = parts[0].lower().strip()
+                if schema in FORBIDDEN_WRITE_SCHEMAS:
+                    checks.append(CheckResult(
+                        203, "部署目标 schema", ValidationStatus.FAILED,
+                        f"禁止写入 {schema}——目标表 {target} 的 schema 在禁止列表中"
+                        f"（禁止: {', '.join(sorted(FORBIDDEN_WRITE_SCHEMAS))}）",
+                        "FAIL",
+                    ))
+                elif schema not in ALLOWED_WRITE_SCHEMAS:
+                    checks.append(CheckResult(
+                        203, "部署目标 schema", ValidationStatus.WARN,
+                        f"目标表 {target} 的 schema '{schema}' 不在标准允许列表中"
+                        f"（允许: {', '.join(sorted(ALLOWED_WRITE_SCHEMAS))}）——需人审确认",
+                        "WARN",
+                    ))
+                else:
+                    checks.append(CheckResult(
+                        203, "部署目标 schema", ValidationStatus.PASSED,
+                        f"目标表 {target} 的 schema 合法", "FAIL",
+                    ))
+
+        # ── 检查 4：SQL 部署脚本禁止关键字 ──
+        if deploy_sql.strip():
+            cleaned = deploy_sql.upper()
+            found_keywords = [
+                kw for kw in FORBIDDEN_DEPLOY_KEYWORDS
+                if re.search(rf"\b{kw}\b", cleaned)
+                # "REPLACE" 在 "CREATE OR REPLACE" 中是合法的 CTAS 语法
+                and not (kw == "REPLACE" and "CREATE OR REPLACE" in cleaned)
+            ]
+            if found_keywords:
+                checks.append(CheckResult(
+                    204, "SQL 部署禁止关键字", ValidationStatus.FAILED,
+                    f"SQL 部署脚本包含禁止关键字: {', '.join(sorted(found_keywords))}",
+                    "FAIL",
+                ))
+            else:
+                checks.append(CheckResult(
+                    204, "SQL 部署禁止关键字", ValidationStatus.PASSED,
+                    "未检测到 DROP/ALTER/TRUNCATE/DELETE 等禁止关键字", "FAIL",
+                ))
+        else:
+            checks.append(CheckResult(
+                204, "SQL 部署禁止关键字", ValidationStatus.WARN,
+                "SQL 部署脚本为空——需要人审确认", "WARN",
+            ))
+
+        # ── 检查 5：Spark 部署脚本不得复制业务逻辑 ──
+        if deploy_spark.strip() and verified_spark.strip():
+            if "build_dataframe" not in deploy_spark:
+                checks.append(CheckResult(
+                    205, "Spark 部署业务隔离", ValidationStatus.FAILED,
+                    "Spark 部署脚本未引用 build_dataframe()——"
+                    "部署脚本应调用已验证的转换入口，不得重新实现业务逻辑",
+                    "FAIL",
+                ))
+            else:
+                checks.append(CheckResult(
+                    205, "Spark 部署业务隔离", ValidationStatus.PASSED,
+                    "Spark 部署脚本引用 build_dataframe()——业务逻辑不重复",
+                    "FAIL",
+                ))
+        elif deploy_spark.strip():
+            checks.append(CheckResult(
+                205, "Spark 部署业务隔离", ValidationStatus.WARN,
+                "无法验证 Spark 部署是否引用已验证入口（缺少 verified_spark 参照）",
+                "WARN",
+            ))
+
+        # ── 检查 6：source_query_hash 一致性 ──
+        stored_hash = manifest_dict.get("source_query_hash", "")
+        if stored_hash and verified_sql.strip():
+            import hashlib
+            actual_hash = hashlib.sha256(verified_sql.encode("utf-8")).hexdigest()
+            if actual_hash != stored_hash:
+                checks.append(CheckResult(
+                    206, "source_query_hash 一致性", ValidationStatus.FAILED,
+                    f"source_query_hash 不一致——清单记录 {stored_hash[:16]}..."
+                    f"，实际 sql/main.sql 哈希 {actual_hash[:16]}...",
+                    "FAIL",
+                ))
+            else:
+                checks.append(CheckResult(
+                    206, "source_query_hash 一致性", ValidationStatus.PASSED,
+                    f"source_query_hash 与 sql/main.sql 一致（{stored_hash[:16]}...）",
+                    "FAIL",
+                ))
+
+        return ValidationReport(overall_status=self._aggregate(checks), checks=checks)
+
     def validate(
         self,
         sql: str = "",

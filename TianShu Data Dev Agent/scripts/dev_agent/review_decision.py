@@ -583,7 +583,23 @@ def cmd_set(
         print(f"操作者:     human:{user}")
         print(f"理由:       {message.strip()}")
 
-        # M4c：从 SUPERSEDED 恢复时提醒下游
+        # M5：从 APPROVED 转为 release 状态时的提醒
+    if state == "APPROVED":
+        deploy_manifest_path = package_dir / "deployment_manifest.yml"
+        if deploy_manifest_path.is_file():
+            print()
+            print(
+                "[提醒] 当前 APPROVED 仅表示 QUERY_LOGIC_APPROVED（只读查询逻辑已审查）。"
+            )
+            print(
+                "部署产物及配置需要独立的发布审批——请使用 'release' 子命令。"
+            )
+            print(
+                f"  python scripts/dev_agent/review_decision.py release {package_dir}"
+                f" --state RELEASE_APPROVED --message \"...\""
+            )
+
+    # M4c：从 SUPERSEDED 恢复时提醒下游
         if state == "APPROVED":
             try:
                 registry = read_registry(output_root)
@@ -609,7 +625,139 @@ def cmd_set(
 
 
 # ═══════════════════════════════════════════════════════════
-# CLI 入口（M4c 扩展）
+# 写：release set（M5 新增——发布审批）
+# ═══════════════════════════════════════════════════════════
+
+
+def cmd_release_set(
+    package_dir: Path,
+    state: str,
+    message: str,
+    user: str = "human",
+) -> int:
+    """设置发布审批状态（RELEASE_APPROVED / RELEASE_REJECTED）。
+
+    严格校验：
+      - 仅人能设置
+      - deployment_manifest.yml 必须存在
+      - 部署静态检查必须通过（无 FAIL）
+      - --message 非空
+      - RELEASE_APPROVED 要求 verification_summary.yml 存在
+    """
+    # 校验 1：消息非空
+    if not message or not message.strip():
+        print("[ERROR] --message 不能为空。发布审批必须提供理由。", file=sys.stderr)
+        return EXIT_EMPTY_MESSAGE
+
+    # 校验 2：状态有效
+    valid_states = {"RELEASE_APPROVED", "RELEASE_REJECTED"}
+    if state not in valid_states:
+        print(
+            f"[ERROR] 无效的发布审批状态: {state}。"
+            f"人可设置的状态: {sorted(valid_states)}",
+            file=sys.stderr,
+        )
+        return EXIT_INVALID_STATE
+
+    # 校验 3：deployment_manifest.yml 必须存在
+    deploy_manifest_path = package_dir / "deployment_manifest.yml"
+    if not deploy_manifest_path.is_file():
+        print(
+            "[ERROR] deployment_manifest.yml 不存在——"
+            "请先运行 M2 build 生成部署草案。",
+            file=sys.stderr,
+        )
+        return EXIT_MISSING_FILE
+
+    # 校验 4：RELEASE_APPROVED 要求验证通过
+    if state == "RELEASE_APPROVED":
+        summary_path = package_dir / "reports" / "verification_summary.yml"
+        if not summary_path.is_file():
+            print(
+                "[ERROR] RELEASE_APPROVED 要求 verification_summary.yml 存在——"
+                "请先运行 M3 验证引擎。",
+                file=sys.stderr,
+            )
+            return EXIT_MISSING_FILE
+
+        if yaml is not None:
+            summary = yaml.safe_load(summary_path.read_text(encoding="utf-8")) or {}
+            overall = summary.get("overall_status", "N/A")
+            deploy_status = summary.get("deploy_static_status", "N/A")
+
+            if overall == "FAIL":
+                print(
+                    f"[ERROR] 验证 overall_status 为 FAIL，不能 RELEASE_APPROVED。",
+                    file=sys.stderr,
+                )
+                return EXIT_INVALID_STATE
+
+            if deploy_status == "FAIL":
+                print(
+                    f"[ERROR] 部署静态检查 status 为 FAIL，不能 RELEASE_APPROVED。\n"
+                    f"请先修复部署产物中的 FAIL 项。",
+                    file=sys.stderr,
+                )
+                return EXIT_INVALID_STATE
+
+    # 执行：更新 deployment_manifest.yml
+    if yaml is None:
+        print("[ERROR] 缺少 pyyaml 依赖: pip install pyyaml", file=sys.stderr)
+        return EXIT_MISSING_FILE
+
+    deploy_manifest = yaml.safe_load(deploy_manifest_path.read_text(encoding="utf-8")) or {}
+    current_status = deploy_manifest.get("release_status", "DRAFT")
+
+    if current_status == state:
+        print(f"发布审批状态未变更（已是 {state}）")
+        return EXIT_SUCCESS
+
+    deploy_manifest["release_status"] = state
+    deploy_manifest["release_approved_by"] = f"human:{user}"
+    deploy_manifest["release_message"] = message.strip()
+
+    # 原子写入
+    tmp_path = deploy_manifest_path.with_suffix(".tmp")
+    tmp_path.write_text(
+        yaml.safe_dump(deploy_manifest, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
+    tmp_path.replace(deploy_manifest_path)
+
+    # 同时追加到 decision_log
+    try:
+        from src.agent.decision_manager import append_decision_log
+        from datetime import datetime, timezone
+
+        now_iso = datetime.now(timezone.utc).isoformat()
+        append_decision_log(package_dir, {
+            "timestamp": now_iso,
+            "from_state": f"release:{current_status}",
+            "to_state": f"release:{state}",
+            "changed_by": "human",
+            "actor_id": f"human:{user}",
+            "reason": f"发布审批: {message.strip()[:200]}",
+        })
+    except Exception:
+        pass  # 日志追加失败不阻断
+
+    print(f"发布审批状态已更新: {current_status} → {state}")
+    print(f"操作者:     human:{user}")
+    print(f"理由:       {message.strip()}")
+
+    if state == "RELEASE_APPROVED":
+        print()
+        print("[重要] RELEASE_APPROVED 表示部署产物及配置已审查，可以进入发布流程。")
+        print("但实际部署仍需人执行，Agent 不自动上线。")
+    else:
+        print()
+        print("[提醒] 发布被拒绝——部署产物需修改后重新提交审批。")
+
+    return EXIT_SUCCESS
+
+
+# ═══════════════════════════════════════════════════════════
+# CLI 入口（M4c 扩展 + M5 release）
 # ═══════════════════════════════════════════════════════════
 
 
@@ -695,6 +843,29 @@ def main() -> int:
         help="Review Package 输出根目录",
     )
 
+    # ---- release（M5 新增——发布审批） ----
+    release_parser = subparsers.add_parser("release", help="设置发布审批状态（M5 部署绑定）")
+    release_parser.add_argument(
+        "package_dir",
+        help="Review Package 目录路径",
+    )
+    release_parser.add_argument(
+        "--state",
+        required=True,
+        choices=["RELEASE_APPROVED", "RELEASE_REJECTED"],
+        help="发布审批状态",
+    )
+    release_parser.add_argument(
+        "--message",
+        required=True,
+        help="发布审批理由（必填，非空）",
+    )
+    release_parser.add_argument(
+        "--user",
+        default="human",
+        help="操作者标识（默认: human）",
+    )
+
     args = parser.parse_args()
 
     if args.command is None:
@@ -730,6 +901,13 @@ def main() -> int:
         return cmd_audit(package_dir)
     elif args.command == "deps":
         return cmd_deps(package_dir, output_root=args.registry)
+    elif args.command == "release":
+        return cmd_release_set(
+            package_dir,
+            state=args.state,
+            message=args.message,
+            user=args.user,
+        )
     else:
         parser.print_help()
         return EXIT_USAGE

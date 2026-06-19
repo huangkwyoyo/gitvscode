@@ -9,6 +9,7 @@ M4c：发布后自动注册到 package 注册表。
 
 from __future__ import annotations
 
+import hashlib
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -18,6 +19,11 @@ import yaml
 from src.ir.types import ArtifactHashes, DecisionRecord, DecisionStatus, ReviewPackageManifest
 
 from .decision_manager import compute_artifact_hashes
+from .deploy_generator import (
+    build_deployment_manifest,
+    generate_deploy_spark,
+    generate_deploy_sql,
+)
 from .design_planner import DevPlan
 from .dual_code_generator import DualCodeDrafts
 from .requirement_analyzer import RequirementSpec
@@ -33,6 +39,12 @@ REQUIRED_FILES = [
     "decision.md",
     "decision.yml",
     "decision_log.yml",
+]
+
+DEPLOY_FILES = [
+    "deploy/main.sql",
+    "deploy/main.py",
+    "deployment_manifest.yml",
 ]
 
 
@@ -214,15 +226,23 @@ def publish_review_package(
     plan: DevPlan,
     drafts: DualCodeDrafts,
     output_root: str | Path = "generated/review_packages",
+    deploy_config: dict | None = None,
 ) -> ReviewPackageManifest:
-    """写出完整 Review Package 并返回 manifest。
+    """写出完整 Review Package（含 M5 部署产物）并返回 manifest。
 
     M4b 变更：先写代码和报告文件，计算 artifact 哈希，
     再将哈希写入 decision.yml——保证哈希与文件一致。
+
+    M5 新增：
+      - 生成 deploy/main.sql、deploy/main.py（确定性封装）
+      - 生成 deployment_manifest.yml
+      - 部署产物纳入 artifact_hashes
+      - manifest 区分 deploy_files 和 files
     """
+    deploy_config = deploy_config or {}
     root = Path(output_root)
     package_dir = root / requirement.request_id
-    for rel in ["sql", "spark", "tests", "reports", "lineage"]:
+    for rel in ["sql", "spark", "tests", "reports", "lineage", "deploy"]:
         (package_dir / rel).mkdir(parents=True, exist_ok=True)
 
     # 阶段 1：写所有代码和报告文件（decision.yml/decision_log.yml 除外）
@@ -236,10 +256,42 @@ def publish_review_package(
         yaml.safe_dump(_build_lineage(requirement, plan), allow_unicode=True, sort_keys=False),
     )
 
-    # M4b：计算 artifact 哈希（在 decision.yml 写入之前）
-    artifact_hashes = compute_artifact_hashes(package_dir)
+    # M5：生成部署产物（阶段 1.5——在计算哈希之前）
+    verified_sql_hash = hashlib.sha256(
+        drafts.sql.content.encode("utf-8")
+    ).hexdigest()
+    deploy_manifest = build_deployment_manifest(
+        request_id=requirement.request_id,
+        verified_sql_hash=verified_sql_hash,
+        target_table=deploy_config.get(
+            "target_table",
+            f"generated.{requirement.request_id}",
+        ),
+        write_strategy=deploy_config.get(
+            "write_strategy",
+            "CREATE_TABLE_AS_SELECT",
+        ),
+        partition_columns=deploy_config.get("partition_columns", []),
+        human_review_points=list(plan.human_review_points),
+    )
+    deploy_sql = generate_deploy_sql(drafts.sql.content, deploy_manifest)
+    deploy_spark = generate_deploy_spark(deploy_manifest)
 
-    # 阶段 2：写 decision 文件（含 artifact 哈希）
+    _write_text(package_dir / "deploy" / "main.sql", deploy_sql)
+    _write_text(package_dir / "deploy" / "main.py", deploy_spark)
+    _write_text(
+        package_dir / "deployment_manifest.yml",
+        yaml.safe_dump(
+            deploy_manifest.to_dict(),
+            allow_unicode=True,
+            sort_keys=False,
+        ),
+    )
+
+    # M5：计算扩展 artifact 哈希（含部署产物，在 decision.yml 写入之前）
+    artifact_hashes = _compute_extended_hashes(package_dir)
+
+    # 阶段 2：写 decision 文件（含扩展 artifact 哈希）
     decision = DecisionRecord(
         notes=plan.human_review_points + drafts.pending_items,
         artifact_hashes=artifact_hashes,
@@ -274,7 +326,50 @@ def publish_review_package(
         request_id=requirement.request_id,
         package_path=str(package_dir.resolve()),
         files=REQUIRED_FILES,
+        deploy_files=DEPLOY_FILES,
         pending_items=plan.pending_items + drafts.pending_items,
+        release_status=deploy_manifest.release_status,
+    )
+
+
+def _compute_extended_hashes(package_dir: Path) -> ArtifactHashes:
+    """M5：计算扩展 artifact 哈希——覆盖查询产物和部署产物。
+
+    在原有 compute_artifact_hashes 基础上新增 deploy/main.sql、
+    deploy/main.py 和 deployment_manifest.yml 的哈希。
+    """
+    base = compute_artifact_hashes(package_dir)
+
+    deploy_sql_path = package_dir / "deploy" / "main.sql"
+    deploy_spark_path = package_dir / "deploy" / "main.py"
+    deploy_manifest_path = package_dir / "deployment_manifest.yml"
+
+    deploy_sql_hash = ""
+    deploy_spark_hash = ""
+    deploy_manifest_hash = ""
+
+    if deploy_sql_path.is_file():
+        deploy_sql_hash = hashlib.sha256(
+            deploy_sql_path.read_bytes()
+        ).hexdigest()
+    if deploy_spark_path.is_file():
+        deploy_spark_hash = hashlib.sha256(
+            deploy_spark_path.read_bytes()
+        ).hexdigest()
+    if deploy_manifest_path.is_file():
+        deploy_manifest_hash = hashlib.sha256(
+            deploy_manifest_path.read_bytes()
+        ).hexdigest()
+
+    # 基于原有哈希创建扩展版本
+    return ArtifactHashes(
+        sql_main=base.sql_main,
+        spark_main=base.spark_main,
+        lineage_source_refs=base.lineage_source_refs,
+        verification_summary=base.verification_summary,
+        deploy_sql=deploy_sql_hash,
+        deploy_spark=deploy_spark_hash,
+        deployment_manifest=deploy_manifest_hash,
     )
 
 

@@ -260,6 +260,10 @@ def compute_artifact_hashes(package_dir: Path) -> ArtifactHashes:
     spark_path = package_dir / "spark" / "main.py"
     lineage_path = package_dir / "lineage" / "source_refs.yml"
     summary_path = package_dir / "reports" / "verification_summary.yml"
+    # M5：部署产物也纳入哈希计算
+    deploy_sql_path = package_dir / "deploy" / "main.sql"
+    deploy_spark_path = package_dir / "deploy" / "main.py"
+    deploy_manifest_path = package_dir / "deployment_manifest.yml"
 
     for required in [sql_path, spark_path, lineage_path]:
         if not required.is_file():
@@ -269,11 +273,24 @@ def compute_artifact_hashes(package_dir: Path) -> ArtifactHashes:
     if summary_path.is_file():
         verification_summary_hash = _hash_file(summary_path)
 
+    deploy_sql_hash = ""
+    deploy_spark_hash = ""
+    deploy_manifest_hash = ""
+    if deploy_sql_path.is_file():
+        deploy_sql_hash = _hash_file(deploy_sql_path)
+    if deploy_spark_path.is_file():
+        deploy_spark_hash = _hash_file(deploy_spark_path)
+    if deploy_manifest_path.is_file():
+        deploy_manifest_hash = _hash_file(deploy_manifest_path)
+
     return ArtifactHashes(
         sql_main=_hash_file(sql_path),
         spark_main=_hash_file(spark_path),
         lineage_source_refs=_hash_file(lineage_path),
         verification_summary=verification_summary_hash,
+        deploy_sql=deploy_sql_hash,
+        deploy_spark=deploy_spark_hash,
+        deployment_manifest=deploy_manifest_hash,
     )
 
 
@@ -295,6 +312,10 @@ def check_artifact_integrity(
         "sql_main": "sql/main.sql",
         "spark_main": "spark/main.py",
         "lineage_source_refs": "lineage/source_refs.yml",
+        # M5：部署产物也纳入完整性检查
+        "deploy_sql": "deploy/main.sql",
+        "deploy_spark": "deploy/main.py",
+        "deployment_manifest": "deployment_manifest.yml",
     }
 
     for hash_key, rel_path in file_map.items():
