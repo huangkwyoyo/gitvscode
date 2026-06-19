@@ -98,7 +98,11 @@ def compare_results(
         spark_row_count=spark_result.row_count,
         column_match=True,
         value_diffs=[],
-        detail="行数、列名、抽样行与数值合计一致。",
+        detail=(
+            "行数、列名、抽样行与数值合计一致（LIMIT 1000 样本）。"
+            "注意：样本一致不代表全量数据一致、业务正确或生产就绪——"
+            "交叉验证只能发现两份代码逻辑不一致，不能证明两份代码都正确。"
+        ),
     )
 
 

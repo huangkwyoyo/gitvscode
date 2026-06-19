@@ -98,10 +98,80 @@ class ValidationStatus(str, Enum):
 
 class CrossValidateStatus(str, Enum):
     """交叉验证状态"""
-    CONSISTENT = "consistent"          # SQL 和 PySpark 结果一致
+    CONSISTENT = "consistent"          # SQL 和 PySpark 样本结果一致（仅样本，非全量数据）
     INCONSISTENT = "inconsistent"      # 结果不一致——至少一份代码有逻辑错误
     SKIPPED = "skipped"               # 跳过（如 Spark 不可用）
     NOT_ATTEMPTED = "not_attempted"   # 未尝试
+
+
+class AssuranceLevel(str, Enum):
+    """验证保证级别——描述当前验证能提供什么程度的保证。
+
+    PARTIAL：当前级别。仅有 SQL 单引擎样本执行（LIMIT 1000），
+             Spark 侧为 SKIPPED/PENDING，交叉验证无法提供双引擎背书。
+             不构成业务正确性或生产就绪的证明。
+
+    DUAL_ENGINE_SAMPLE：未来目标级别。SQL 和 Spark 双引擎均完成
+             样本执行且结果一致（CONSISTENT）。仅代表样本集一致，
+             不代表全量数据一致、业务正确或生产就绪。
+    """
+    PARTIAL = "PARTIAL"                           # SQL 单引擎样本执行（当前状态）
+    DUAL_ENGINE_SAMPLE = "DUAL_ENGINE_SAMPLE"     # 双引擎样本一致（未来目标）
+
+
+@dataclass
+class VerificationCoverage:
+    """验证覆盖范围——结构化记录各项验证维度的完成状态。
+
+    每个字段取值为 COMPLETE / SKIPPED / FAILED / NOT_COVERED。
+    当前实现仅覆盖前 5 个维度（sql_static 到 cross_validation），
+    其余维度为 NOT_COVERED——明确标注"当前不验证"比沉默更安全。
+
+    设计原则（来自漏洞 E/F 修复）：
+      - 不伪造 Spark 执行完成状态
+      - 不声称样本执行等价于全量数据验证
+      - 不声称交叉验证等价于业务正确性证明
+      - NOT_COVERED 是明确的设计声明，不是缺陷
+    """
+    # 已覆盖维度
+    sql_static: str = "PENDING"               # SQL 静态检查：COMPLETE | SKIPPED | FAILED
+    sql_sample: str = "PENDING"               # SQL 样本执行（LIMIT 1000）：COMPLETE | SKIPPED | FAILED
+    spark_static: str = "PENDING"             # Spark 静态检查：COMPLETE | SKIPPED | FAILED
+    spark_sample: str = "PENDING"             # Spark 样本执行：当前始终 SKIPPED/PENDING
+    cross_validation: str = "PENDING"         # 交叉验证：CONSISTENT | INCONSISTENT | SKIPPED | NOT_ATTEMPTED
+
+    # 未覆盖维度——当前实现不验证，明确标注
+    business_semantics: str = "NOT_COVERED"         # 业务语义正确性（JOIN 基数、指标口径）
+    full_data_behavior: str = "NOT_COVERED"         # 全量数据行为（LIMIT 1000 不代表全量）
+    production_performance: str = "NOT_COVERED"     # 生产性能（执行计划、资源消耗）
+    partition_idempotency_rollback: str = "NOT_COVERED"  # 分区/幂等/回滚
+
+    @property
+    def all_covered_dimensions(self) -> dict[str, str]:
+        """返回所有维度的覆盖状态（含 NOT_COVERED 维度）。"""
+        return {
+            "sql_static": self.sql_static,
+            "sql_sample": self.sql_sample,
+            "spark_static": self.spark_static,
+            "spark_sample": self.spark_sample,
+            "cross_validation": self.cross_validation,
+            "business_semantics": self.business_semantics,
+            "full_data_behavior": self.full_data_behavior,
+            "production_performance": self.production_performance,
+            "partition_idempotency_rollback": self.partition_idempotency_rollback,
+        }
+
+    @property
+    def unverified_dimensions(self) -> list[str]:
+        """返回当前标记为 NOT_COVERED 的维度列表。"""
+        return [
+            key for key, val in self.all_covered_dimensions.items()
+            if val == "NOT_COVERED"
+        ]
+
+    def to_dict(self) -> dict[str, Any]:
+        """序列化为字典"""
+        return self.all_covered_dimensions
 
 
 class DecisionStatus(str, Enum):
@@ -890,9 +960,10 @@ class CrossValidationResult:
 
     SQL 和 PySpark 两份代码独立执行后，对比行数、列名、值分布、抽样行。
     三种可能结果：
-      - CONSISTENT：一致——置信度大幅提高
+      - CONSISTENT：样本一致——两份代码的 LIMIT 1000 样本结果匹配。
+        不代表全量数据一致、业务正确或生产就绪。
       - INCONSISTENT：不一致——人审时必须调查
-      - SKIPPED：跳过——Spark 环境不可用
+      - SKIPPED：跳过——Spark 环境不可用，无法提供双引擎背书
     """
     status: CrossValidateStatus = CrossValidateStatus.NOT_ATTEMPTED
     sql_row_count: int = 0

@@ -592,6 +592,185 @@ def test_artifact_hashes_verified_in_summary(tmp_path):
     # 因此 verification_summary 自身哈希为 null（无法包含自身哈希）
 
 
+# ═════════════════════════════════════════════════════════════
+# Phase 3（漏洞 E/F 修复）：verification_coverage + assurance_level
+# ═════════════════════════════════════════════════════════════
+
+
+def test_verification_coverage_in_summary(tmp_path):
+    """verification_summary.yml 必须包含 verification_coverage 字段（9 维度）。"""
+    package_dir = _build_package(tmp_path)
+    verify_review_package(package_dir)
+    summary = yaml.safe_load(
+        (package_dir / "reports" / "verification_summary.yml").read_text(encoding="utf-8")
+    )
+
+    assert "verification_coverage" in summary
+    coverage = summary["verification_coverage"]
+    # 已覆盖维度（5 个）
+    assert "sql_static" in coverage
+    assert "sql_sample" in coverage
+    assert "spark_static" in coverage
+    assert "spark_sample" in coverage
+    assert "cross_validation" in coverage
+    # 未覆盖维度（4 个——明确标注 NOT_COVERED）
+    assert coverage["business_semantics"] == "NOT_COVERED"
+    assert coverage["full_data_behavior"] == "NOT_COVERED"
+    assert coverage["production_performance"] == "NOT_COVERED"
+    assert coverage["partition_idempotency_rollback"] == "NOT_COVERED"
+
+
+def test_assurance_level_in_summary_always_partial_without_spark(tmp_path):
+    """无 Spark 时 assurance_level 必须为 PARTIAL。"""
+    package_dir = _build_package(tmp_path)
+    verify_review_package(package_dir)
+    summary = yaml.safe_load(
+        (package_dir / "reports" / "verification_summary.yml").read_text(encoding="utf-8")
+    )
+
+    assert "assurance_level" in summary
+    # 当前无真实 Spark 环境，保证级别始终为 PARTIAL
+    assert summary["assurance_level"] == "PARTIAL"
+    # 绝不能伪装成 DUAL_ENGINE_SAMPLE
+    assert summary["assurance_level"] != "DUAL_ENGINE_SAMPLE"
+
+
+def test_verification_coverage_spark_always_skipped_or_pending(tmp_path):
+    """verification_coverage 中 spark_sample 在当前必须为 SKIPPED/PENDING/FAILED。"""
+    package_dir = _build_package(tmp_path)
+    verify_review_package(package_dir)
+    summary = yaml.safe_load(
+        (package_dir / "reports" / "verification_summary.yml").read_text(encoding="utf-8")
+    )
+
+    coverage = summary["verification_coverage"]
+    # Spark 样本执行在当前环境下不能伪装 COMPLETE
+    assert coverage["spark_sample"] != "COMPLETE"
+    assert coverage["spark_sample"] in {"SKIPPED", "PENDING", "FAILED"}
+
+
+def test_verification_coverage_never_claims_full_coverage(tmp_path):
+    """verification_coverage 绝不能声称全量数据或生产就绪已覆盖。"""
+    package_dir = _build_package(tmp_path)
+    verify_review_package(package_dir)
+    summary = yaml.safe_load(
+        (package_dir / "reports" / "verification_summary.yml").read_text(encoding="utf-8")
+    )
+
+    coverage = summary["verification_coverage"]
+    # 四个 NOT_COVERED 维度必须明确标注
+    assert coverage.get("business_semantics") == "NOT_COVERED"
+    assert coverage.get("full_data_behavior") == "NOT_COVERED"
+    assert coverage.get("production_performance") == "NOT_COVERED"
+    assert coverage.get("partition_idempotency_rollback") == "NOT_COVERED"
+
+
+def test_verification_report_contains_coverage_section(tmp_path):
+    """verification.md 必须包含验证覆盖范围和未验证风险章节。"""
+    package_dir = _build_package(tmp_path)
+    result = verify_review_package(package_dir)
+    content = Path(result.verification_report_path).read_text(encoding="utf-8")
+
+    assert "验证覆盖范围" in content
+    assert "未验证风险" in content
+    assert "NOT_COVERED" in content
+
+
+def test_verification_report_contains_capability_boundary(tmp_path):
+    """verification.md 必须包含能力边界声明——三道防线不构成上线充分条件。"""
+    package_dir = _build_package(tmp_path)
+    result = verify_review_package(package_dir)
+    content = Path(result.verification_report_path).read_text(encoding="utf-8")
+
+    assert "三道防线用于降低风险，不构成上线充分条件" in content
+    assert "PARTIAL" in content
+
+
+def test_cross_validation_report_contains_sample_disclaimer(tmp_path):
+    """cross_validation.md 必须包含样本一致性免责声明。"""
+    package_dir = _build_package(tmp_path)
+    result = verify_review_package(package_dir)
+    content = Path(result.cross_validation_report_path).read_text(encoding="utf-8")
+
+    assert "LIMIT 1000 样本" in content
+    assert "不代表全量数据一致" in content
+
+
+def test_cross_validation_consistent_detail_has_disclaimer():
+    """CONSISTENT 结果的 detail 必须包含样本免责声明。"""
+    from src.verify.cross_validation import compare_results
+
+    sql_result = SQLResult(
+        sql="SELECT 1",
+        columns=["a"],
+        rows=[(1,)],
+        row_count=1,
+    )
+    spark_result = SQLResult(
+        sql="spark",
+        columns=["a"],
+        rows=[(1,)],
+        row_count=1,
+    )
+    result = compare_results(sql_result, spark_result)
+    assert result.status == CrossValidateStatus.CONSISTENT
+    # detail 必须包含免责声明
+    assert "不代表全量数据一致" in result.detail
+    assert "LIMIT 1000" in result.detail
+    # 不应再使用"置信度大幅提高"等过度承诺表述
+    assert "置信度大幅提高" not in result.detail
+
+
+def test_cross_validation_result_docstring_updated():
+    """CrossValidationResult 的 docstring 不应再包含"置信度大幅提高"。"""
+    from src.ir.types import CrossValidationResult
+    doc = CrossValidationResult.__doc__ or ""
+    assert "置信度大幅提高" not in doc
+    assert "不代表全量数据一致" in doc
+
+
+def test_assurance_level_enum_values():
+    """AssuranceLevel 枚举只应有 PARTIAL 和 DUAL_ENGINE_SAMPLE 两个值。"""
+    from src.ir.types import AssuranceLevel
+    values = {e.value for e in AssuranceLevel}
+    assert values == {"PARTIAL", "DUAL_ENGINE_SAMPLE"}
+
+
+def test_verification_coverage_defaults():
+    """VerificationCoverage 默认所有已覆盖维度为 PENDING，未覆盖维度为 NOT_COVERED。"""
+    from src.ir.types import VerificationCoverage
+    cov = VerificationCoverage()
+    assert cov.sql_static == "PENDING"
+    assert cov.business_semantics == "NOT_COVERED"
+    assert cov.full_data_behavior == "NOT_COVERED"
+    assert cov.production_performance == "NOT_COVERED"
+    assert cov.partition_idempotency_rollback == "NOT_COVERED"
+    # unverified_dimensions 属性
+    unverified = cov.unverified_dimensions
+    assert "business_semantics" in unverified
+    assert "full_data_behavior" in unverified
+    assert "production_performance" in unverified
+    assert "partition_idempotency_rollback" in unverified
+    # 已覆盖维度不应该出现在 unverified 中
+    assert "sql_static" not in unverified
+
+
+def test_verification_coverage_to_dict():
+    """VerificationCoverage.to_dict() 返回完整 9 维度。"""
+    from src.ir.types import VerificationCoverage
+    cov = VerificationCoverage(
+        sql_static="COMPLETE",
+        sql_sample="COMPLETE",
+        spark_static="SKIPPED",
+        spark_sample="SKIPPED",
+        cross_validation="SKIPPED",
+    )
+    d = cov.to_dict()
+    assert len(d) == 9
+    assert d["sql_static"] == "COMPLETE"
+    assert d["business_semantics"] == "NOT_COVERED"
+
+
 def test_superseded_when_approved_and_reverify(tmp_path):
     """APPROVED + re-verify → SUPERSEDED 自动转换（通过 decision_manager 模拟）。"""
     from src.agent.decision_manager import transition_state

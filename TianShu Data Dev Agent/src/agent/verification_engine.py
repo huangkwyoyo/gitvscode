@@ -23,11 +23,13 @@ from typing import Any
 import yaml
 
 from src.ir.types import (
+    AssuranceLevel,
     CrossValidateStatus,
     DecisionStatus,
     SQLResult,
     ValidationReport,
     ValidationStatus,
+    VerificationCoverage,
 )
 from src.sandbox.executor import execute_sql_sample
 from src.sandbox.spark_executor import execute_spark_dsl
@@ -389,13 +391,39 @@ def _build_verification_summary_yml(
       - decision_state_before_verify：验证前决策状态
       - decision_state_after_verify：验证后决策状态（若有变更）
       - stale_risk_note 更新为 M4b 已实现
+
+    Phase 3（漏洞 E/F 修复）新增：
+      - verification_coverage：9 维验证覆盖状态
+      - assurance_level：当前保证级别（PARTIAL / DUAL_ENGINE_SAMPLE）
     """
     now_iso = datetime.now(timezone.utc).isoformat()
+
+    # 构造验证覆盖范围
+    coverage = VerificationCoverage(
+        sql_static=sql_static_status,
+        sql_sample=sql_sample_status,
+        spark_static=spark_static_status,
+        spark_sample=spark_sample_status,
+        cross_validation=cross_status,
+    )
+
+    # 计算保证级别：当前始终为 PARTIAL（Spark 不可用）
+    # 未来当 sql_sample==PASS 且 spark_sample==PASS 且 cross_status==CONSISTENT 时为 DUAL_ENGINE_SAMPLE
+    assurance = AssuranceLevel.PARTIAL
+    if (
+        sql_sample_status == "PASS"
+        and spark_sample_status == "PASS"
+        and cross_status == "PASS"  # CONSISTENT → _cross_status → "PASS"
+    ):
+        assurance = AssuranceLevel.DUAL_ENGINE_SAMPLE
+
     result: dict[str, Any] = {
         "generated_at": now_iso,
         "verification_id": verification_id,
         "package_path": str(package_dir.resolve()),
         "overall_status": overall_status,
+        "assurance_level": assurance.value,
+        "verification_coverage": coverage.to_dict(),
         "sql_static_status": sql_static_status,
         "sql_sample_status": sql_sample_status,
         "spark_static_status": spark_static_status,
@@ -574,9 +602,19 @@ def _build_verification_report(
     deploy_static_status: str = "PENDING",
     deploy_static_checks: list = None,
 ) -> str:
-    """生成 verification.md。"""
+    """生成 verification.md——含验证覆盖范围和未验证风险。"""
     sql_static_status = _sql_static_status(static_report)
     spark_static_status = _spark_static_status(static_report)
+
+    # 构造验证覆盖范围
+    coverage = VerificationCoverage(
+        sql_static=sql_static_status,
+        sql_sample=sql_sample_status,
+        spark_static=spark_static_status,
+        spark_sample=spark_sample_status,
+        cross_validation="PENDING",  # 交叉验证状态由 cross_status 单独覆盖
+    )
+
     lines = [
         "# Verification Report",
         "",
@@ -591,8 +629,52 @@ def _build_verification_report(
         f"- Spark sample run 状态：{spark_sample_status}",
         f"- 部署静态检查状态：{deploy_static_status}",
         "",
-        "## PENDING / SKIPPED 原因",
+        "## 验证覆盖范围",
+        "",
+        "当前验证能力仅覆盖静态检查和单引擎样本执行。以下维度明确标注为 NOT_COVERED：",
+        "",
     ]
+
+    # 已覆盖维度
+    for key, val in coverage.all_covered_dimensions.items():
+        label = {
+            "sql_static": "SQL 静态检查（安全黑名单、表/字段存在性、JOIN 白名单）",
+            "sql_sample": "SQL 样本执行（只读、LIMIT 1000、超时 30s）",
+            "spark_static": "Spark 静态检查（AST 安全分析）",
+            "spark_sample": "Spark 样本执行",
+            "cross_validation": "SQL/Spark 交叉验证",
+            "business_semantics": "业务语义正确性（JOIN 基数、指标口径）",
+            "full_data_behavior": "全量数据行为（非 LIMIT 约束下的行为）",
+            "production_performance": "生产性能（执行计划、资源消耗）",
+            "partition_idempotency_rollback": "分区/幂等/回滚正确性",
+        }.get(key, key)
+        status_icon = "✅" if val not in ("NOT_COVERED", "SKIPPED", "PENDING", "FAILED") else "⚠️"
+        lines.append(f"- {status_icon} **{label}**：{val}")
+
+    lines.append("")
+
+    # 未验证风险
+    unverified = coverage.unverified_dimensions
+    if unverified:
+        lines.extend([
+            "## 未验证风险",
+            "",
+            "以下维度当前验证不覆盖，人审时需特别注意：",
+            "",
+        ])
+        for key in unverified:
+            detail = {
+                "business_semantics": "JOIN 基数正确性、指标口径准确性、业务逻辑等价性——需要业务专家审查",
+                "full_data_behavior": "LIMIT 1000 样本不代表全量数据行为——全量 JOIN 可能产生不同结果",
+                "production_performance": "执行计划、内存消耗、分区剪枝——需在类生产环境独立评估",
+                "partition_idempotency_rollback": "分区覆盖正确性、幂等性、回滚安全性——需独立测试",
+            }.get(key, "当前不验证")
+            lines.append(f"- **{key}**：{detail}")
+        lines.append("")
+
+    lines.extend([
+        "## PENDING / SKIPPED 原因",
+    ])
 
     if no_sql_run:
         lines.append("- SQL sample run: SKIPPED，CLI 指定 --no-sql-run。")
@@ -638,6 +720,8 @@ def _build_verification_report(
         "- SQL/Spark 均为草案。",
         "- 未经人审不得上线。",
         "- Agent 不写生产库，不自动上线，不替代人工审批。",
+        "- **三道防线用于降低风险，不构成上线充分条件。**",
+        "- **当前验证为 PARTIAL 级别——仅 SQL 单引擎样本执行，不证明业务正确或生产就绪。**",
         "",
     ])
     return "\n".join(lines)
@@ -680,6 +764,8 @@ def _build_cross_validation_report(
         "",
         "- 交叉验证结果不能替代人工审批。",
         "- WARN/SKIPPED/PENDING 均需要人工确认是否可继续。",
+        "- CONSISTENT 仅代表两份代码的 LIMIT 1000 样本结果一致，不代表全量数据一致、业务正确或生产就绪。",
+        "- 当前 Spark 不可用时交叉验证始终 SKIPPED——无法提供双引擎背书。",
         "- 未经人审不得上线。",
         "",
     ])
