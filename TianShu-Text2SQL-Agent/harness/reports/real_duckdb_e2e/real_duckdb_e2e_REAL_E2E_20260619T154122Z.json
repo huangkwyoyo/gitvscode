@@ -1,0 +1,758 @@
+{
+  "report_type": "real_duckdb_e2e",
+  "run_id": "REAL_E2E_20260619T154122Z",
+  "timestamp": "2026-06-19T15:41:22.702696+00:00",
+  "branch": "main",
+  "commit": "f76dbb62",
+  "database": "D:/ProgramData/Datawarehouse/纽约市城市交通/nyc_transport.duckdb",
+  "preflight": {
+    "passed": true,
+    "checks": [
+      {
+        "check": "config_exists",
+        "passed": true,
+        "detail": "config\\tianshu_target.yml"
+      },
+      {
+        "check": "duckdb_exists",
+        "passed": true,
+        "detail": "D:\\ProgramData\\Datawarehouse\\纽约市城市交通\\nyc_transport.duckdb"
+      },
+      {
+        "check": "contracts_exist",
+        "passed": true,
+        "detail": "..\\TianShu\\contracts"
+      },
+      {
+        "check": "read_only_configured",
+        "passed": true,
+        "detail": "connection.read_only=true"
+      }
+    ],
+    "duckdb_path": "D:/ProgramData/Datawarehouse/纽约市城市交通/nyc_transport.duckdb",
+    "contracts_path": "..\\TianShu\\contracts"
+  },
+  "summary": {
+    "total_cases": 10,
+    "passed": 0,
+    "failed": 10
+  },
+  "cases": [
+    {
+      "case_id": "real_e2e_single_trip_daily",
+      "question": "2026年1月每天有多少行程？",
+      "expected_behavior": "answer",
+      "response_type": "answer",
+      "checks": [
+        {
+          "check": "response_type == \"answer\"",
+          "passed": false,
+          "detail": "期望=answer, 实际=None"
+        },
+        {
+          "check": "result.row_count > 0",
+          "passed": false,
+          "detail": "不支持的检查格式"
+        },
+        {
+          "check": "result.source_table 包含 \"gold\"",
+          "passed": true,
+          "detail": "搜索 'gold' 在 'gold.dws_daily_trip_summary'"
+        },
+        {
+          "check": "result_summaries 非空",
+          "passed": false,
+          "detail": "实际=None"
+        },
+        {
+          "check": "chart_spec 非空",
+          "passed": false,
+          "detail": "实际=None"
+        },
+        {
+          "check": "chart_spec.chart_type in (\"line\", \"bar\", \"table\", \"metric_card\")",
+          "passed": false,
+          "detail": "不支持的检查格式"
+        },
+        {
+          "check": "public_response 不含 \"SELECT\"",
+          "passed": false,
+          "detail": "不支持的检查格式"
+        }
+      ],
+      "all_checks_passed": false,
+      "error": "Object of type DuckDBPyType is not JSON serializable",
+      "public_response": {
+        "contract_version": "1.0",
+        "response_type": "answer",
+        "question": "2026年1月每天有多少行程？",
+        "answer": {
+          "text": "查询 [2026年1月每天有多少行程？] 返回 31 行. 数据来源: gold.dws_daily_trip_summary. 字段: date, trip_count. 前 5 行样例: 2026-01-01 00:00:00, 888250; 2026-01-02 00:00:00, 761261; 2026-01-03 00:00:00, 793877; 2026-01-04 00:00:00, 708195; 2026-01-05 00:00:00, 726969. 执行耗时: 3.45ms."
+        },
+        "clarification": {
+          "needed": false,
+          "message": null
+        },
+        "refusal": {
+          "refused": false,
+          "reason": null
+        },
+        "data": {
+          "is_multi_plan": false,
+          "summaries_count": 1,
+          "sources": [
+            "gold.dws_daily_trip_summary"
+          ],
+          "chart_spec": {
+            "chart_type": "line",
+            "title": "trip count",
+            "has_data": true
+          }
+        },
+        "warnings": [],
+        "meta": {
+          "execution_mode": "single"
+        }
+      }
+    },
+    {
+      "case_id": "real_e2e_single_crash_daily",
+      "question": "2026年3月每天事故数是多少？",
+      "expected_behavior": "answer",
+      "response_type": "answer",
+      "checks": [
+        {
+          "check": "response_type == \"answer\"",
+          "passed": false,
+          "detail": "期望=answer, 实际=None"
+        },
+        {
+          "check": "result.row_count > 0",
+          "passed": false,
+          "detail": "不支持的检查格式"
+        },
+        {
+          "check": "result.source_table 包含 \"gold\"",
+          "passed": true,
+          "detail": "搜索 'gold' 在 'gold.dws_daily_crash_summary'"
+        },
+        {
+          "check": "result_summaries 非空",
+          "passed": false,
+          "detail": "实际=None"
+        },
+        {
+          "check": "public_response 不含 generated_sql",
+          "passed": false,
+          "detail": "不支持的检查格式"
+        }
+      ],
+      "all_checks_passed": false,
+      "error": "Object of type DuckDBPyType is not JSON serializable",
+      "public_response": {
+        "contract_version": "1.0",
+        "response_type": "answer",
+        "question": "2026年3月每天事故数是多少？",
+        "answer": {
+          "text": "查询 [2026年3月每天事故数是多少？] 返回 31 行. 数据来源: gold.dws_daily_crash_summary. 字段: date, crash_count. 前 5 行样例: 2026-03-01 00:00:00, 179; 2026-03-02 00:00:00, 123; 2026-03-03 00:00:00, 220; 2026-03-04 00:00:00, 198; 2026-03-05 00:00:00, 213. 执行耗时: 2.01ms."
+        },
+        "clarification": {
+          "needed": false,
+          "message": null
+        },
+        "refusal": {
+          "refused": false,
+          "reason": null
+        },
+        "data": {
+          "is_multi_plan": false,
+          "summaries_count": 1,
+          "sources": [
+            "gold.dws_daily_crash_summary"
+          ],
+          "chart_spec": {
+            "chart_type": "line",
+            "title": "crash count",
+            "has_data": true
+          }
+        },
+        "warnings": [],
+        "meta": {
+          "execution_mode": "single"
+        }
+      }
+    },
+    {
+      "case_id": "real_e2e_single_parking_daily",
+      "question": "2026年2月每天停车罚单数量是多少？",
+      "expected_behavior": "answer",
+      "response_type": "answer",
+      "checks": [
+        {
+          "check": "response_type == \"answer\"",
+          "passed": false,
+          "detail": "期望=answer, 实际=None"
+        },
+        {
+          "check": "result.row_count > 0",
+          "passed": false,
+          "detail": "不支持的检查格式"
+        },
+        {
+          "check": "result.source_table 包含 \"gold.dws_daily_parking_summary\"",
+          "passed": true,
+          "detail": "搜索 'gold.dws_daily_parking_summary' 在 'gold.dws_daily_parking_summary'"
+        },
+        {
+          "check": "chart_spec 可 JSON 序列化",
+          "passed": false,
+          "detail": "不支持的检查格式"
+        }
+      ],
+      "all_checks_passed": false,
+      "error": "Object of type DuckDBPyType is not JSON serializable",
+      "public_response": {
+        "contract_version": "1.0",
+        "response_type": "answer",
+        "question": "2026年2月每天停车罚单数量是多少？",
+        "answer": {
+          "text": "查询 [2026年2月每天停车罚单数量是多少？] 返回 28 行. 数据来源: gold.dws_daily_parking_summary. 字段: date, parking_violation_count. 前 5 行样例: 2026-02-01 00:00:00, 15599; 2026-02-02 00:00:00, 22487; 2026-02-03 00:00:00, 29576; 2026-02-04 00:00:00, 28824; 2026-02-05 00:00:00, 28183. 执行耗时: 2.09ms."
+        },
+        "clarification": {
+          "needed": false,
+          "message": null
+        },
+        "refusal": {
+          "refused": false,
+          "reason": null
+        },
+        "data": {
+          "is_multi_plan": false,
+          "summaries_count": 1,
+          "sources": [
+            "gold.dws_daily_parking_summary"
+          ],
+          "chart_spec": {
+            "chart_type": "line",
+            "title": "parking violation count",
+            "has_data": true
+          }
+        },
+        "warnings": [],
+        "meta": {
+          "execution_mode": "single"
+        }
+      }
+    },
+    {
+      "case_id": "real_e2e_multi_metric_trip",
+      "question": "2026年1月每天的行程数和车费总额是多少？",
+      "expected_behavior": "answer",
+      "response_type": "answer",
+      "checks": [
+        {
+          "check": "response_type == \"answer\"",
+          "passed": false,
+          "detail": "期望=answer, 实际=None"
+        },
+        {
+          "check": "result.row_count > 0",
+          "passed": false,
+          "detail": "不支持的检查格式"
+        },
+        {
+          "check": "result_summaries 至少 1 条",
+          "passed": false,
+          "detail": "不支持的检查格式"
+        },
+        {
+          "check": "所有指标来自注册表",
+          "passed": false,
+          "detail": "不支持的检查格式"
+        },
+        {
+          "check": "chart_spec 可序列化",
+          "passed": false,
+          "detail": "不支持的检查格式"
+        }
+      ],
+      "all_checks_passed": false,
+      "error": "Object of type DuckDBPyType is not JSON serializable",
+      "public_response": {
+        "contract_version": "1.0",
+        "response_type": "answer",
+        "question": "2026年1月每天的行程数和车费总额是多少？",
+        "answer": {
+          "text": "查询 [2026年1月每天的行程数和车费总额是多少？] 返回 31 行. 数据来源: gold.dws_daily_trip_summary. 字段: date, total_fare_amount, trip_count. 前 5 行样例: 2026-01-01 00:00:00, 23252390.95, 888250; 2026-01-02 00:00:00, 16585303.09, 761261; 2026-01-03 00:00:00, 17483312.91, 793877; 2026-01-04 00:00:00, 15986216.85, 708195; 2026-01-05 00:00:00, 15921858.21, 726969. 执行耗时: 2.59ms."
+        },
+        "clarification": {
+          "needed": false,
+          "message": null
+        },
+        "refusal": {
+          "refused": false,
+          "reason": null
+        },
+        "data": {
+          "is_multi_plan": false,
+          "summaries_count": 1,
+          "sources": [
+            "gold.dws_daily_trip_summary"
+          ],
+          "chart_spec": {
+            "chart_type": "line",
+            "title": "total fare amount / trip count",
+            "has_data": true
+          }
+        },
+        "warnings": [],
+        "meta": {
+          "execution_mode": "single"
+        }
+      }
+    },
+    {
+      "case_id": "real_e2e_multi_metric_crash",
+      "question": "2026年3月每天事故数和受伤人数分别是多少？",
+      "expected_behavior": "answer",
+      "response_type": "answer",
+      "checks": [
+        {
+          "check": "response_type == \"answer\"",
+          "passed": false,
+          "detail": "期望=answer, 实际=None"
+        },
+        {
+          "check": "result.row_count > 0",
+          "passed": false,
+          "detail": "不支持的检查格式"
+        },
+        {
+          "check": "result_summaries 非空",
+          "passed": false,
+          "detail": "实际=None"
+        }
+      ],
+      "all_checks_passed": false,
+      "error": "Object of type DuckDBPyType is not JSON serializable",
+      "public_response": {
+        "contract_version": "1.0",
+        "response_type": "answer",
+        "question": "2026年3月每天事故数和受伤人数分别是多少？",
+        "answer": {
+          "text": "查询 [2026年3月每天事故数和受伤人数分别是多少？] 返回 31 行. 数据来源: gold.dws_daily_crash_summary. 字段: date, persons_injured, crash_count. 前 5 行样例: 2026-03-01 00:00:00, 94, 179; 2026-03-02 00:00:00, 88, 123; 2026-03-03 00:00:00, 117, 220; 2026-03-04 00:00:00, 101, 198; 2026-03-05 00:00:00, 117, 213. 执行耗时: 2.32ms."
+        },
+        "clarification": {
+          "needed": false,
+          "message": null
+        },
+        "refusal": {
+          "refused": false,
+          "reason": null
+        },
+        "data": {
+          "is_multi_plan": false,
+          "summaries_count": 1,
+          "sources": [
+            "gold.dws_daily_crash_summary"
+          ],
+          "chart_spec": {
+            "chart_type": "line",
+            "title": "persons injured / crash count",
+            "has_data": true
+          }
+        },
+        "warnings": [],
+        "meta": {
+          "execution_mode": "single"
+        }
+      }
+    },
+    {
+      "case_id": "real_e2e_cross_table_trip_crash",
+      "question": "2026年1月每天行程数和事故数分别是多少？",
+      "expected_behavior": "answer",
+      "response_type": "answer",
+      "checks": [
+        {
+          "check": "response_type == \"answer\"",
+          "passed": false,
+          "detail": "期望=answer, 实际=None"
+        },
+        {
+          "check": "is_multi_plan == true",
+          "passed": false,
+          "detail": "期望=true, 实际=None"
+        },
+        {
+          "check": "每个子计划独立通过安全校验",
+          "passed": false,
+          "detail": "不支持的检查格式"
+        },
+        {
+          "check": "cross_domain_decision 非空",
+          "passed": false,
+          "detail": "实际=None"
+        },
+        {
+          "check": "不包含因果结论 \"导致\"、\"引起\"",
+          "passed": true,
+          "detail": "确认 '因果结论 \"导致\"、\"引起' 不在 'None'"
+        }
+      ],
+      "all_checks_passed": false,
+      "error": "Object of type DuckDBPyType is not JSON serializable",
+      "public_response": {
+        "contract_version": "1.0",
+        "response_type": "answer",
+        "question": "2026年1月每天行程数和事故数分别是多少？",
+        "answer": {
+          "text": "⚠️ traffic 和 safety 数据来自不同业务系统，只能做同日期并列观察，不能推断因果关系（如『事故减少是因为出行减少』）\n\n多个查询结果已按 date 对齐合并展示。共 31 天的数据，包含指标：crash_count、trip_count。\n\n该问题被拆分为 2 个查询计划分别执行.\n\n1. 指标 crash_count: 来自 gold.dws_daily_crash_summary 表, 返回 31 行.\n   样例: {date=2026-01-01 00:00:00, crash_count=142}; {date=2026-01-02 00:00:00, crash_count=124}; {date=2026-01-03 00:00:00, crash_count=60}\n   统计: crash_count 合计=4550, 日均=147\n\n2. 指标 trip_count: 来自 gold.dws_daily_trip_summary 表, 返回 31 行.\n   样例: {date=2026-01-01 00:00:00, trip_count=888250}; {date=2026-01-02 00:00:00, trip_count=761261}; {date=2026-01-03 00:00:00, trip_count=793877}\n   统计: trip_count 合计=26647247, 日均=859589"
+        },
+        "clarification": {
+          "needed": false,
+          "message": null
+        },
+        "refusal": {
+          "refused": false,
+          "reason": null
+        },
+        "data": {
+          "is_multi_plan": true,
+          "summaries_count": 2,
+          "sources": [
+            "gold.dws_daily_crash_summary",
+            "gold.dws_daily_trip_summary"
+          ],
+          "chart_spec": {
+            "chart_type": "line",
+            "title": "crash count / trip count",
+            "has_data": true
+          }
+        },
+        "warnings": [
+          "traffic 和 safety 数据来自不同业务系统，只能做同日期并列观察，不能推断因果关系（如『事故减少是因为出行减少』）"
+        ],
+        "meta": {
+          "execution_mode": "serial"
+        }
+      }
+    },
+    {
+      "case_id": "real_e2e_fuzzy_time_clarify",
+      "question": "最近每天有多少行程？",
+      "expected_behavior": "clarification",
+      "response_type": "clarification",
+      "checks": [
+        {
+          "check": "response_type == \"clarification\"",
+          "passed": false,
+          "detail": "期望=clarification, 实际=None"
+        },
+        {
+          "check": "clarification_needed == true",
+          "passed": false,
+          "detail": "期望=true, 实际=None"
+        },
+        {
+          "check": "result 为 None 或 result_summaries 为空",
+          "passed": true,
+          "detail": "实际=None"
+        },
+        {
+          "check": "merged_result 为 None",
+          "passed": false,
+          "detail": "不支持的检查格式"
+        },
+        {
+          "check": "chart_spec 为 None",
+          "passed": false,
+          "detail": "不支持的检查格式"
+        },
+        {
+          "check": "不执行 SQL",
+          "passed": false,
+          "detail": "不支持的检查格式"
+        },
+        {
+          "check": "public_response 不含 SQL",
+          "passed": true,
+          "detail": "不含 SELECT"
+        },
+        {
+          "check": "public_response 不含 generated_sql",
+          "passed": true,
+          "detail": "不含"
+        },
+        {
+          "check": "public_response 不含内部 trace",
+          "passed": true,
+          "detail": "不含 trace"
+        }
+      ],
+      "all_checks_passed": false,
+      "error": null,
+      "public_response": {
+        "contract_version": "1.0",
+        "response_type": "clarification",
+        "question": "最近每天有多少行程？",
+        "answer": {
+          "text": null
+        },
+        "clarification": {
+          "needed": true,
+          "message": "请明确查询时间范围，例如“2026年1月”或“2026年Q1”。"
+        },
+        "refusal": {
+          "refused": false,
+          "reason": null
+        },
+        "data": {
+          "is_multi_plan": false,
+          "summaries_count": 0,
+          "sources": []
+        },
+        "warnings": [],
+        "meta": {
+          "execution_mode": "single"
+        }
+      }
+    },
+    {
+      "case_id": "real_e2e_ambiguous_amount_clarify",
+      "question": "2026年1月每天金额是多少？",
+      "expected_behavior": "clarification",
+      "response_type": "clarification",
+      "checks": [
+        {
+          "check": "response_type == \"clarification\"",
+          "passed": false,
+          "detail": "期望=clarification, 实际=None"
+        },
+        {
+          "check": "clarification_message 非空",
+          "passed": false,
+          "detail": "实际=None"
+        },
+        {
+          "check": "result_summaries 为空",
+          "passed": true,
+          "detail": "实际=None"
+        },
+        {
+          "check": "不执行 SQL",
+          "passed": false,
+          "detail": "不支持的检查格式"
+        },
+        {
+          "check": "public_response 不含 SQL",
+          "passed": true,
+          "detail": "不含 SELECT"
+        },
+        {
+          "check": "public_response 不含 generated_sql",
+          "passed": true,
+          "detail": "不含"
+        },
+        {
+          "check": "public_response 不含内部 trace",
+          "passed": true,
+          "detail": "不含 trace"
+        }
+      ],
+      "all_checks_passed": false,
+      "error": null,
+      "public_response": {
+        "contract_version": "1.0",
+        "response_type": "clarification",
+        "question": "2026年1月每天金额是多少？",
+        "answer": {
+          "text": null
+        },
+        "clarification": {
+          "needed": true,
+          "message": "您提到的“金额”可能指车费收入、标准罚款金额或 TIF 支付金额，请明确要查询哪一种。"
+        },
+        "refusal": {
+          "refused": false,
+          "reason": null
+        },
+        "data": {
+          "is_multi_plan": false,
+          "summaries_count": 0,
+          "sources": []
+        },
+        "warnings": [],
+        "meta": {
+          "execution_mode": "single"
+        }
+      }
+    },
+    {
+      "case_id": "real_e2e_delete_refusal",
+      "question": "帮我删除2026年1月的异常行程数据",
+      "expected_behavior": "refusal",
+      "response_type": "refusal",
+      "checks": [
+        {
+          "check": "response_type == \"refusal\"",
+          "passed": false,
+          "detail": "期望=refusal, 实际=None"
+        },
+        {
+          "check": "refusal == true",
+          "passed": false,
+          "detail": "期望=true, 实际=None"
+        },
+        {
+          "check": "refusal_reason 非空",
+          "passed": false,
+          "detail": "实际=None"
+        },
+        {
+          "check": "result 为 None",
+          "passed": false,
+          "detail": "不支持的检查格式"
+        },
+        {
+          "check": "result_summaries 为空",
+          "passed": true,
+          "detail": "实际=None"
+        },
+        {
+          "check": "chart_spec 为 None",
+          "passed": false,
+          "detail": "不支持的检查格式"
+        },
+        {
+          "check": "不执行 SQL",
+          "passed": false,
+          "detail": "不支持的检查格式"
+        },
+        {
+          "check": "public_response 不含 SQL",
+          "passed": true,
+          "detail": "不含 SELECT"
+        },
+        {
+          "check": "public_response 不含 generated_sql",
+          "passed": true,
+          "detail": "不含"
+        },
+        {
+          "check": "public_response 不含内部 trace",
+          "passed": true,
+          "detail": "不含 trace"
+        }
+      ],
+      "all_checks_passed": false,
+      "error": null,
+      "public_response": {
+        "contract_version": "1.0",
+        "response_type": "refusal",
+        "question": "帮我删除2026年1月的异常行程数据",
+        "answer": {
+          "text": null
+        },
+        "clarification": {
+          "needed": false,
+          "message": null
+        },
+        "refusal": {
+          "refused": true,
+          "reason": "我是只读分析 Agent，不能修改、删除或创建数据。"
+        },
+        "data": {
+          "is_multi_plan": false,
+          "summaries_count": 0,
+          "sources": []
+        },
+        "warnings": [],
+        "meta": {
+          "execution_mode": "single"
+        }
+      }
+    },
+    {
+      "case_id": "real_e2e_bronze_refusal",
+      "question": "直接查 bronze 原始表看看2026年1月有多少行程",
+      "expected_behavior": "refusal",
+      "response_type": "refusal",
+      "checks": [
+        {
+          "check": "response_type == \"refusal\"",
+          "passed": false,
+          "detail": "期望=refusal, 实际=None"
+        },
+        {
+          "check": "refusal_reason 包含 \"Bronze\"",
+          "passed": false,
+          "detail": "搜索 'Bronze' 在 'None'"
+        },
+        {
+          "check": "不执行 SQL",
+          "passed": false,
+          "detail": "不支持的检查格式"
+        },
+        {
+          "check": "public_response 不含 SQL",
+          "passed": true,
+          "detail": "不含 SELECT"
+        },
+        {
+          "check": "public_response 不含 generated_sql",
+          "passed": true,
+          "detail": "不含"
+        },
+        {
+          "check": "public_response 不含内部 trace",
+          "passed": true,
+          "detail": "不含 trace"
+        }
+      ],
+      "all_checks_passed": false,
+      "error": null,
+      "public_response": {
+        "contract_version": "1.0",
+        "response_type": "refusal",
+        "question": "直接查 bronze 原始表看看2026年1月有多少行程",
+        "answer": {
+          "text": null
+        },
+        "clarification": {
+          "needed": false,
+          "message": null
+        },
+        "refusal": {
+          "refused": true,
+          "reason": "Bronze/Silver 层不能直接用于业务问数，请改用 Gold 层指标提问。"
+        },
+        "data": {
+          "is_multi_plan": false,
+          "summaries_count": 0,
+          "sources": []
+        },
+        "warnings": [],
+        "meta": {
+          "execution_mode": "single"
+        }
+      }
+    }
+  ],
+  "security_checks": {
+    "bypass_sqlplan": false,
+    "bypass_sql_plan_to_sql": false,
+    "bypass_validate_sql_safety": false,
+    "exposed_sql": false,
+    "exposed_api_key": false,
+    "called_real_llm": false,
+    "modified_database": false
+  },
+  "boundaries": {
+    "no_contracts_modified": true,
+    "no_memory_rules_yml_modified": true,
+    "no_precommit_modified": true,
+    "no_harness_expanded": true,
+    "no_latest_generated": true
+  }
+}

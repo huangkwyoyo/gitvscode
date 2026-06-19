@@ -1,0 +1,37 @@
+{
+  "report_type": "precommit_memory_warn_single_observation",
+  "run_id": "OBS-20260619T154719",
+  "timestamp": "2026-06-19T23:47:19.578028+08:00",
+  "git_commit": "f76dbb622868f4581e9ce87c7dd4e826610b004c",
+  "branch": "main",
+  "duration_ms": 1422.8,
+  "exit_code": 0,
+  "warning_count": 0,
+  "active_blocking_rules": [
+    "TA-R018",
+    "TA-R019",
+    "TA-R020",
+    "TA-R023"
+  ],
+  "ta_r018_result": "skipped",
+  "memory_warn_exit_code": 0,
+  "precommit_mode": "blocking",
+  "polluted_reports": false,
+  "generated_latest": false,
+  "worktree_dirty_before": true,
+  "worktree_dirty_after": true,
+  "enforcement_summary": {
+    "total_rules": 21,
+    "passed": 20,
+    "warnings": 1,
+    "blocking_failures": 0,
+    "active_blocking": 4
+  },
+  "boundary_confirmations": {
+    "no_blocking": false,
+    "no_latest": true,
+    "no_docs_memory_modification": true,
+    "no_memory_rules_yml_modification": true,
+    "temp_report_dir_used": true
+  }
+}
