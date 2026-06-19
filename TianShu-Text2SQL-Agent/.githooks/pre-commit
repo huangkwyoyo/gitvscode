@@ -33,7 +33,7 @@ echo -e "${CYAN}═════════════════════�
 echo ""
 
 # ── 第一步：代码编译检查 ──────────────────────────────
-echo -e "${YELLOW}[1/3] 代码编译检查 (compileall)...${NC}"
+echo -e "${YELLOW}[1/5] 代码编译检查 (compileall)...${NC}"
 if python -m compileall -q src harness tests 2>/dev/null; then
     echo -e "  ${GREEN}✅ PASS${NC} — 所有 Python 文件编译通过"
 else
@@ -51,7 +51,7 @@ else
 fi
 
 # ── 第二步：单元测试 ──────────────────────────────────
-echo -e "${YELLOW}[2/3] 单元测试 (pytest)...${NC}"
+echo -e "${YELLOW}[2/5] 单元测试 (pytest)...${NC}"
 if python -m pytest -q --basetemp harness/reports/test_tmp/pytest_precommit_hook 2>&1; then
     echo -e "  ${GREEN}✅ PASS${NC} — 所有测试用例通过"
 else
@@ -68,7 +68,7 @@ else
 fi
 
 # ── 第三步：Harness 五项安全检查 ──────────────────────────
-echo -e "${YELLOW}[3/4] Harness 五项安全检查...${NC}"
+echo -e "${YELLOW}[3/5] Harness 五项安全检查...${NC}"
 if python harness/run_harness.py --step 1 2>&1 && \
    python harness/run_harness.py --step 2 2>&1 && \
    python harness/run_harness.py --step 3 2>&1 && \
@@ -94,7 +94,7 @@ else
 fi
 
 # ── 第四步：Memory Gate 记忆更新检查 ────────────────────
-echo -e "${YELLOW}[4/4] Memory Gate 记忆更新检查...${NC}"
+echo -e "${YELLOW}[4/5] Memory Gate 记忆更新检查...${NC}"
 MEMORY_OUTPUT=$(python harness/checks/check_memory_update.py 2>&1)
 MEMORY_EXIT=$?
 if [ $MEMORY_EXIT -eq 0 ]; then
@@ -115,6 +115,12 @@ else
     echo "  跳过方式（不推荐）：git commit --no-verify"
     exit 1
 fi
+
+# ── 第五步：Memory Harness pre-commit warn（warn-only，不阻断）──
+echo -e "${YELLOW}[5/5] Memory Harness pre-commit warn（warn-only）...${NC}"
+python harness/run_precommit_memory_warn.py 2>&1
+# pre-commit warn 始终为 warn-only，不检查其退出码，不阻断 commit
+echo -e "  ${CYAN}ℹ️  以上为 Memory Harness 检查结果（warn-only，不影响 commit）${NC}"
 
 # ── 全部通过 ──────────────────────────────────────────
 echo ""
