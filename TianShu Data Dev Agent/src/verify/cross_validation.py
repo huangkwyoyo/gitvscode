@@ -21,38 +21,38 @@ def compare_results(
     """比较 SQL 与 Spark sample run 结果。"""
     if sql_result is None and spark_result is None:
         return CrossValidationResult(
-            status=CrossValidateStatus.NOT_ATTEMPTED,
-            detail="没有 SQL/Spark 执行结果，交叉验证未尝试。",
+            status=CrossValidateStatus.NOT_EXECUTED,
+            detail="没有 SQL/Spark 执行结果，交叉验证未执行——双引擎均未产出结果。",
         )
 
     if sql_result is None:
         return CrossValidationResult(
-            status=CrossValidateStatus.SKIPPED,
+            status=CrossValidateStatus.NOT_EXECUTED,
             spark_row_count=spark_result.row_count if spark_result else 0,
-            detail="SQL 结果缺失，交叉验证不能通过。",
+            detail="SQL 结果缺失，交叉验证未执行——缺少 SQL 侧结果。",
         )
 
     if spark_result is None:
         return CrossValidationResult(
-            status=CrossValidateStatus.SKIPPED,
+            status=CrossValidateStatus.NOT_EXECUTED,
             sql_row_count=sql_result.row_count,
-            detail="Spark 结果缺失或不可用，交叉验证跳过。",
+            detail="Spark 结果缺失或不可用，交叉验证未执行——无法提供双引擎背书。",
         )
 
     if sql_result.error:
         return CrossValidationResult(
-            status=CrossValidateStatus.SKIPPED,
+            status=CrossValidateStatus.NOT_EXECUTED,
             sql_row_count=sql_result.row_count,
             spark_row_count=spark_result.row_count,
-            detail=f"SQL sample run 失败，交叉验证跳过: {sql_result.error}",
+            detail=f"SQL sample run 失败，交叉验证未执行: {sql_result.error}",
         )
 
     if spark_result.error:
         return CrossValidationResult(
-            status=CrossValidateStatus.SKIPPED,
+            status=CrossValidateStatus.NOT_EXECUTED,
             sql_row_count=sql_result.row_count,
             spark_row_count=spark_result.row_count,
-            detail=f"Spark sample run 失败或不可用，交叉验证跳过: {spark_result.error}",
+            detail=f"Spark sample run 失败或不可用，交叉验证未执行: {spark_result.error}",
         )
 
     diffs: list[dict] = []
@@ -93,15 +93,15 @@ def compare_results(
         )
 
     return CrossValidationResult(
-        status=CrossValidateStatus.CONSISTENT,
+        status=CrossValidateStatus.CONSISTENT_SAMPLE,
         sql_row_count=sql_result.row_count,
         spark_row_count=spark_result.row_count,
         column_match=True,
         value_diffs=[],
         detail=(
             "行数、列名、抽样行与数值合计一致（LIMIT 1000 样本）。"
-            "注意：样本一致不代表全量数据一致、业务正确或生产就绪——"
-            "交叉验证只能发现两份代码逻辑不一致，不能证明两份代码都正确。"
+            "仅证明本次样本结果在已比较维度上一致，"
+            "不证明两份实现业务语义正确，也不证明全量或生产行为一致。"
         ),
     )
 

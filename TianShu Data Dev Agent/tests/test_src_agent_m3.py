@@ -198,7 +198,7 @@ def test_cross_validation_passes_for_matching_results():
         row_count=1,
     )
     result = compare_results(sql_result, spark_result)
-    assert result.status == CrossValidateStatus.CONSISTENT
+    assert result.status == CrossValidateStatus.CONSISTENT_SAMPLE
 
 
 def test_cross_validation_warns_for_column_row_or_sample_diff():
@@ -222,8 +222,8 @@ def test_cross_validation_skips_when_spark_missing_or_sql_failed():
         SQLResult(sql="spark", row_count=1),
     )
 
-    assert missing_spark.status == CrossValidateStatus.SKIPPED
-    assert failed_sql.status == CrossValidateStatus.SKIPPED
+    assert missing_spark.status == CrossValidateStatus.NOT_EXECUTED
+    assert failed_sql.status == CrossValidateStatus.NOT_EXECUTED
 
 
 def test_verification_reports_written_and_decision_not_approved(tmp_path):

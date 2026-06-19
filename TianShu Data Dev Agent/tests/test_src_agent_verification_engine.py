@@ -171,11 +171,11 @@ def test_spark_sample_never_passes_without_real_spark(tmp_path):
 
 
 def test_cross_validation_status_without_spark(tmp_path):
-    """没有 Spark 结果时 cross_validation_status 不能是 PASS。"""
+    """没有 Spark 结果时 cross_validation_status 不能是 PASS，应为 NOT_EXECUTED。"""
     package_dir = _build_package(tmp_path)
     result = verify_review_package(package_dir)
 
-    assert result.cross_validation_status in {"SKIPPED", "PENDING"}
+    assert result.cross_validation_status in {"NOT_EXECUTED", "SKIPPED", "PENDING"}
     assert result.cross_validation_status != "PASS"
 
 
@@ -441,8 +441,13 @@ def test_spark_result_status_pass():
 
 
 def test_cross_status_consistent():
-    """_cross_status：CONSISTENT → PASS。"""
-    assert _cross_status(CrossValidateStatus.CONSISTENT) == "PASS"
+    """_cross_status：CONSISTENT_SAMPLE → CONSISTENT_SAMPLE。"""
+    assert _cross_status(CrossValidateStatus.CONSISTENT_SAMPLE) == "CONSISTENT_SAMPLE"
+
+
+def test_cross_status_legacy_consistent():
+    """_cross_status：旧 CONSISTENT → CONSISTENT（向后兼容）。"""
+    assert _cross_status(CrossValidateStatus.CONSISTENT) == "CONSISTENT"
 
 
 def test_cross_status_inconsistent():
@@ -451,13 +456,18 @@ def test_cross_status_inconsistent():
 
 
 def test_cross_status_skipped():
-    """_cross_status：SKIPPED → SKIPPED。"""
+    """_cross_status：SKIPPED → SKIPPED（向后兼容旧值）。"""
     assert _cross_status(CrossValidateStatus.SKIPPED) == "SKIPPED"
 
 
+def test_cross_status_not_executed():
+    """_cross_status：NOT_EXECUTED → NOT_EXECUTED。"""
+    assert _cross_status(CrossValidateStatus.NOT_EXECUTED) == "NOT_EXECUTED"
+
+
 def test_cross_status_pending():
-    """_cross_status：NOT_ATTEMPTED → PENDING。"""
-    assert _cross_status(CrossValidateStatus.NOT_ATTEMPTED) == "PENDING"
+    """_cross_status：NOT_ATTEMPTED → NOT_EXECUTED。"""
+    assert _cross_status(CrossValidateStatus.NOT_ATTEMPTED) == "NOT_EXECUTED"
 
 
 def test_overall_status_fail_on_any_fail():
@@ -613,11 +623,15 @@ def test_verification_coverage_in_summary(tmp_path):
     assert "spark_static" in coverage
     assert "spark_sample" in coverage
     assert "cross_validation" in coverage
-    # 未覆盖维度（4 个——明确标注 NOT_COVERED）
-    assert coverage["business_semantics"] == "NOT_COVERED"
-    assert coverage["full_data_behavior"] == "NOT_COVERED"
-    assert coverage["production_performance"] == "NOT_COVERED"
-    assert coverage["partition_idempotency_rollback"] == "NOT_COVERED"
+    # 未覆盖维度（4 个——明确标注 NOT_VALIDATED / HUMAN_REVIEW_REQUIRED）
+    assert coverage["business_semantics"] == "HUMAN_REVIEW_REQUIRED"
+    assert coverage["full_data_behavior"] == "NOT_VALIDATED"
+    assert coverage["production_performance"] == "NOT_VALIDATED"
+    assert coverage["partition_idempotency_rollback"] == "NOT_VALIDATED"
+    # spark_sample 应为 NOT_IMPLEMENTED（当前 executor 是桩）
+    assert coverage["spark_sample"] == "NOT_IMPLEMENTED"
+    # cross_validation 应为 NOT_EXECUTED（Spark 不可用）
+    assert coverage["cross_validation"] == "NOT_EXECUTED"
 
 
 def test_assurance_level_in_summary_always_partial_without_spark(tmp_path):
@@ -636,7 +650,7 @@ def test_assurance_level_in_summary_always_partial_without_spark(tmp_path):
 
 
 def test_verification_coverage_spark_always_skipped_or_pending(tmp_path):
-    """verification_coverage 中 spark_sample 在当前必须为 SKIPPED/PENDING/FAILED。"""
+    """verification_coverage 中 spark_sample 在当前为 NOT_IMPLEMENTED。"""
     package_dir = _build_package(tmp_path)
     verify_review_package(package_dir)
     summary = yaml.safe_load(
@@ -646,7 +660,8 @@ def test_verification_coverage_spark_always_skipped_or_pending(tmp_path):
     coverage = summary["verification_coverage"]
     # Spark 样本执行在当前环境下不能伪装 COMPLETE
     assert coverage["spark_sample"] != "COMPLETE"
-    assert coverage["spark_sample"] in {"SKIPPED", "PENDING", "FAILED"}
+    # 当前 executor 是桩——始终 NOT_IMPLEMENTED
+    assert coverage["spark_sample"] == "NOT_IMPLEMENTED"
 
 
 def test_verification_coverage_never_claims_full_coverage(tmp_path):
@@ -658,11 +673,11 @@ def test_verification_coverage_never_claims_full_coverage(tmp_path):
     )
 
     coverage = summary["verification_coverage"]
-    # 四个 NOT_COVERED 维度必须明确标注
-    assert coverage.get("business_semantics") == "NOT_COVERED"
-    assert coverage.get("full_data_behavior") == "NOT_COVERED"
-    assert coverage.get("production_performance") == "NOT_COVERED"
-    assert coverage.get("partition_idempotency_rollback") == "NOT_COVERED"
+    # 四个未验证维度必须明确标注（使用精确术语）
+    assert coverage.get("business_semantics") == "HUMAN_REVIEW_REQUIRED"
+    assert coverage.get("full_data_behavior") == "NOT_VALIDATED"
+    assert coverage.get("production_performance") == "NOT_VALIDATED"
+    assert coverage.get("partition_idempotency_rollback") == "NOT_VALIDATED"
 
 
 def test_verification_report_contains_coverage_section(tmp_path):
@@ -687,17 +702,18 @@ def test_verification_report_contains_capability_boundary(tmp_path):
 
 
 def test_cross_validation_report_contains_sample_disclaimer(tmp_path):
-    """cross_validation.md 必须包含样本一致性免责声明。"""
+    """cross_validation.md 必须包含 CONSISTENT_SAMPLE / NOT_EXECUTED 免责声明。"""
     package_dir = _build_package(tmp_path)
     result = verify_review_package(package_dir)
     content = Path(result.cross_validation_report_path).read_text(encoding="utf-8")
 
-    assert "LIMIT 1000 样本" in content
-    assert "不代表全量数据一致" in content
+    assert "CONSISTENT_SAMPLE" in content
+    assert "NOT_EXECUTED" in content
+    assert "仅证明本次样本结果在已比较维度上一致" in content
 
 
 def test_cross_validation_consistent_detail_has_disclaimer():
-    """CONSISTENT 结果的 detail 必须包含样本免责声明。"""
+    """CONSISTENT_SAMPLE 结果的 detail 必须包含精确免责声明。"""
     from src.verify.cross_validation import compare_results
 
     sql_result = SQLResult(
@@ -713,10 +729,11 @@ def test_cross_validation_consistent_detail_has_disclaimer():
         row_count=1,
     )
     result = compare_results(sql_result, spark_result)
-    assert result.status == CrossValidateStatus.CONSISTENT
-    # detail 必须包含免责声明
-    assert "不代表全量数据一致" in result.detail
-    assert "LIMIT 1000" in result.detail
+    assert result.status == CrossValidateStatus.CONSISTENT_SAMPLE
+    # detail 必须包含精确免责声明（任务规格 §4.3 要求的标准文案）
+    assert "仅证明本次样本结果在已比较维度上一致" in result.detail
+    assert "不证明两份实现业务语义正确" in result.detail
+    assert "也不证明全量或生产行为一致" in result.detail
     # 不应再使用"置信度大幅提高"等过度承诺表述
     assert "置信度大幅提高" not in result.detail
 
@@ -737,22 +754,54 @@ def test_assurance_level_enum_values():
 
 
 def test_verification_coverage_defaults():
-    """VerificationCoverage 默认所有已覆盖维度为 PENDING，未覆盖维度为 NOT_COVERED。"""
+    """VerificationCoverage 默认值对齐任务规格定义。"""
     from src.ir.types import VerificationCoverage
     cov = VerificationCoverage()
     assert cov.sql_static == "PENDING"
-    assert cov.business_semantics == "NOT_COVERED"
-    assert cov.full_data_behavior == "NOT_COVERED"
-    assert cov.production_performance == "NOT_COVERED"
-    assert cov.partition_idempotency_rollback == "NOT_COVERED"
-    # unverified_dimensions 属性
+    assert cov.spark_sample == "NOT_IMPLEMENTED"
+    assert cov.cross_validation == "NOT_EXECUTED"
+    assert cov.business_semantics == "HUMAN_REVIEW_REQUIRED"
+    assert cov.full_data_behavior == "NOT_VALIDATED"
+    assert cov.production_performance == "NOT_VALIDATED"
+    assert cov.partition_idempotency_rollback == "NOT_VALIDATED"
+    # unverified_dimensions 属性——包含所有非 COMPLETE/FAILED/SKIPPED 的维度
     unverified = cov.unverified_dimensions
     assert "business_semantics" in unverified
     assert "full_data_behavior" in unverified
     assert "production_performance" in unverified
     assert "partition_idempotency_rollback" in unverified
-    # 已覆盖维度不应该出现在 unverified 中
-    assert "sql_static" not in unverified
+    assert "spark_sample" in unverified       # NOT_IMPLEMENTED
+    assert "cross_validation" in unverified    # NOT_EXECUTED
+    # COMPLETE/SKIPPED/FAILED 的维度不在 unverified 中
+    assert "sql_static" not in unverified      # PENDING → 不在 _UNVERIFIED_TERMS 中
+
+
+def test_verification_report_mentions_limit_does_not_guarantee_scan_limit(tmp_path):
+    """verification.md 必须说明 LIMIT 不保证限制底层扫描量。"""
+    package_dir = _build_package(tmp_path)
+    result = verify_review_package(package_dir)
+    content = Path(result.verification_report_path).read_text(encoding="utf-8")
+
+    assert "不保证限制底层扫描量" in content
+
+
+def test_verification_report_mentions_join_whitelist_not_cardinality(tmp_path):
+    """verification.md 必须说明 JOIN 白名单不证明 JOIN 基数正确。"""
+    package_dir = _build_package(tmp_path)
+    result = verify_review_package(package_dir)
+    content = Path(result.verification_report_path).read_text(encoding="utf-8")
+
+    assert "JOIN 白名单不证明 JOIN 基数正确" in content
+
+
+def test_verification_report_mentions_partition_idempotency_rollback_unverified(tmp_path):
+    """verification.md 必须说明分区、幂等、回滚未验证。"""
+    package_dir = _build_package(tmp_path)
+    result = verify_review_package(package_dir)
+    content = Path(result.verification_report_path).read_text(encoding="utf-8")
+
+    assert "分区" in content and "幂等" in content
+    assert "回滚" in content or "rollback" in content.lower()
 
 
 def test_verification_coverage_to_dict():
@@ -768,7 +817,7 @@ def test_verification_coverage_to_dict():
     d = cov.to_dict()
     assert len(d) == 9
     assert d["sql_static"] == "COMPLETE"
-    assert d["business_semantics"] == "NOT_COVERED"
+    assert d["business_semantics"] == "HUMAN_REVIEW_REQUIRED"
 
 
 def test_superseded_when_approved_and_reverify(tmp_path):

@@ -285,6 +285,7 @@ def verify_review_package(
             sql_result=sql_result,
             spark_result=spark_result,
             overall_status=overall_status,
+            cross_status=cross_status,
             warnings=warnings,
             failures=failures,
             no_sql_run=no_sql_run,
@@ -398,22 +399,22 @@ def _build_verification_summary_yml(
     """
     now_iso = datetime.now(timezone.utc).isoformat()
 
-    # 构造验证覆盖范围
+    # 构造验证覆盖范围——将内部状态映射为 coverage 标准术语
     coverage = VerificationCoverage(
-        sql_static=sql_static_status,
-        sql_sample=sql_sample_status,
-        spark_static=spark_static_status,
-        spark_sample=spark_sample_status,
-        cross_validation=cross_status,
+        sql_static=_to_coverage_term(sql_static_status),
+        sql_sample=_to_coverage_term(sql_sample_status),
+        spark_static=_to_coverage_term(spark_static_status),
+        spark_sample=_spark_coverage_term(spark_sample_status),
+        cross_validation=_cross_coverage_term(cross_status),
     )
 
     # 计算保证级别：当前始终为 PARTIAL（Spark 不可用）
-    # 未来当 sql_sample==PASS 且 spark_sample==PASS 且 cross_status==CONSISTENT 时为 DUAL_ENGINE_SAMPLE
+    # 未来当 sql_sample==PASS 且 spark_sample==PASS 且 cross_status==CONSISTENT_SAMPLE 时为 DUAL_ENGINE_SAMPLE
     assurance = AssuranceLevel.PARTIAL
     if (
         sql_sample_status == "PASS"
         and spark_sample_status == "PASS"
-        and cross_status == "PASS"  # CONSISTENT → _cross_status → "PASS"
+        and cross_status == "CONSISTENT_SAMPLE"
     ):
         assurance = AssuranceLevel.DUAL_ENGINE_SAMPLE
 
@@ -512,13 +513,24 @@ def _spark_result_status(result: SQLResult | None) -> str:
 
 
 def _cross_status(status: CrossValidateStatus) -> str:
-    """把交叉验证枚举转成报告状态。"""
-    if status == CrossValidateStatus.CONSISTENT:
-        return "PASS"
+    """把交叉验证枚举转成报告状态。
+
+    v2.1：新增 CONSISTENT_SAMPLE → CONSISTENT_SAMPLE（不再伪装为 PASS），
+          NOT_EXECUTED → NOT_EXECUTED。
+    """
+    if status == CrossValidateStatus.CONSISTENT_SAMPLE:
+        return "CONSISTENT_SAMPLE"
     if status == CrossValidateStatus.INCONSISTENT:
         return "WARN"
+    if status == CrossValidateStatus.NOT_EXECUTED:
+        return "NOT_EXECUTED"
+    # 向后兼容旧枚举值
+    if status == CrossValidateStatus.CONSISTENT:
+        return "CONSISTENT"  # 旧值——不伪装 PASS
     if status == CrossValidateStatus.SKIPPED:
         return "SKIPPED"
+    if status == CrossValidateStatus.NOT_ATTEMPTED:
+        return "NOT_EXECUTED"
     return "PENDING"
 
 
@@ -549,7 +561,7 @@ def _collect_findings(
         warnings.append(f"Spark sample run 状态为 {spark_sample_status}")
     if spark_sample_status == "FAIL" and spark_result and spark_result.error:
         failures.append(f"Spark sample run 失败: {spark_result.error}")
-    if cross_status in {"WARN", "SKIPPED", "PENDING"}:
+    if cross_status in {"WARN", "SKIPPED", "PENDING", "NOT_EXECUTED"}:
         warnings.append(f"交叉验证状态为 {cross_status}: {cross_detail}")
 
     return warnings, failures
@@ -565,7 +577,11 @@ def _overall_status(
     failures: list[str],
     deploy_static_status: str = "PENDING",
 ) -> str:
-    """计算总体状态，任何跳过或待定都不能伪装 PASS。"""
+    """计算总体状态，任何跳过或待定都不能伪装 PASS。
+
+    v2.1：NOT_EXECUTED 和 CONSISTENT_SAMPLE 不会导致 PASS——
+          NOT_EXECUTED 视为未完成，CONSISTENT_SAMPLE 不改变 WARN/SKIPPED 聚合。
+    """
     statuses = {
         sql_static_status,
         sql_sample_status,
@@ -573,17 +589,21 @@ def _overall_status(
         spark_sample_status,
         cross_status,
     }
-    # M5：部署状态仅在 FAIL/WARN/SKIPPED 时纳入聚合（PASS 保持向后兼容）
-    if deploy_static_status in {"FAIL", "WARN", "SKIPPED"}:
+    # M5：部署状态仅在 FAIL/WARN/SKIPPED 时纳入聚合
+    if deploy_static_status in {"FAIL", "WARN", "SKIPPED", "NOT_EXECUTED"}:
         statuses.add(deploy_static_status)
     if failures or "FAIL" in statuses:
         return "FAIL"
     if "WARN" in statuses or warnings:
         return "WARN"
+    # NOT_EXECUTED = 交叉验证未执行——不能伪装 PASS
+    if "NOT_EXECUTED" in statuses:
+        return "WARN"
     if "PENDING" in statuses:
         return "PENDING"
     if "SKIPPED" in statuses:
         return "SKIPPED"
+    # CONSISTENT_SAMPLE 仅供交叉验证维度，不改变其他维度的聚合结果
     return "PASS"
 
 
@@ -595,24 +615,32 @@ def _build_verification_report(
     sql_result: SQLResult | None,
     spark_result: SQLResult | None,
     overall_status: str,
-    warnings: list[str],
-    failures: list[str],
-    no_sql_run: bool,
-    conn_provided: bool,
+    cross_status: str = "NOT_EXECUTED",
+    warnings: list[str] | None = None,
+    failures: list[str] | None = None,
+    no_sql_run: bool = False,
+    conn_provided: bool = False,
     deploy_static_status: str = "PENDING",
-    deploy_static_checks: list = None,
+    deploy_static_checks: list | None = None,
 ) -> str:
     """生成 verification.md——含验证覆盖范围和未验证风险。"""
+    if warnings is None:
+        warnings = []
+    if failures is None:
+        failures = []
+    if deploy_static_checks is None:
+        deploy_static_checks = []
+
     sql_static_status = _sql_static_status(static_report)
     spark_static_status = _spark_static_status(static_report)
 
-    # 构造验证覆盖范围
+    # 构造验证覆盖范围——将内部状态映射为 coverage 标准术语
     coverage = VerificationCoverage(
-        sql_static=sql_static_status,
-        sql_sample=sql_sample_status,
-        spark_static=spark_static_status,
-        spark_sample=spark_sample_status,
-        cross_validation="PENDING",  # 交叉验证状态由 cross_status 单独覆盖
+        sql_static=_to_coverage_term(sql_static_status),
+        sql_sample=_to_coverage_term(sql_sample_status),
+        spark_static=_to_coverage_term(spark_static_status),
+        spark_sample=_spark_coverage_term(spark_sample_status),
+        cross_validation=_cross_coverage_term(cross_status),
     )
 
     lines = [
@@ -641,14 +669,19 @@ def _build_verification_report(
             "sql_static": "SQL 静态检查（安全黑名单、表/字段存在性、JOIN 白名单）",
             "sql_sample": "SQL 样本执行（只读、LIMIT 1000、超时 30s）",
             "spark_static": "Spark 静态检查（AST 安全分析）",
-            "spark_sample": "Spark 样本执行",
-            "cross_validation": "SQL/Spark 交叉验证",
-            "business_semantics": "业务语义正确性（JOIN 基数、指标口径）",
+            "spark_sample": "Spark 样本执行（当前为桩——NOT_IMPLEMENTED）",
+            "cross_validation": "SQL/Spark 交叉验证（需双引擎结果才可执行）",
+            "business_semantics": "业务语义正确性（JOIN 基数、指标口径）——只能人审",
             "full_data_behavior": "全量数据行为（非 LIMIT 约束下的行为）",
             "production_performance": "生产性能（执行计划、资源消耗）",
             "partition_idempotency_rollback": "分区/幂等/回滚正确性",
         }.get(key, key)
-        status_icon = "✅" if val not in ("NOT_COVERED", "SKIPPED", "PENDING", "FAILED") else "⚠️"
+        _incomplete_terms = {
+            "NOT_COVERED", "NOT_IMPLEMENTED", "NOT_EXECUTED",
+            "NOT_VALIDATED", "HUMAN_REVIEW_REQUIRED",
+            "SKIPPED", "PENDING", "FAILED",
+        }
+        status_icon = "✅" if val not in _incomplete_terms else "⚠️"
         lines.append(f"- {status_icon} **{label}**：{val}")
 
     lines.append("")
@@ -664,10 +697,10 @@ def _build_verification_report(
         ])
         for key in unverified:
             detail = {
-                "business_semantics": "JOIN 基数正确性、指标口径准确性、业务逻辑等价性——需要业务专家审查",
-                "full_data_behavior": "LIMIT 1000 样本不代表全量数据行为——全量 JOIN 可能产生不同结果",
-                "production_performance": "执行计划、内存消耗、分区剪枝——需在类生产环境独立评估",
-                "partition_idempotency_rollback": "分区覆盖正确性、幂等性、回滚安全性——需独立测试",
+                "business_semantics": "JOIN 基数正确性、指标口径准确性、业务逻辑等价性——只能由业务专家人工审查。JOIN 白名单不证明 JOIN 基数正确。",
+                "full_data_behavior": "LIMIT 1000 不保证限制底层扫描量，样本结果不代表全量数据行为。全量 JOIN 可能产生不同结果、不同性能特征。",
+                "production_performance": "执行计划、内存消耗、分区剪枝——需在类生产环境独立评估。样本执行不反映生产规模性能。",
+                "partition_idempotency_rollback": "分区覆盖正确性、幂等性、重跑安全性、回滚有效性——当前未验证，需独立测试。部署前必须确认。",
             }.get(key, "当前不验证")
             lines.append(f"- **{key}**：{detail}")
         lines.append("")
@@ -722,6 +755,9 @@ def _build_verification_report(
         "- Agent 不写生产库，不自动上线，不替代人工审批。",
         "- **三道防线用于降低风险，不构成上线充分条件。**",
         "- **当前验证为 PARTIAL 级别——仅 SQL 单引擎样本执行，不证明业务正确或生产就绪。**",
+        "- **LIMIT 1000 仅限制结果行数，不保证限制底层扫描量——样本执行不代表全量性能。**",
+        "- **JOIN 白名单只能证明 JOIN 路径已审批，不能证明 JOIN 基数正确或业务口径准确。**",
+        "- **分区正确性、幂等性、重跑安全性、回滚有效性——当前均未验证。**",
         "",
     ])
     return "\n".join(lines)
@@ -763,9 +799,9 @@ def _build_cross_validation_report(
         "## 人审建议",
         "",
         "- 交叉验证结果不能替代人工审批。",
-        "- WARN/SKIPPED/PENDING 均需要人工确认是否可继续。",
-        "- CONSISTENT 仅代表两份代码的 LIMIT 1000 样本结果一致，不代表全量数据一致、业务正确或生产就绪。",
-        "- 当前 Spark 不可用时交叉验证始终 SKIPPED——无法提供双引擎背书。",
+        "- NOT_EXECUTED：双引擎未执行——无法提供双引擎背书，人审时需独立验证 Spark 侧逻辑。",
+        "- CONSISTENT_SAMPLE：仅证明本次样本结果在已比较维度上一致，不证明两份实现业务语义正确，也不证明全量或生产行为一致。",
+        "- 当前 Spark 不可用时交叉验证始终 NOT_EXECUTED——无法提供双引擎背书。",
         "- 未经人审不得上线。",
         "",
     ])
@@ -826,3 +862,57 @@ def _numeric_compare(
     if any(diff.get("type") == "numeric_sum" for diff in value_diffs):
         return "WARN"
     return "PASS"
+
+
+# ═══════════════════════════════════════════════════════
+# 状态 → coverage 标准术语映射（v2.1 漏洞 E 修复）
+# ═══════════════════════════════════════════════════════
+
+
+def _to_coverage_term(status: str) -> str:
+    """将内部 PASS/FAIL/WARN/SKIPPED/PENDING 映射为 coverage 标准术语。
+
+    COMPLETE = 已完整执行并通过
+    FAILED   = 已执行但失败
+    SKIPPED  = 故意跳过
+    """
+    if status == "PASS":
+        return "COMPLETE"
+    if status == "FAIL":
+        return "FAILED"
+    if status == "WARN":
+        return "COMPLETE"  # WARN 也是已完成，仅提醒人审
+    if status in {"SKIPPED", "PENDING"}:
+        return "SKIPPED"
+    return status  # 透传未知值
+
+
+def _spark_coverage_term(status: str) -> str:
+    """Spark sample 专用映射——当前 executor 是桩，始终 NOT_IMPLEMENTED。
+
+    NOT_IMPLEMENTED = executor 是桩，无真实 Spark 环境（当前所有 SKIPPED/PENDING 均归于此）
+    COMPLETE        = 通过（未来真实 Spark 接入后）
+    FAILED          = 失败（未来真实 Spark 接入后）
+    """
+    if status == "PASS":
+        return "COMPLETE"
+    if status == "FAIL":
+        return "FAILED"
+    # 当前所有 SKIPPED/PENDING 均来自 executor 桩 → 统一标记 NOT_IMPLEMENTED
+    return "NOT_IMPLEMENTED"
+
+
+def _cross_coverage_term(status: str) -> str:
+    """交叉验证专用映射——区分"未执行"与"完成"。
+
+    NOT_EXECUTED = 双引擎未执行
+    FAILED       = 双引擎结果不一致（INCONSISTENT）
+    COMPLETE     = 双引擎样本一致（CONSISTENT_SAMPLE）
+    """
+    if status in {"CONSISTENT_SAMPLE", "CONSISTENT"}:
+        return "COMPLETE"
+    if status == "WARN":
+        return "FAILED"          # INCONSISTENT → WARN → coverage=FAILED
+    if status in {"NOT_EXECUTED", "SKIPPED", "PENDING"}:
+        return "NOT_EXECUTED"
+    return "NOT_EXECUTED"

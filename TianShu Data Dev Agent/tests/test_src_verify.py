@@ -371,21 +371,24 @@ class TestCrossValidationEngine:
     """交叉验证引擎测试"""
 
     def test_compare_results_both_none(self):
+        """v2.1：双方均无结果 → NOT_EXECUTED。"""
         result = compare_results()
-        assert result.status.value == "not_attempted"
+        assert result.status.value == "not_executed"
 
     def test_compare_results_no_spark(self):
+        """v2.1：缺少 Spark 结果 → NOT_EXECUTED。"""
         result = compare_results(
             sql_result=SQLResult(sql="SELECT 1", row_count=10),
         )
-        assert result.status.value == "skipped"
+        assert result.status.value == "not_executed"
 
     def test_compare_results_phase1_stub(self):
+        """v2.1：双结果一致 → CONSISTENT_SAMPLE。"""
         result = compare_results(
             sql_result=SQLResult(sql="SELECT 1", row_count=10),
             spark_result=SQLResult(sql="spark.code", row_count=10),
         )
-        assert result.status.value == "consistent"
+        assert result.status.value == "consistent_sample"
 
 
 class TestReportFactories:

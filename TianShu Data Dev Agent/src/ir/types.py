@@ -97,11 +97,24 @@ class ValidationStatus(str, Enum):
 
 
 class CrossValidateStatus(str, Enum):
-    """交叉验证状态"""
-    CONSISTENT = "consistent"          # SQL 和 PySpark 样本结果一致（仅样本，非全量数据）
-    INCONSISTENT = "inconsistent"      # 结果不一致——至少一份代码有逻辑错误
-    SKIPPED = "skipped"               # 跳过（如 Spark 不可用）
-    NOT_ATTEMPTED = "not_attempted"   # 未尝试
+    """交叉验证状态——区分双引擎是否真实执行、样本一致与全量一致。
+
+    v2.1（漏洞 E 修复）新增 CONSISTENT_SAMPLE + NOT_EXECUTED，
+    替代早期 SKIPPED/CONSISTENT 的模糊表述：
+      - NOT_EXECUTED：双引擎未执行——无 Spark 结果，交叉验证无法提供双引擎背书
+      - CONSISTENT_SAMPLE：双引擎样本一致——LIMIT 1000 结果在已比较维度上一致。
+        不代表全量数据一致、业务正确或生产就绪。
+      - INCONSISTENT：双引擎结果存在差异——至少一份代码有逻辑错误
+    """
+    # v2.1 主值（精确语义）
+    NOT_EXECUTED = "not_executed"          # 双引擎未执行（Spark 不可用或跳过）
+    CONSISTENT_SAMPLE = "consistent_sample" # 双引擎样本一致（仅样本，非全量）
+    INCONSISTENT = "inconsistent"           # 结果不一致——至少一份代码有逻辑错误
+
+    # 保留旧值（向后兼容——旧调用方可能引用）
+    CONSISTENT = "consistent"               # 已弃用——语义不精确，等价于 CONSISTENT_SAMPLE
+    SKIPPED = "skipped"                     # 已弃用——建议使用 NOT_EXECUTED
+    NOT_ATTEMPTED = "not_attempted"         # 保留——未尝试任何交叉验证
 
 
 class AssuranceLevel(str, Enum):
@@ -123,32 +136,43 @@ class AssuranceLevel(str, Enum):
 class VerificationCoverage:
     """验证覆盖范围——结构化记录各项验证维度的完成状态。
 
-    每个字段取值为 COMPLETE / SKIPPED / FAILED / NOT_COVERED。
-    当前实现仅覆盖前 5 个维度（sql_static 到 cross_validation），
-    其余维度为 NOT_COVERED——明确标注"当前不验证"比沉默更安全。
+    取值规范（与任务规格严格对齐）：
+      - COMPLETE：该维度已完整执行并通过
+      - FAILED：该维度已执行但失败
+      - SKIPPED：该维度被跳过（如 --no-sql-run）
+      - NOT_IMPLEMENTED：该维度代码已存在但未实现执行能力（Spark executor）
+      - NOT_EXECUTED：该维度需要双引擎但未执行（交叉验证）
+      - NOT_VALIDATED：该维度当前不验证——未实现检查能力
+      - HUMAN_REVIEW_REQUIRED：该维度只能由人审查——自动验证无法覆盖
 
     设计原则（来自漏洞 E/F 修复）：
       - 不伪造 Spark 执行完成状态
       - 不声称样本执行等价于全量数据验证
       - 不声称交叉验证等价于业务正确性证明
-      - NOT_COVERED 是明确的设计声明，不是缺陷
+      - NOT_IMPLEMENTED / NOT_VALIDATED 是明确的设计声明，不是缺陷
     """
     # 已覆盖维度
-    sql_static: str = "PENDING"               # SQL 静态检查：COMPLETE | SKIPPED | FAILED
-    sql_sample: str = "PENDING"               # SQL 样本执行（LIMIT 1000）：COMPLETE | SKIPPED | FAILED
-    spark_static: str = "PENDING"             # Spark 静态检查：COMPLETE | SKIPPED | FAILED
-    spark_sample: str = "PENDING"             # Spark 样本执行：当前始终 SKIPPED/PENDING
-    cross_validation: str = "PENDING"         # 交叉验证：CONSISTENT | INCONSISTENT | SKIPPED | NOT_ATTEMPTED
+    sql_static: str = "PENDING"                    # SQL 静态检查：COMPLETE | SKIPPED | FAILED
+    sql_sample: str = "PENDING"                    # SQL 样本执行：COMPLETE | SKIPPED | FAILED
+    spark_static: str = "PENDING"                  # Spark 静态检查：COMPLETE | SKIPPED | FAILED
+    spark_sample: str = "NOT_IMPLEMENTED"          # Spark 样本执行：当前 executor 是桩，始终 NOT_IMPLEMENTED
+    cross_validation: str = "NOT_EXECUTED"         # 交叉验证：NOT_EXECUTED | FAILED | COMPLETE
 
-    # 未覆盖维度——当前实现不验证，明确标注
-    business_semantics: str = "NOT_COVERED"         # 业务语义正确性（JOIN 基数、指标口径）
-    full_data_behavior: str = "NOT_COVERED"         # 全量数据行为（LIMIT 1000 不代表全量）
-    production_performance: str = "NOT_COVERED"     # 生产性能（执行计划、资源消耗）
-    partition_idempotency_rollback: str = "NOT_COVERED"  # 分区/幂等/回滚
+    # 自动验证不覆盖的维度——明确标注术语
+    business_semantics: str = "HUMAN_REVIEW_REQUIRED"         # 业务语义正确性（只能人审）
+    full_data_behavior: str = "NOT_VALIDATED"                 # 全量数据行为（LIMIT 1000 不代表全量）
+    production_performance: str = "NOT_VALIDATED"             # 生产性能（执行计划、资源消耗）
+    partition_idempotency_rollback: str = "NOT_VALIDATED"     # 分区/幂等/回滚
+
+    # 标记为未验证的术语集合（用于 unverified_dimensions 筛选）
+    _UNVERIFIED_TERMS: frozenset[str] = frozenset({
+        "NOT_COVERED", "NOT_IMPLEMENTED", "NOT_EXECUTED",
+        "NOT_VALIDATED", "HUMAN_REVIEW_REQUIRED",
+    })
 
     @property
     def all_covered_dimensions(self) -> dict[str, str]:
-        """返回所有维度的覆盖状态（含 NOT_COVERED 维度）。"""
+        """返回所有 9 维度的覆盖状态。"""
         return {
             "sql_static": self.sql_static,
             "sql_sample": self.sql_sample,
@@ -163,10 +187,14 @@ class VerificationCoverage:
 
     @property
     def unverified_dimensions(self) -> list[str]:
-        """返回当前标记为 NOT_COVERED 的维度列表。"""
+        """返回当前未完全验证的维度列表。
+
+        包括 NOT_IMPLEMENTED、NOT_EXECUTED、NOT_VALIDATED、HUMAN_REVIEW_REQUIRED
+        等所有非 COMPLETE 且非 FAILED/SKIPPED 的维度。
+        """
         return [
             key for key, val in self.all_covered_dimensions.items()
-            if val == "NOT_COVERED"
+            if val in self._UNVERIFIED_TERMS
         ]
 
     def to_dict(self) -> dict[str, Any]:
