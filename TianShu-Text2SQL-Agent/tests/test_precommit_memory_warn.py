@@ -30,6 +30,9 @@ from harness.run_precommit_memory_warn import (
     _analyze_enforcement,
     _find_json_object_start,
     _find_matching_brace,
+    _get_git_info,
+    _get_worktree_dirty,
+    _record_observation,
     _run_fast_gate_step3,
     render_warn_output,
     run_precommit_warn,
@@ -635,3 +638,414 @@ def test_no_llm_imports():
         assert indicator not in source.lower(), (
             f"脚本不应包含 LLM 调用相关代码: {indicator}"
         )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 测试：Step 21b — observation 记录功能
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestObservationRecording:
+    """Step 21b 观察证据收集器测试。"""
+
+    @staticmethod
+    def _mock_git_clean():
+        """模拟工作区干净（无未提交变更）。"""
+        return False
+
+    @staticmethod
+    def _mock_git_dirty():
+        """模拟工作区有变更。"""
+        return True
+
+    @staticmethod
+    def _mock_git_info():
+        """模拟 git 信息返回。"""
+        return {
+            "commit": "7d915ddfe8a1bc3c4f5e6d7a8b9c0d1e2f3a4b5c",
+            "branch": "main",
+        }
+
+    def test_record_observation_creates_json(self, monkeypatch, tmp_path):
+        """--record-observation 应生成 timestamp JSON 文件。"""
+        monkeypatch.setattr(
+            "harness.run_precommit_memory_warn._run_fast_gate_step3",
+            lambda report_dir: _make_pass_report(),
+        )
+        monkeypatch.setattr(
+            "harness.run_precommit_memory_warn._get_worktree_dirty",
+            self._mock_git_clean,
+        )
+        monkeypatch.setattr(
+            "harness.run_precommit_memory_warn._get_git_info",
+            self._mock_git_info,
+        )
+
+        obs_dir = str(tmp_path / "history")
+        exit_code = run_precommit_warn(
+            record_observation=True,
+            observation_dir=obs_dir,
+        )
+        assert exit_code == 0
+
+        # 验证生成 JSON 文件
+        json_files = list(Path(obs_dir).glob("*.json"))
+        assert len(json_files) == 1, f"应有 1 个 JSON 文件，实际: {json_files}"
+        assert "latest" not in json_files[0].name.lower()
+
+        # 验证 JSON 内容结构
+        data = json.loads(json_files[0].read_text(encoding="utf-8"))
+        assert data["report_type"] == "precommit_memory_warn_single_observation"
+
+    def test_observation_filename_not_latest(self, monkeypatch, tmp_path):
+        """observation 文件名不应包含 latest。"""
+        monkeypatch.setattr(
+            "harness.run_precommit_memory_warn._run_fast_gate_step3",
+            lambda report_dir: _make_pass_report(),
+        )
+        monkeypatch.setattr(
+            "harness.run_precommit_memory_warn._get_worktree_dirty",
+            self._mock_git_clean,
+        )
+        monkeypatch.setattr(
+            "harness.run_precommit_memory_warn._get_git_info",
+            self._mock_git_info,
+        )
+
+        obs_dir = str(tmp_path / "history")
+        run_precommit_warn(
+            record_observation=True,
+            observation_dir=obs_dir,
+        )
+
+        all_files = list(Path(obs_dir).rglob("*"))
+        for f in all_files:
+            if f.is_file():
+                assert "latest" not in f.name.lower(), (
+                    f"文件名不应包含 latest: {f.name}"
+                )
+
+    def test_observation_records_duration_and_exit_code(self, monkeypatch, tmp_path):
+        """observation 应记录 duration_ms 和 exit_code。"""
+        monkeypatch.setattr(
+            "harness.run_precommit_memory_warn._run_fast_gate_step3",
+            lambda report_dir: _make_pass_report(),
+        )
+        monkeypatch.setattr(
+            "harness.run_precommit_memory_warn._get_worktree_dirty",
+            self._mock_git_clean,
+        )
+        monkeypatch.setattr(
+            "harness.run_precommit_memory_warn._get_git_info",
+            self._mock_git_info,
+        )
+
+        obs_dir = str(tmp_path / "history")
+        run_precommit_warn(
+            record_observation=True,
+            observation_dir=obs_dir,
+        )
+
+        json_files = list(Path(obs_dir).glob("*.json"))
+        data = json.loads(json_files[0].read_text(encoding="utf-8"))
+
+        assert "duration_ms" in data
+        assert isinstance(data["duration_ms"], (int, float))
+        assert data["duration_ms"] > 0
+        assert data["exit_code"] == 0
+        assert data["memory_warn_exit_code"] == 0
+
+    def test_observation_records_git_commit(self, monkeypatch, tmp_path):
+        """observation 应记录 git_commit 和 branch。"""
+        expected_commit = "abc123def456"
+        expected_branch = "feature/test"
+
+        def _mock_info():
+            return {"commit": expected_commit, "branch": expected_branch}
+
+        monkeypatch.setattr(
+            "harness.run_precommit_memory_warn._run_fast_gate_step3",
+            lambda report_dir: _make_pass_report(),
+        )
+        monkeypatch.setattr(
+            "harness.run_precommit_memory_warn._get_worktree_dirty",
+            self._mock_git_clean,
+        )
+        monkeypatch.setattr(
+            "harness.run_precommit_memory_warn._get_git_info",
+            _mock_info,
+        )
+
+        obs_dir = str(tmp_path / "history")
+        run_precommit_warn(
+            record_observation=True,
+            observation_dir=obs_dir,
+        )
+
+        json_files = list(Path(obs_dir).glob("*.json"))
+        data = json.loads(json_files[0].read_text(encoding="utf-8"))
+
+        assert data["git_commit"] == expected_commit
+        assert data["branch"] == expected_branch
+
+    def test_observation_records_active_blocking_rules(self, monkeypatch, tmp_path):
+        """observation 应记录 active_blocking_rules 包含 TA-R018。"""
+        monkeypatch.setattr(
+            "harness.run_precommit_memory_warn._run_fast_gate_step3",
+            lambda report_dir: _make_pass_report(),
+        )
+        monkeypatch.setattr(
+            "harness.run_precommit_memory_warn._get_worktree_dirty",
+            self._mock_git_clean,
+        )
+        monkeypatch.setattr(
+            "harness.run_precommit_memory_warn._get_git_info",
+            self._mock_git_info,
+        )
+
+        obs_dir = str(tmp_path / "history")
+        run_precommit_warn(
+            record_observation=True,
+            observation_dir=obs_dir,
+        )
+
+        json_files = list(Path(obs_dir).glob("*.json"))
+        data = json.loads(json_files[0].read_text(encoding="utf-8"))
+
+        assert "active_blocking_rules" in data
+        assert "TA-R018" in data["active_blocking_rules"]
+
+    def test_observation_records_worktree_dirty(self, monkeypatch, tmp_path):
+        """observation 应记录 worktree_dirty_before 和 worktree_dirty_after。"""
+        monkeypatch.setattr(
+            "harness.run_precommit_memory_warn._run_fast_gate_step3",
+            lambda report_dir: _make_pass_report(),
+        )
+        # 模拟运行前工作区有变更
+        monkeypatch.setattr(
+            "harness.run_precommit_memory_warn._get_worktree_dirty",
+            self._mock_git_dirty,
+        )
+        monkeypatch.setattr(
+            "harness.run_precommit_memory_warn._get_git_info",
+            self._mock_git_info,
+        )
+
+        obs_dir = str(tmp_path / "history")
+        run_precommit_warn(
+            record_observation=True,
+            observation_dir=obs_dir,
+        )
+
+        json_files = list(Path(obs_dir).glob("*.json"))
+        data = json.loads(json_files[0].read_text(encoding="utf-8"))
+
+        assert "worktree_dirty_before" in data
+        assert "worktree_dirty_after" in data
+        # 两次调用 _get_worktree_dirty 都返回 True
+        assert data["worktree_dirty_before"] is True
+        assert data["worktree_dirty_after"] is True
+
+    def test_observation_write_failure_still_exit_zero(self, monkeypatch, tmp_path):
+        """observation 写入失败时脚本应仍 exit 0 并输出 warning。"""
+        monkeypatch.setattr(
+            "harness.run_precommit_memory_warn._run_fast_gate_step3",
+            lambda report_dir: _make_pass_report(),
+        )
+        monkeypatch.setattr(
+            "harness.run_precommit_memory_warn._get_worktree_dirty",
+            self._mock_git_clean,
+        )
+        monkeypatch.setattr(
+            "harness.run_precommit_memory_warn._get_git_info",
+            self._mock_git_info,
+        )
+        # 模拟 _record_observation 内部异常
+        monkeypatch.setattr(
+            "harness.run_precommit_memory_warn._record_observation",
+            lambda **kwargs: (_ for _ in ()).throw(RuntimeError("模拟写入失败")),
+        )
+
+        exit_code = run_precommit_warn(
+            record_observation=True,
+            observation_dir=str(tmp_path / "no-perm-dir"),
+        )
+        assert exit_code == 0
+
+    def test_observation_on_failure_still_exit_zero(self, monkeypatch, tmp_path):
+        """warn 失败场景下 record_observation 仍应 exit 0。"""
+        monkeypatch.setattr(
+            "harness.run_precommit_memory_warn._run_fast_gate_step3",
+            lambda report_dir: _make_blocking_failure_report(),
+        )
+        monkeypatch.setattr(
+            "harness.run_precommit_memory_warn._get_worktree_dirty",
+            self._mock_git_clean,
+        )
+        monkeypatch.setattr(
+            "harness.run_precommit_memory_warn._get_git_info",
+            self._mock_git_info,
+        )
+
+        obs_dir = str(tmp_path / "history")
+        exit_code = run_precommit_warn(
+            record_observation=True,
+            observation_dir=obs_dir,
+        )
+        assert exit_code == 0
+
+        # 同时验证 observation 记录了 warning_count > 0
+        json_files = list(Path(obs_dir).glob("*.json"))
+        data = json.loads(json_files[0].read_text(encoding="utf-8"))
+        assert data["warning_count"] >= 1
+        assert data["ta_r018_result"] == "failed"
+
+    def test_record_observation_uses_temp_report_dir(self, monkeypatch, tmp_path):
+        """record_observation 模式下仍使用临时 report dir，不污染 harness/reports。"""
+        captured_dir: list[str] = []
+
+        def _capture_dir(report_dir: str) -> dict:
+            captured_dir.append(report_dir)
+            return _make_pass_report()
+
+        monkeypatch.setattr(
+            "harness.run_precommit_memory_warn._run_fast_gate_step3",
+            _capture_dir,
+        )
+        monkeypatch.setattr(
+            "harness.run_precommit_memory_warn._get_worktree_dirty",
+            self._mock_git_clean,
+        )
+        monkeypatch.setattr(
+            "harness.run_precommit_memory_warn._get_git_info",
+            self._mock_git_info,
+        )
+
+        obs_dir = str(tmp_path / "history")
+        run_precommit_warn(
+            record_observation=True,
+            observation_dir=obs_dir,
+        )
+
+        assert len(captured_dir) == 1
+        # report_dir 不应是 harness/reports
+        assert "harness/reports" not in str(captured_dir[0])
+
+    def test_record_observation_no_docs_modification(self, monkeypatch, tmp_path):
+        """record_observation 模式下不修改 docs/memory/*。"""
+        memory_dir = PROJECT_ROOT / "docs" / "memory"
+        if not memory_dir.exists():
+            pytest.skip("docs/memory/ 不存在")
+
+        # 记录修改时间
+        mtimes_before = {}
+        for f in memory_dir.rglob("*"):
+            if f.is_file():
+                mtimes_before[str(f)] = f.stat().st_mtime
+
+        monkeypatch.setattr(
+            "harness.run_precommit_memory_warn._run_fast_gate_step3",
+            lambda report_dir: _make_pass_report(),
+        )
+        monkeypatch.setattr(
+            "harness.run_precommit_memory_warn._get_worktree_dirty",
+            self._mock_git_clean,
+        )
+        monkeypatch.setattr(
+            "harness.run_precommit_memory_warn._get_git_info",
+            self._mock_git_info,
+        )
+
+        obs_dir = str(tmp_path / "history")
+        run_precommit_warn(
+            record_observation=True,
+            observation_dir=obs_dir,
+        )
+
+        for f in memory_dir.rglob("*"):
+            if f.is_file():
+                key = str(f)
+                if key in mtimes_before:
+                    assert f.stat().st_mtime == mtimes_before[key], (
+                        f"{f.name} 不应被修改"
+                    )
+
+    def test_record_observation_no_rules_modification(self, monkeypatch, tmp_path):
+        """record_observation 模式下不修改 memory_rules.yml。"""
+        rules_path = PROJECT_ROOT / "docs" / "memory" / "memory_rules.yml"
+        if not rules_path.exists():
+            pytest.skip("memory_rules.yml 不存在")
+
+        original_content = rules_path.read_bytes()
+
+        monkeypatch.setattr(
+            "harness.run_precommit_memory_warn._run_fast_gate_step3",
+            lambda report_dir: _make_pass_report(),
+        )
+        monkeypatch.setattr(
+            "harness.run_precommit_memory_warn._get_worktree_dirty",
+            self._mock_git_clean,
+        )
+        monkeypatch.setattr(
+            "harness.run_precommit_memory_warn._get_git_info",
+            self._mock_git_info,
+        )
+
+        obs_dir = str(tmp_path / "history")
+        run_precommit_warn(
+            record_observation=True,
+            observation_dir=obs_dir,
+        )
+
+        assert rules_path.read_bytes() == original_content, (
+            "memory_rules.yml 不应被修改"
+        )
+
+    def test_main_supports_record_observation_flag(self, monkeypatch, tmp_path):
+        """main() 的 --record-observation 标志应正确传递。"""
+        from harness.run_precommit_memory_warn import main
+
+        monkeypatch.setattr(
+            "harness.run_precommit_memory_warn._run_fast_gate_step3",
+            lambda report_dir: _make_pass_report(),
+        )
+        monkeypatch.setattr(
+            "harness.run_precommit_memory_warn._get_worktree_dirty",
+            self._mock_git_clean,
+        )
+        monkeypatch.setattr(
+            "harness.run_precommit_memory_warn._get_git_info",
+            self._mock_git_info,
+        )
+
+        obs_dir = str(tmp_path / "history")
+        result = main([
+            "--record-observation",
+            "--observation-dir", obs_dir,
+        ])
+        assert result == 0
+
+        # 验证确实生成了 observation 文件
+        json_files = list(Path(obs_dir).glob("*.json"))
+        assert len(json_files) == 1
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 测试：_get_git_info 和 _get_worktree_dirty 辅助函数
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+def test_get_git_info_returns_dict():
+    """_get_git_info 应返回包含 commit 和 branch 的 dict。"""
+    info = _get_git_info()
+    assert isinstance(info, dict)
+    assert "commit" in info
+    assert "branch" in info
+    # 在 git 仓库中应能获取到非 unknown 的值
+    assert len(info["commit"]) >= 7 or info["commit"] == "unknown"
+
+
+def test_get_worktree_dirty_returns_bool():
+    """_get_worktree_dirty 应返回 bool。"""
+    dirty = _get_worktree_dirty()
+    assert isinstance(dirty, bool)

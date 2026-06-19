@@ -118,7 +118,7 @@ fi
 
 # ── 第五步：Memory Harness pre-commit warn（warn-only，不阻断）──
 echo -e "${YELLOW}[5/5] Memory Harness pre-commit warn（warn-only）...${NC}"
-python harness/run_precommit_memory_warn.py 2>&1
+python harness/run_precommit_memory_warn.py --record-observation 2>&1
 # pre-commit warn 始终为 warn-only，不检查其退出码，不阻断 commit
 echo -e "  ${CYAN}ℹ️  以上为 Memory Harness 检查结果（warn-only，不影响 commit）${NC}"
 

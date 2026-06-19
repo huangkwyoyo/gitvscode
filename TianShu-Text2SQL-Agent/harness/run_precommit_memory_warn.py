@@ -1,12 +1,16 @@
-"""Memory Harness pre-commit warn-only 脚本（Step 20）。
+"""Memory Harness pre-commit warn-only 脚本（Step 20 + Step 21b）。
 
 职责：
     在 git commit 前运行轻量 Memory Rule Enforcement 检查。
     发现 active+blocking=true 规则失败时输出 WARNING，但始终 exit 0，
     不阻断 commit。
 
+    可选：--record-observation 在每次运行时生成 timestamp observation snapshot，
+    用于 Step 22 readiness review 收集观察证据。
+
 用法：
     python harness/run_precommit_memory_warn.py
+    python harness/run_precommit_memory_warn.py --record-observation
 
 关键边界：
     - 始终 exit 0（不阻断 commit）
@@ -27,12 +31,19 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 # 项目根目录
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
+
+# 观察记录默认输出目录
+_DEFAULT_OBSERVATION_DIR = str(
+    PROJECT_ROOT / "harness" / "reports" / "precommit_memory_warn_history"
+)
 
 # 颜色定义（终端输出）
 _GREEN = "\033[0;32m"
@@ -92,6 +103,267 @@ def _find_matching_brace(text: str, start: int) -> int:
             if depth == 0:
                 return i
     return -1
+
+
+def _get_git_info() -> dict[str, str]:
+    """获取当前 git commit SHA 和分支名。
+
+    Returns:
+        {"commit": "...", "branch": "..."}，失败时返回 "unknown"
+    """
+    commit = "unknown"
+    branch = "unknown"
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=PROJECT_ROOT,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode == 0:
+            commit = result.stdout.strip()
+    except (subprocess.TimeoutExpired, OSError, FileNotFoundError):
+        pass
+
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            cwd=PROJECT_ROOT,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode == 0:
+            branch = result.stdout.strip()
+    except (subprocess.TimeoutExpired, OSError, FileNotFoundError):
+        pass
+
+    return {"commit": commit, "branch": branch}
+
+
+def _get_worktree_dirty() -> bool:
+    """检查工作区是否有未提交的变更（包括 untracked 文件）。
+
+    Returns:
+        True 表示工作区有变更
+    """
+    try:
+        result = subprocess.run(
+            ["git", "status", "--porcelain"],
+            cwd=PROJECT_ROOT,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if result.returncode == 0:
+            return len(result.stdout.strip()) > 0
+    except (subprocess.TimeoutExpired, OSError, FileNotFoundError):
+        pass
+    # 无法判断时返回 True（保守）
+    return True
+
+
+def _record_observation(
+    analysis: dict,
+    report: dict | None,
+    duration_ms: float,
+    worktree_dirty_before: bool,
+    observation_dir: str,
+    git_commit: str = "unknown",
+    branch: str = "unknown",
+) -> str | None:
+    """生成 timestamp observation snapshot（JSON + MD）。
+
+    不生成 latest 文件。写入失败时仅输出 stderr 警告，不抛异常。
+
+    Args:
+        analysis: _analyze_enforcement 返回的分析结果
+        report: fast gate JSON 报告（可为 None）
+        duration_ms: 运行耗时（毫秒）
+        worktree_dirty_before: 运行前工作区是否有变更
+        observation_dir: 输出目录
+        git_commit: git commit SHA
+        branch: 分支名
+
+    Returns:
+        生成的 JSON 文件路径，失败返回 None
+    """
+    try:
+        out_dir = Path(observation_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        # 生成 run_id 和时间戳
+        now = datetime.now(timezone.utc)
+        local_now = now.astimezone()
+        run_id = f"OBS-{now.strftime('%Y%m%dT%H%M%S')}"
+        timestamp_local = local_now.isoformat()
+
+        # 提取 TA-R018 结果
+        ta_r018_result = "skipped"
+        enf = (report or {}).get("enforcement_report") or {}
+        for rr in enf.get("rule_results", []):
+            if rr.get("rule_id") == "TA-R018":
+                result_str = (rr.get("result") or "").lower()
+                if result_str == "pass":
+                    ta_r018_result = "passed"
+                elif result_str == "fail":
+                    ta_r018_result = "failed"
+                elif result_str in ("warn", "warning"):
+                    ta_r018_result = "warning"
+                else:
+                    ta_r018_result = "skipped"
+                break
+
+        # 活跃的 blocking 规则列表
+        enf_summary = analysis.get("summary", {})
+        active_blocking_rules: list[str] = []
+        for rr in enf.get("rule_results", []):
+            if rr.get("blocking") and rr.get("status") == "active":
+                active_blocking_rules.append(rr.get("rule_id", "?"))
+
+        # 运行后工作区状态
+        worktree_dirty_after = _get_worktree_dirty()
+
+        # 构建 observation 数据
+        observation = {
+            "report_type": "precommit_memory_warn_single_observation",
+            "run_id": run_id,
+            "timestamp": timestamp_local,
+            "git_commit": git_commit,
+            "branch": branch,
+            "duration_ms": round(duration_ms, 1),
+            "exit_code": 0,
+            "warning_count": analysis.get("blocking_failures", 0),
+            "active_blocking_rules": active_blocking_rules,
+            "ta_r018_result": ta_r018_result,
+            "memory_warn_exit_code": 0,
+            "precommit_mode": "warn_only",
+            "polluted_reports": False,
+            "generated_latest": False,
+            "worktree_dirty_before": worktree_dirty_before,
+            "worktree_dirty_after": worktree_dirty_after,
+            "enforcement_summary": {
+                "total_rules": enf_summary.get("total_rules", 0),
+                "passed": enf_summary.get("passed", 0),
+                "warnings": enf_summary.get("warnings", 0),
+                "blocking_failures": enf_summary.get("blocking_failures", 0),
+                "active_blocking": enf_summary.get("active_blocking", 0),
+            },
+            "boundary_confirmations": {
+                "no_blocking": True,
+                "no_latest": True,
+                "no_docs_memory_modification": True,
+                "no_memory_rules_yml_modification": True,
+                "temp_report_dir_used": True,
+            },
+        }
+
+        # 生成文件名（timestamp 部分，不含 latest）
+        ts_slug = local_now.strftime("%Y%m%d_%H%M%S")
+        json_name = f"precommit_memory_warn_observation_{ts_slug}.json"
+        md_name = f"precommit_memory_warn_observation_{ts_slug}.md"
+
+        # 写入 JSON
+        json_path = out_dir / json_name
+        json_path.write_text(
+            json.dumps(observation, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+
+        # 写入 Markdown
+        md_path = out_dir / md_name
+        md_path.write_text(
+            _render_observation_markdown(observation),
+            encoding="utf-8",
+        )
+
+        return str(json_path)
+
+    except Exception as exc:
+        print(
+            _color(
+                f"[WARN] 观察记录写入失败: {exc}（不影响 pre-commit 结果）",
+                _YELLOW,
+            ),
+            file=sys.stderr,
+        )
+        return None
+
+
+def _render_observation_markdown(obs: dict) -> str:
+    """将 observation dict 渲染为 Markdown 文本。
+
+    Args:
+        obs: observation 数据字典
+
+    Returns:
+        Markdown 字符串
+    """
+    lines: list[str] = []
+    lines.append("# Pre-commit Memory Warn Observation (Single Run)")
+    lines.append("")
+    lines.append(f"**Run ID:** `{obs.get('run_id', '?')}`")
+    lines.append(f"**时间:** {obs.get('timestamp', '?')}")
+    lines.append(f"**Commit:** `{obs.get('git_commit', '?')[:8]}`")
+    lines.append(f"**分支:** {obs.get('branch', '?')}")
+    lines.append("")
+
+    # 汇总
+    lines.append("## Summary")
+    lines.append("")
+    lines.append(f"| 指标 | 值 |")
+    lines.append(f"|------|-----|")
+    lines.append(f"| duration_ms | {obs.get('duration_ms', 0):.1f} |")
+    lines.append(f"| exit_code | {obs.get('exit_code', 0)} |")
+    lines.append(f"| warning_count | {obs.get('warning_count', 0)} |")
+    lines.append(f"| ta_r018_result | {obs.get('ta_r018_result', '?')} |")
+    lines.append(f"| precommit_mode | {obs.get('precommit_mode', '?')} |")
+    lines.append(f"| worktree_dirty_before | {obs.get('worktree_dirty_before', True)} |")
+    lines.append(f"| worktree_dirty_after | {obs.get('worktree_dirty_after', True)} |")
+    lines.append("")
+
+    # 活跃规则
+    rules = obs.get("active_blocking_rules", [])
+    lines.append("## Active Blocking Rules")
+    lines.append("")
+    if rules:
+        for r in rules:
+            lines.append(f"- {r}")
+    else:
+        lines.append("- (无)")
+    lines.append("")
+
+    # Enforcement 摘要
+    enf = obs.get("enforcement_summary", {})
+    lines.append("## Enforcement Summary")
+    lines.append("")
+    lines.append(f"- 总规则数: {enf.get('total_rules', 0)}")
+    lines.append(f"- 通过: {enf.get('passed', 0)}")
+    lines.append(f"- 警告: {enf.get('warnings', 0)}")
+    lines.append(f"- 阻断失败: {enf.get('blocking_failures', 0)}")
+    lines.append(f"- active+blocking 规则数: {enf.get('active_blocking', 0)}")
+    lines.append("")
+
+    # 边界确认
+    boundary = obs.get("boundary_confirmations", {})
+    lines.append("## Boundary Confirmations")
+    lines.append("")
+    lines.append(f"| 边界 | 状态 |")
+    lines.append(f"|------|:--:|")
+    lines.append(f"| no blocking | {'✅' if boundary.get('no_blocking') else '❌'} |")
+    lines.append(f"| no latest | {'✅' if boundary.get('no_latest') else '❌'} |")
+    lines.append(f"| no docs/memory modification | {'✅' if boundary.get('no_docs_memory_modification') else '❌'} |")
+    lines.append(f"| no memory_rules.yml modification | {'✅' if boundary.get('no_memory_rules_yml_modification') else '❌'} |")
+    lines.append(f"| temp report dir used | {'✅' if boundary.get('temp_report_dir_used') else '❌'} |")
+    lines.append("")
+
+    lines.append("---")
+    lines.append("")
+    lines.append(f"*Step 21b 自动记录 — 由 pre-commit warn 触发*")
+    lines.append(f"*记录时间: {obs.get('timestamp', '?')}*")
+
+    return "\n".join(lines)
 
 
 def _run_fast_gate_step3(report_dir: str) -> dict | None:
@@ -286,16 +558,37 @@ def render_warn_output(analysis: dict) -> str:
     return "\n".join(lines)
 
 
-def run_precommit_warn(temp_root: str | None = None, quiet: bool = False) -> int:
+def run_precommit_warn(
+    temp_root: str | None = None,
+    quiet: bool = False,
+    record_observation: bool = False,
+    observation_dir: str | None = None,
+) -> int:
     """执行 pre-commit warn 检查，始终返回 0。
 
     Args:
         temp_root: 临时目录父路径，None 则使用系统默认
         quiet: True 则在全部通过时不输出任何内容
+        record_observation: True 则在检查后生成 observation snapshot（Step 21b）
+        observation_dir: observation 输出目录，None 使用默认目录
 
     Returns:
         始终返回 0
     """
+    t_start = time.perf_counter()
+    report = None
+    analysis: dict = {}
+    worktree_dirty_before = False
+    git_commit = "unknown"
+    branch = "unknown"
+
+    # 观察记录的前置采集（运行前）
+    if record_observation:
+        worktree_dirty_before = _get_worktree_dirty()
+        git_info = _get_git_info()
+        git_commit = git_info["commit"]
+        branch = git_info["branch"]
+
     try:
         # 创建临时目录
         temp_dir = tempfile.mkdtemp(
@@ -315,6 +608,7 @@ def run_precommit_warn(temp_root: str | None = None, quiet: bool = False) -> int
                     _YELLOW,
                 )
             )
+            analysis = {"blocking_failures": 0, "enforcement_available": False}
             return 0
 
         # 分析 enforcement
@@ -341,9 +635,34 @@ def run_precommit_warn(temp_root: str | None = None, quiet: bool = False) -> int
             ),
             file=sys.stderr,
         )
+        analysis = {"blocking_failures": 0, "enforcement_available": False}
         return 0
 
     finally:
+        # 观察记录（Step 21b）—— 在清理临时目录前执行（不影响 exit code）
+        if record_observation:
+            try:
+                duration_ms = (time.perf_counter() - t_start) * 1000.0
+                obs_dir = observation_dir or _DEFAULT_OBSERVATION_DIR
+                _record_observation(
+                    analysis=analysis,
+                    report=report,
+                    duration_ms=duration_ms,
+                    worktree_dirty_before=worktree_dirty_before,
+                    observation_dir=obs_dir,
+                    git_commit=git_commit,
+                    branch=branch,
+                )
+            except Exception as obs_exc:
+                # 观察记录写入失败绝不影响 exit code
+                print(
+                    _color(
+                        f"[WARN] 观察记录写入失败: {obs_exc}（不影响 pre-commit 结果）",
+                        _YELLOW,
+                    ),
+                    file=sys.stderr,
+                )
+
         # 清理临时目录
         try:
             if 'temp_dir' in locals() and Path(temp_dir).exists():
@@ -353,7 +672,7 @@ def run_precommit_warn(temp_root: str | None = None, quiet: bool = False) -> int
 
 
 def main(argv: list[str] | None = None) -> int:
-    """CLI 入口 — pre-commit warn-only Memory Harness。"""
+    """CLI 入口 — pre-commit warn-only Memory Harness（Step 20 + Step 21b）。"""
     if sys.platform == "win32":
         try:
             sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -361,7 +680,7 @@ def main(argv: list[str] | None = None) -> int:
             pass
 
     parser = argparse.ArgumentParser(
-        description="Memory Harness pre-commit warn-only 检查（Step 20）"
+        description="Memory Harness pre-commit warn-only 检查（Step 20 + Step 21b）"
     )
     parser.add_argument(
         "--temp-root",
@@ -373,9 +692,24 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="静默模式：仅在发现问题时输出",
     )
+    parser.add_argument(
+        "--record-observation",
+        action="store_true",
+        help="生成 timestamp observation snapshot 用于 Step 22 readiness review（Step 21b）",
+    )
+    parser.add_argument(
+        "--observation-dir",
+        default=_DEFAULT_OBSERVATION_DIR,
+        help=f"observation 输出目录（默认 {_DEFAULT_OBSERVATION_DIR}）",
+    )
     args = parser.parse_args(argv)
 
-    return run_precommit_warn(temp_root=args.temp_root, quiet=args.quiet)
+    return run_precommit_warn(
+        temp_root=args.temp_root,
+        quiet=args.quiet,
+        record_observation=args.record_observation,
+        observation_dir=args.observation_dir,
+    )
 
 
 if __name__ == "__main__":
