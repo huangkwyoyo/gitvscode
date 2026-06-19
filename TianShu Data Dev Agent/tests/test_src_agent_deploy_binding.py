@@ -352,6 +352,20 @@ def test_illegal_write_strategy_blocked():
     assert any("DELETE_FROM" in e or "不支持" in e for e in errors)
 
 
+def test_production_target_environment_blocked():
+    """target_environment 设为 PRODUCTION 时必须报错。"""
+    manifest = DeploymentManifest(
+        request_id="test",
+        source_query_hash="abc123",
+        target_table="generated.test",
+        write_strategy=DeployWriteStrategy.CREATE_TABLE_AS_SELECT.value,
+        target_environment="PRODUCTION",
+    )
+    errors = validate_write_boundary(manifest)
+    assert len(errors) > 0, "target_environment=PRODUCTION 应被拦截"
+    assert any("PRODUCTION" in e for e in errors)
+
+
 # ═══════════════════════════════════════════════════════════════
 # 测试 13：分区覆盖未声明分区列时必须 FAIL
 # ═══════════════════════════════════════════════════════════════
@@ -387,9 +401,10 @@ def test_partition_strategy_requires_partition_columns(strategy):
     ("ALTER TABLE gold.test ADD COLUMN x INT;", "ALTER"),
     ("DELETE FROM gold.test WHERE 1=1;", "DELETE"),
     ("TRUNCATE TABLE gold.test;", "TRUNCATE"),
+    ("MERGE INTO gold.test USING src ON t.id = s.id WHEN MATCHED THEN UPDATE SET val = s.val", "MERGE"),
 ])
 def test_forbidden_keywords_in_deploy_sql_blocked(bad_sql, keyword):
-    """SQL 部署草案包含 DROP/ALTER/DELETE/TRUNCATE 时必须报错。"""
+    """SQL 部署草案包含 DROP/ALTER/DELETE/TRUNCATE/MERGE 时必须报错。"""
     errors = validate_deploy_sql(bad_sql)
     assert len(errors) > 0, f"包含 {keyword} 的 SQL 部署草案应被拦截"
     assert any(keyword in e for e in errors)
