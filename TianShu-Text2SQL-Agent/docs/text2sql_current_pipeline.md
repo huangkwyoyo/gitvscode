@@ -558,5 +558,63 @@ python -m compileall -q src harness tests
 7. 失败样例可沉淀。
 8. 后续工程审查有明确依据。
 
-只要这些边界没有建立好，就不应进入“让 LLM 直接 SQL candidate”阶段。
+只要这些边界没有建立好，就不应进入”让 LLM 直接 SQL candidate”阶段。
 
+## 13. Phase 6B: REST API 服务入口
+
+Phase 6B 基于 Phase 6A 的统一公开响应契约 v1.0 建设了本地只读 HTTP 服务。
+
+### 13.1 API 架构
+
+```
+Client (127.0.0.1)
+    ↓ HTTP
+FastAPI (uvicorn)
+    ↓
+Request ID 中间件 → 安全日志
+    ↓
+POST /v1/ask → AgentRuntime.ask()
+    ├─ 检查 is_online
+    ├─ asyncio.Lock (超时 → 429)
+    ├─ ThreadPoolExecutor → agent.ask() (同步)
+    ├─ build_public_response()
+    └─ 返回 contract v1.0
+```
+
+### 13.2 端点
+
+| endpoint | method | status | purpose |
+|---|---|---|---|
+| `/health/live` | GET | 200 | 进程存活 |
+| `/health/ready` | GET | 200/503 | Agent 在线状态 |
+| `/v1/ask` | POST | 200 | 中文问数 |
+
+### 13.3 新增安全门禁
+
+| 门禁 | 说明 |
+|------|------|
+| HTTP Schema 门禁 | Pydantic extra=forbid，拒绝 SQL/mode/config 参数 |
+| Agent Online 门禁 | is_online 判定（context + resolver + connection） |
+| 并发串行化 | asyncio.Lock，超时返回 429 |
+| 错误脱敏 | 500/503 不返回 traceback/SQL/API Key |
+| 请求 ID | UUID 格式 X-Request-ID 响应头 |
+
+### 13.4 关键文件
+
+| 文件 | 用途 |
+|------|------|
+| `src/api/app.py` | FastAPI 应用 |
+| `src/api/runtime.py` | AgentRuntime 生命周期 + 并发控制 |
+| `src/api/schemas.py` | 请求/响应 Schema |
+| `src/api/errors.py` | 安全错误处理 |
+| `config/api_config.yml` | API 安全默认配置 |
+| `scripts/run_api.py` | 启动入口 |
+
+### 13.5 Phase 6B 禁止事项
+
+- 不提供 /sql、/execute、/debug、/trace 端点
+- 不接受 SQL、SQLPlan、表名、API Key 等客户端控制参数
+- 不默认绑定 0.0.0.0
+- 不开 CORS
+- 不实现认证/会话/流式/WebSocket
+- HTTP 层只能调用 agent.ask() + build_public_response()

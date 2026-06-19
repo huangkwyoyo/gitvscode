@@ -16,18 +16,25 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+api = [
+    "fastapi>=0.115,<1",
+    "uvicorn>=0.30,<1",
+]
 dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
     "ruff>=0.1.0",
+    "httpx>=0.27,<1",
 ]
 
 [project.scripts]
 tianshu-ask = "src.agent:main"
+tianshu-api = "src.api.app:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
+asyncio_mode = "auto"
 markers = [
     "real_duckdb: 需要真实 DuckDB 数据库连接的端到端测试（默认不运行）",
 ]

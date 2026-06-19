@@ -153,6 +153,24 @@ class Text2SQLAgent:
         """Agent 是否已就绪（可处理查询）"""
         return self._context is not None
 
+    @property
+    def is_online(self) -> bool:
+        """Agent 是否在线（可执行 DuckDB 查询）。
+
+        online 判定必须至少确认：
+            - context 存在
+            - context.offline=False（非离线模式）
+            - resolver 存在
+            - resolver 连接可用
+        """
+        if self._context is None:
+            return False
+        if self._context.offline:
+            return False
+        if self._resolver is None:
+            return False
+        return self._resolver.is_connected
+
     def _get_executor(self) -> PlanExecutor:
         """懒初始化 PlanExecutor（需要 resolver 和 context 就绪）"""
         if self._executor is None:

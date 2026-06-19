@@ -1,0 +1,23 @@
+# Phase 6B —— API 服务安全默认配置
+#
+# 约束：
+#   - 默认绑定 127.0.0.1，不得默认绑定 0.0.0.0
+#   - 默认关闭 CORS
+#   - 不配置认证和公网访问
+#   - 不允许 HTTP 请求覆盖此配置
+#   - 配置缺失或非法时 fail closed
+
+server:
+  host: "127.0.0.1"
+  port: 8000
+
+runtime:
+  max_concurrent_agent_requests: 1
+  queue_wait_timeout_seconds: 2
+
+request:
+  max_question_length: 2000
+
+security:
+  cors_enabled: false
+  expose_internal_errors: false

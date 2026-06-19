@@ -464,6 +464,11 @@ class TianShuResolver:
             source_table=source_table,
         )
 
+    @property
+    def is_connected(self) -> bool:
+        """DuckDB 连接是否可用（已建立且未关闭）"""
+        return self._conn is not None
+
     def close(self):
         """关闭 DuckDB 连接"""
         if self._conn is not None:
