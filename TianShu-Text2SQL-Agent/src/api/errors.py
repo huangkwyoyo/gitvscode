@@ -26,6 +26,8 @@ ERROR_CODE_VALIDATION = "VALIDATION_ERROR"
 ERROR_CODE_SERVICE_NOT_READY = "SERVICE_NOT_READY"
 ERROR_CODE_SERVICE_BUSY = "SERVICE_BUSY"
 ERROR_CODE_INTERNAL_ERROR = "INTERNAL_ERROR"
+ERROR_CODE_AUTH_FAILED = "AUTH_FAILED"
+ERROR_CODE_REQUEST_TOO_LARGE = "REQUEST_TOO_LARGE"
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -36,6 +38,8 @@ _USER_FACING_MESSAGES: dict[str, str] = {
     ERROR_CODE_SERVICE_NOT_READY: "问数服务暂不可用，请稍后再试",
     ERROR_CODE_SERVICE_BUSY: "当前问数请求较多，请稍后再试",
     ERROR_CODE_INTERNAL_ERROR: "服务内部异常，请联系管理员",
+    ERROR_CODE_AUTH_FAILED: "认证失败",
+    ERROR_CODE_REQUEST_TOO_LARGE: "请求体过大",
 }
 
 
@@ -98,6 +102,18 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException) 
         return build_error_response(
             status_code=429,
             code=ERROR_CODE_SERVICE_BUSY,
+            request_id=_get_request_id(request),
+        )
+    if exc.status_code == 401:
+        return build_error_response(
+            status_code=401,
+            code=ERROR_CODE_AUTH_FAILED,
+            request_id=_get_request_id(request),
+        )
+    if exc.status_code == 413:
+        return build_error_response(
+            status_code=413,
+            code=ERROR_CODE_REQUEST_TOO_LARGE,
             request_id=_get_request_id(request),
         )
     # 其他 HTTP 异常

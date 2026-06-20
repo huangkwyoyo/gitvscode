@@ -1,11 +1,12 @@
-# Phase 6B —— API 服务安全默认配置
+# Phase 6C —— API 服务安全配置（本地闭环）
 #
 # 约束：
 #   - 默认绑定 127.0.0.1，不得默认绑定 0.0.0.0
 #   - 默认关闭 CORS
-#   - 不配置认证和公网访问
+#   - local_secure_mode 启用后 token 缺失必须 fail closed
 #   - 不允许 HTTP 请求覆盖此配置
 #   - 配置缺失或非法时 fail closed
+#   - docs 可在本地保留，但不得包含 token 示例值
 
 server:
   host: "127.0.0.1"
@@ -17,7 +18,20 @@ runtime:
 
 request:
   max_question_length: 2000
+  max_body_bytes: 8192
 
 security:
+  local_secure_mode: true
+  token_env: "TIANSHU_LOCAL_API_TOKEN"
   cors_enabled: false
   expose_internal_errors: false
+  docs_enabled: true
+
+local_security:
+  rate_limit:
+    enabled: true
+    requests_per_minute: 30
+    burst: 3
+  audit:
+    enabled: true
+    directory: "harness/reports/local_api_audit"

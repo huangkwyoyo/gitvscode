@@ -19,6 +19,7 @@ docs/
     ├── Phase2完成与后续规划_v2_20260616_1500.md(Phase 2-5 路线图 v2——修订版)
 	    ├── Phase6A真实DuckDB_E2E与统一响应契约_20260619_2347.md  (Phase 6A 完成报告)
 	    ├── Phase6B只读REST_API与服务运行时_20260620_0715.md  (Phase 6B 完成报告)
+	    ├── Phase6C本地API安全闭环与可重复验收_20260620_0750.md  (Phase 6C 完成报告)
     ├── llm_integration_design.md             (LLM 接入设计——Prompt 模板与接口)
     ├── llm_integration_phase2a.md            (LLM 接入 Phase 2A 设计报告)
     └── prompt_regression.md                  (Prompt 回归体系说明)

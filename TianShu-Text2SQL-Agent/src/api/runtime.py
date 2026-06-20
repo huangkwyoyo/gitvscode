@@ -77,6 +77,10 @@ class AgentRuntime:
         # 日志安全：只记录 request_id / route / HTTP status / duration_ms / response_type / error code
         self._logger = logging.getLogger("tianshu.api")
 
+        # Phase 6C：安全组件引用（由 app.py 的 main() 注入）
+        self._local_auth = None
+        self._rate_limiter_cfg: dict[str, Any] = {}
+
     async def start(self) -> None:
         """启动 Agent 运行时：加载配置、创建 Agent 实例。
 
@@ -233,6 +237,10 @@ class AgentRuntime:
                 )
                 loaded[section] = _DEFAULT_API_CONFIG.get(section, {})
 
+        # Phase 6C：local_security 段为可选（缺失时使用安全默认值）
+        if "local_security" not in loaded:
+            loaded["local_security"] = _DEFAULT_API_CONFIG.get("local_security", {})
+
         # ── 安全强制：host 不得为 0.0.0.0 ──
         server_cfg = loaded.get("server", {})
         if server_cfg.get("host") == "0.0.0.0":
@@ -255,6 +263,26 @@ _DEFAULT_API_CONFIG: dict[str, Any] = {
         "max_concurrent_agent_requests": 1,
         "queue_wait_timeout_seconds": 2,
     },
-    "request": {"max_question_length": 2000},
-    "security": {"cors_enabled": False, "expose_internal_errors": False},
+    "request": {
+        "max_question_length": 2000,
+        "max_body_bytes": 8192,
+    },
+    "security": {
+        "local_secure_mode": False,
+        "token_env": "TIANSHU_LOCAL_API_TOKEN",
+        "cors_enabled": False,
+        "expose_internal_errors": False,
+        "docs_enabled": True,
+    },
+    "local_security": {
+        "rate_limit": {
+            "enabled": False,
+            "requests_per_minute": 30,
+            "burst": 3,
+        },
+        "audit": {
+            "enabled": False,
+            "directory": "harness/reports/local_api_audit",
+        },
+    },
 }

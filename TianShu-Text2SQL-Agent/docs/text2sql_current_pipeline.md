@@ -618,3 +618,54 @@ POST /v1/ask → AgentRuntime.ask()
 - 不开 CORS
 - 不实现认证/会话/流式/WebSocket
 - HTTP 层只能调用 agent.ask() + build_public_response()
+
+## 14. Phase 6C: 本地 API 安全闭环
+
+Phase 6C 在 Phase 6B 的基础上叠加了本地安全闭环，使开发者能在一台机器上安全启动、认证调用并生成可重复验收报告。
+
+### 14.1 安全中间件栈
+
+```
+Client (127.0.0.1)
+    ↓
+Body Limit 中间件（413 — max_body_bytes）
+    ↓
+安全响应头（nosniff, DENY, no-referrer, no-store）
+    ↓
+Request ID（UUID 追踪）
+    ↓
+Auth 中间件（X-TianShu-Token → 401）
+    ↓
+Rate Limit 中间件（固定窗口 → 429 + Retry-After）
+    ↓
+AgentRuntime.ask() + 审计写入
+```
+
+### 14.2 新增安全门禁
+
+| 门禁 | 说明 |
+|------|------|
+| 令牌认证 | X-TianShu-Token 头部，hmac.compare_digest，local_secure_mode fail-closed |
+| 请求体限制 | JSON 解析前检查 Content-Length，超限 413 |
+| 请求频率限制 | 固定窗口（60s + burst），超限 429 + Retry-After |
+| 安全响应头 | nosniff / DENY / no-referrer / no-store |
+| 本地审计 | JSONL 脱敏审计，只记录安全字段 |
+
+### 14.3 关键文件
+
+| 文件 | 用途 |
+|------|------|
+| `src/api/local_auth.py` | 本地令牌认证 |
+| `src/api/local_rate_limit.py` | 进程内限流 |
+| `src/api/body_limit.py` | 请求体大小限制 |
+| `src/api/local_audit.py` | 脱敏审计写入器 |
+| `scripts/run_local_api_closure.py` | 本地闭环 runner |
+
+### 14.4 Phase 6C 禁止事项
+
+- 不做公网部署、Docker、Nginx、Kubernetes
+- 不实现 JWT/OIDC、用户/角色/权限系统
+- 不实现分布式限流、Redis、消息队列
+- 不修改 SQL、Prompt、contracts 或 Memory Rule
+- 不在配置、代码或报告中写入真实 token
+- 不记录 question/answer/SQL/trace 到审计
