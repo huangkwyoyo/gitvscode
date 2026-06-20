@@ -354,6 +354,56 @@ mkdir -p logs
 #   logging.level: DEBUG
 ```
 
+### Q17: Web UI 页面无法打开
+
+**现象**：浏览器访问 `http://127.0.0.1:8000/` 返回 404 或无法连接。
+
+**原因**：
+- API 服务未启动
+- `config/api_config.yml` 中 `ui.enabled: false`
+- `src/web/index.html` 文件缺失
+
+**解决**：
+
+```bash
+# 检查 UI 配置
+grep -A3 "ui:" config/api_config.yml
+# 应显示: enabled: true
+
+# 检查文件存在
+ls src/web/index.html src/web/styles.css src/web/app.js
+
+# 启动 API 服务
+make api
+# 浏览器访问 http://127.0.0.1:8000/
+```
+
+### Q18: Web UI 始终显示"认证失败"（401）
+
+**现象**：输入 Token 后问数始终返回 401 错误。
+
+**原因**：
+- 输入的 Token 与环境变量 `TIANSHU_LOCAL_API_TOKEN` 不匹配
+- `local_secure_mode: true` 但 Token 未设置
+- Token 长度不足 32 字符
+
+**解决**：
+
+```bash
+# 1. 生成新 Token
+export TIANSHU_LOCAL_API_TOKEN=$(python -c "import secrets; print(secrets.token_urlsafe(32))")
+
+# 2. 检查 Token 长度
+echo ${#TIANSHU_LOCAL_API_TOKEN}  # 应 >= 32
+
+# 3. 用新 Token 重启 API
+make api
+
+# 4. 在 Web UI 中输入相同的 Token
+```
+
+> ⚠️ Token 仅保存在当前页面内存中，页面刷新后需重新输入。Web UI 不提供"记住我"功能。
+
 ---
 
 ## 获取更多帮助

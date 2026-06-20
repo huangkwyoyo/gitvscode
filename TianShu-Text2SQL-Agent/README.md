@@ -8,6 +8,7 @@
 - [快速开始](#快速开始)
 - [REPL 交互式使用](#repl-交互式使用)
 - [REST API 使用](#rest-api-使用)
+- [Web UI 使用](#web-ui-使用)
 - [响应契约](#响应契约)
 - [项目结构](#项目结构)
 - [配置说明](#配置说明)
@@ -191,6 +192,38 @@ curl -X POST http://127.0.0.1:8000/v1/ask \
 | 503 | 服务未就绪 |
 
 > 完整请求/响应示例见 [`examples/api/`](examples/api/)。
+
+## Web UI 使用
+
+启动 API 后，打开浏览器访问 `http://127.0.0.1:8000/` 即可使用中文问数 Web 界面。
+
+```bash
+# 1. 启动服务
+make api
+
+# 2. 浏览器打开
+# http://127.0.0.1:8000/
+```
+
+### 界面功能
+
+| 区域 | 说明 |
+|------|------|
+| **顶部状态栏** | 显示 API 可用状态、版本号 (v1.0.0)、本地模式标识 |
+| **认证令牌** | 输入 `X-TianShu-Token` 连接服务。令牌仅保存在当前页面内存，刷新后失效 |
+| **中文问数** | 多行中文输入框，Ctrl+Enter 提交，含示例问题快捷按钮 |
+| **查询结果** | 根据 `response_type` 展示中文答案、反问提示或拒绝原因 |
+| **数据展示** | 原生 SVG 图表（折线/柱状/指标卡）、数据预览表、来源、警告 |
+
+### 安全特性
+
+- 令牌仅保存在 JavaScript 闭包内存（不写 localStorage / Cookie / URL）
+- 所有后端数据通过 `textContent` 安全渲染（零 `innerHTML`）
+- 严格 Content-Security-Policy（无 `unsafe-inline` / `unsafe-eval`）
+- 不显示 SQL、trace、Token、数据库路径等内部信息
+- 纯原生 HTML/CSS/JS + 原生 SVG，无外部 CDN 依赖
+
+> 详细安全说明见 [Web UI 安全测试](tests/test_web_ui_security.py)。
 
 ## 响应契约
 

@@ -2,7 +2,7 @@
 # 在 Git Bash (Windows) 或 Linux/macOS 终端中使用
 # 所有目标均可从项目根目录执行
 
-.PHONY: install test harness api closure baseline verify clean env help
+.PHONY: install test harness api closure baseline verify clean env help web-smoke
 
 # ── 默认目标 ──
 help:
@@ -17,6 +17,7 @@ help:
 	@echo "  make verify    一键验收：编译 → 测试 → 安全 → 闭环"
 	@echo "  make clean     清理临时文件和缓存"
 	@echo "  make env       检查环境配置状态"
+	@echo "  make web-smoke 运行 Web UI Smoke 验收"
 	@echo ""
 
 # ── 安装依赖 ──
@@ -121,3 +122,7 @@ env:
 		echo "  ⚠️ 未找到契约目录"; \
 	fi
 	@echo ""
+
+# ── Web UI Smoke 验收（Phase 7）──
+web-smoke:
+	python scripts/run_web_ui_smoke.py \n		--api-config config/api_config.yml \n		--tianshu-config config/tianshu_target.yml

@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TianShu 中文问数</title>
+    <link rel="stylesheet" href="/assets/styles.css">
+</head>
+<body>
+    <!-- ═══════════════════════════════════════════════════════════ -->
+    <!-- 顶部状态栏 -->
+    <!-- ═══════════════════════════════════════════════════════════ -->
+    <header id="app-header">
+        <div class="header-left">
+            <h1 class="app-title">TianShu 中文问数</h1>
+            <span class="version-badge">v1.0.0</span>
+            <span class="local-badge">本地模式</span>
+        </div>
+        <div class="header-right">
+            <span id="api-status" class="status-indicator status-checking" role="status" aria-live="polite">
+                <span class="status-dot"></span>
+                <span class="status-text">检查中…</span>
+            </span>
+        </div>
+    </header>
+
+    <main class="app-main">
+        <!-- ═══════════════════════════════════════════════════════════ -->
+        <!-- Token 区域 -->
+        <!-- ═══════════════════════════════════════════════════════════ -->
+        <section id="token-section" class="card" aria-labelledby="token-heading">
+            <h2 id="token-heading" class="section-title">认证令牌</h2>
+            <p class="section-desc">输入本地 API 令牌以连接问数服务。令牌仅保存在当前页面内存中，刷新后失效。</p>
+            <div class="token-input-row">
+                <label for="token-input" class="visually-hidden">本地 API 令牌</label>
+                <input
+                    type="password"
+                    id="token-input"
+                    class="input token-input"
+                    placeholder="输入 X-TianShu-Token…"
+                    autocomplete="off"
+                    spellcheck="false"
+                >
+                <button id="token-apply-btn" class="btn btn-primary" type="button">连接</button>
+                <button id="token-clear-btn" class="btn btn-secondary" type="button">清空</button>
+            </div>
+            <p id="token-status" class="token-status" aria-live="polite"></p>
+        </section>
+
+        <!-- ═══════════════════════════════════════════════════════════ -->
+        <!-- 问数区域 -->
+        <!-- ═══════════════════════════════════════════════════════════ -->
+        <section id="query-section" class="card" aria-labelledby="query-heading">
+            <h2 id="query-heading" class="section-title">中文问数</h2>
+            <div class="query-input-row">
+                <label for="question-input" class="visually-hidden">输入中文问题</label>
+                <textarea
+                    id="question-input"
+                    class="input question-input"
+                    placeholder="输入中文问题，例如：2026年1月每天有多少行程？"
+                    rows="3"
+                    maxlength="2000"
+                ></textarea>
+            </div>
+            <div class="query-actions">
+                <div class="query-actions-left">
+                    <button id="submit-btn" class="btn btn-primary" type="button" disabled>提交问数</button>
+                    <button id="clear-btn" class="btn btn-secondary" type="button">清空</button>
+                    <span class="char-count" aria-live="polite">
+                        <span id="char-count-current">0</span>/<span id="char-count-max">2000</span>
+                    </span>
+                </div>
+                <span class="shortcut-hint">Ctrl + Enter 提交</span>
+            </div>
+            <div class="example-questions" aria-label="示例问题">
+                <span class="example-label">示例：</span>
+                <button class="btn btn-example" type="button" data-question="2026年1月每天有多少行程？">2026年1月每天有多少行程？</button>
+                <button class="btn btn-example" type="button" data-question="2026年1月每天的行程数和事故数分别是多少？">行程数和事故数</button>
+                <button class="btn btn-example" type="button" data-question="最近的停车罚款金额是多少？">停车罚款金额</button>
+                <button class="btn btn-example" type="button" data-question="删除所有行程数据">删除所有行程数据</button>
+            </div>
+        </section>
+
+        <!-- ═══════════════════════════════════════════════════════════ -->
+        <!-- 结果区域 -->
+        <!-- ═══════════════════════════════════════════════════════════ -->
+        <section id="result-section" class="card hidden" aria-labelledby="result-heading" aria-live="polite">
+            <h2 id="result-heading" class="section-title">查询结果</h2>
+            <div id="result-content">
+                <!-- 动态填充：answer / clarification / refusal / error -->
+            </div>
+        </section>
+
+        <!-- ═══════════════════════════════════════════════════════════ -->
+        <!-- 数据展示区域 -->
+        <!-- ═══════════════════════════════════════════════════════════ -->
+        <section id="data-section" class="card hidden" aria-labelledby="data-heading">
+            <h2 id="data-heading" class="section-title">数据展示</h2>
+
+            <div id="chart-container" class="chart-area hidden">
+                <!-- 动态填充：SVG 图表 / metric_card / table -->
+            </div>
+
+            <div id="table-preview-container" class="hidden">
+                <h3 class="subsection-title">数据预览</h3>
+                <div id="table-preview" class="table-scroll">
+                    <!-- 动态填充表格 -->
+                </div>
+            </div>
+
+            <div id="sources-container" class="sources-area hidden">
+                <h3 class="subsection-title">数据来源</h3>
+                <ul id="sources-list">
+                    <!-- 动态填充 -->
+                </ul>
+            </div>
+
+            <div id="warnings-container" class="warnings-area hidden">
+                <h3 class="subsection-title">警告</h3>
+                <ul id="warnings-list">
+                    <!-- 动态填充 -->
+                </ul>
+            </div>
+
+            <div id="meta-container" class="meta-area hidden">
+                <span class="meta-label">执行模式：</span>
+                <span id="execution-mode" class="meta-value"></span>
+                <span class="meta-separator">|</span>
+                <span class="meta-label">契约版本：</span>
+                <span id="contract-version" class="meta-value"></span>
+            </div>
+        </section>
+
+        <!-- ═══════════════════════════════════════════════════════════ -->
+        <!-- Loading 状态 -->
+        <!-- ═══════════════════════════════════════════════════════════ -->
+        <div id="loading-overlay" class="loading-overlay hidden" role="status" aria-live="assertive">
+            <div class="loading-spinner"></div>
+            <p class="loading-text">正在查询中…</p>
+        </div>
+    </main>
+
+    <!-- 所有脚本通过外部文件加载，无内联代码，满足严格 CSP -->
+    <script src="/assets/api-client.js"></script>
+    <script src="/assets/chart-renderer.js"></script>
+    <script src="/assets/renderers.js"></script>
+    <script src="/assets/app.js"></script>
+</body>
+</html>

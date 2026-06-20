@@ -35,3 +35,8 @@ local_security:
   audit:
     enabled: true
     directory: "harness/reports/local_api_audit"
+
+# Phase 7 —— Web UI 配置
+ui:
+  enabled: true
+  title: "TianShu 中文问数"

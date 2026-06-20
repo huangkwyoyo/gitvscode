@@ -9,7 +9,7 @@ docs/
 ├── README.md                           (本文件——文档索引)
 ├── text2sql_current_pipeline.md        (当前工作流——工程边界和安全门禁说明)
 ├── text2sql_engineering_glossary.md    (工程术语表——40 个术语的完整定义)
-├── TROUBLESHOOTING.md                  (本地故障排查——16 项常见问题与解决方案)
+├── TROUBLESHOOTING.md                  (本地故障排查——18 项常见问题与解决方案)
 ├── memory/                             (长期记忆系统——经验、风险、规则)
 │   ├── 经验复盘.md                      (R001-R013：经验条目与置信演化链)
 │   ├── 风险清单.md                      (RISK-001 至 RISK-034：当前风险与防线)
@@ -37,6 +37,7 @@ docs/
 
 | 日期 | 内容 |
 |------|------|
+| 2026-06-20 | Phase 7 完成：本地自然语言问数 Web UI——FastAPI 同源托管、原生 HTML/CSS/JS、原生 SVG 图表（line/bar/metric_card/table）、严格 CSP + textContent 防 XSS、Token 仅内存保存、68 新测试、Web UI Smoke Runner |
 | 2026-06-20 | Phase 6D 完成：v1.0 发布冻结与使用体验收尾——版本号 1.0.0、CHANGELOG、Makefile 一键验收、README 快速开始、示例目录、故障排查文档、基线冻结、git tag v1.0.0 |
 | 2026-06-20 | Phase 6C 完成：本地 API 安全闭环——令牌认证（X-TianShu-Token + hmac.compare_digest）、固定窗口限流（429 + Retry-After）、Body 大小限制（413）、脱敏 JSONL 审计、安全响应头、local_secure_mode fail-closed、112 新测试 |
 | 2026-06-20 | Phase 6B 完成：只读 REST API 与服务运行时——FastAPI + uvicorn、3 个端点（/health/live, /health/ready, POST /v1/ask）、AgentRuntime 受控生命周期、公共响应契约 v1.0、38 测试 |

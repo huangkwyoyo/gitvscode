@@ -25,8 +25,11 @@ import uuid
 from contextlib import asynccontextmanager
 from typing import Any
 
+from pathlib import Path as _FilePath
+
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
@@ -220,10 +223,11 @@ def create_app(
         """本地令牌认证中间件。
 
         只保护 POST /v1/ask 端点。
-        /health/live 和 /health/ready 保持无认证。
+        /health/live、/health/ready、/ 和 /assets/* 保持无认证。
         """
-        # 健康检查无需认证
-        if request.url.path in ("/health/live", "/health/ready"):
+        # 健康检查和 UI 页面无需认证
+        _path = request.url.path
+        if _path in ("/health/live", "/health/ready", "/") or _path.startswith("/assets"):
             return await call_next(request)
 
         # 只保护 /v1/ask
@@ -274,8 +278,76 @@ def create_app(
         return await call_next(request)
 
     # ═══════════════════════════════════════════════════════════
+    # Phase 7 Web UI —— 同源托管 + CSP
+    # ═══════════════════════════════════════════════════════════
+
+    # ── 读取 UI 配置 ──
+    ui_config = runtime.api_config.get("ui", {}) if runtime.api_config else {}
+    ui_enabled = ui_config.get("enabled", True)
+
+    # ── 静态资源目录（固定路径，防止目录穿越）──
+    _web_dir = _FilePath(__file__).resolve().parents[1] / "web"
+    if ui_enabled and _web_dir.exists():
+        app.mount("/assets", StaticFiles(directory=str(_web_dir)), name="assets")
+    else:
+        logger.info("Web UI 目录不存在或已禁用: %s", _web_dir)
+
+    @app.middleware("http")
+    async def ui_csp_middleware(request: Request, call_next):
+        """UI CSP 中间件。
+
+        仅对 / 和 /assets/* 路由应用严格 CSP，不影响 /docs 等其他路由。
+
+        CSP 策略：
+            default-src 'self'; script-src 'self'; style-src 'self';
+            img-src 'self' data:; connect-src 'self'; object-src 'none';
+            base-uri 'none'; frame-ancestors 'none'; form-action 'self';
+        """
+        response = await call_next(request)
+
+        _path = request.url.path
+        # 仅对 UI 路由应用严格 CSP
+        if _path == "/" or _path.startswith("/assets"):
+            response.headers["Content-Security-Policy"] = (
+                "default-src 'self'; "
+                "script-src 'self'; "
+                "style-src 'self'; "
+                "img-src 'self' data:; "
+                "connect-src 'self'; "
+                "object-src 'none'; "
+                "base-uri 'none'; "
+                "frame-ancestors 'none'; "
+                "form-action 'self'"
+            )
+
+        return response
+
+    # ═══════════════════════════════════════════════════════════
     # 端点
     # ═══════════════════════════════════════════════════════════
+
+    @app.get("/")
+    async def web_ui_root(request: Request):
+        """Web UI 根页面。
+
+        UI 启用时返回 index.html，禁用时返回 404。
+        页面本身无需认证（Token 由用户在浏览器中输入后通过 JS 传递）。
+        """
+        ui_cfg = request.app.state.runtime.api_config.get("ui", {})
+        if not ui_cfg.get("enabled", True):
+            return JSONResponse(
+                status_code=404,
+                content={"error": {"code": "NOT_FOUND", "message": "Web UI 未启用"}},
+            )
+
+        index_path = _web_dir / "index.html"
+        if not index_path.exists():
+            return JSONResponse(
+                status_code=404,
+                content={"error": {"code": "NOT_FOUND", "message": "Web UI 页面文件不存在"}},
+            )
+
+        return FileResponse(str(index_path), media_type="text/html; charset=utf-8")
 
     @app.get("/health/live")
     async def health_live(request: Request):

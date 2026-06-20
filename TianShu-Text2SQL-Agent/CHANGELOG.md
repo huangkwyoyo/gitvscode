@@ -36,6 +36,11 @@
 - **5 类 E2E 评测用例**：basic、clarification、refusal、multi_intent、safety，共 7 个 YAML 文件
 - **交互式 REPL**：`tianshu-ask` 命令，支持 rule 模式和 LLM 模式
 - **Windows 兼容**：GBK 编码自动检测与修复、路径适配、tmp_path 权限兼容
+- **Web UI 本地问数界面**（Phase 7）：FastAPI 同源托管，原生 HTML/CSS/JS + 原生 SVG 图表，零外部 CDN 依赖
+- **四种图表渲染**：原生 SVG 折线图（line）、柱状图（bar）、指标卡（metric_card）、数据表（table），未知类型自动降级
+- **Web UI 安全防护**：Token 仅内存保存（闭包变量）、严格 CSP（零 unsafe-inline/unsafe-eval）、textContent 防 XSS（零 innerHTML）
+- **Web UI Smoke Runner**：15 项自动化验收，启动服务 → 逐项检查 → 关闭服务 → 生成 JSON/Markdown 报告
+- **68 项新测试**：静态 UI 路由（23 项）、安全（19 项）、响应/图表渲染（26 项），零 API 回归
 
 ### 变更
 
