@@ -1,0 +1,27 @@
+{
+  "contract_version": "1.0",
+  "response_type": "refusal",
+  "question": "删除2026年1月之前的所有行程记录",
+  "answer": {
+    "text": ""
+  },
+  "clarification": {
+    "needed": false,
+    "message": null
+  },
+  "refusal": {
+    "refused": true,
+    "reason": "系统仅支持只读查询，不支持删除、修改或插入数据等写操作。如需数据管理，请联系仓库管理员。"
+  },
+  "data": {
+    "is_multi_plan": false,
+    "summaries": [],
+    "merged_result": null,
+    "chart_spec": null,
+    "sources": []
+  },
+  "warnings": [],
+  "meta": {
+    "execution_mode": "single"
+  }
+}

@@ -1,0 +1,45 @@
+{
+  "contract_version": "1.0",
+  "response_type": "answer",
+  "question": "2026年1月每天有多少行程？",
+  "answer": {
+    "text": "2026年1月日均行程量为 45,230 次。1月1日最高（52,100 次），1月31日最低（38,400 次），整体呈月初高、月末低的趋势。"
+  },
+  "clarification": {
+    "needed": false,
+    "message": null
+  },
+  "refusal": {
+    "refused": false,
+    "reason": null
+  },
+  "data": {
+    "is_multi_plan": false,
+    "summaries": [
+      {
+        "source_table": "gold.dws_daily_trip_summary",
+        "row_count": 31,
+        "columns": ["trip_date", "trip_count"],
+        "grain": "day",
+        "data_preview": [
+          {"trip_date": "2026-01-01", "trip_count": 52100},
+          {"trip_date": "2026-01-02", "trip_count": 48800},
+          {"trip_date": "2026-01-03", "trip_count": 45600}
+        ]
+      }
+    ],
+    "merged_result": null,
+    "chart_spec": {
+      "chart_type": "line",
+      "title": "2026年1月每日行程量趋势",
+      "x_axis": "日期",
+      "y_axis": "行程量（次）",
+      "data_source": "gold.dws_daily_trip_summary"
+    },
+    "sources": ["gold.dws_daily_trip_summary"]
+  },
+  "warnings": [],
+  "meta": {
+    "execution_mode": "single"
+  }
+}

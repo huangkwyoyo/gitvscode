@@ -1,6 +1,6 @@
 [project]
 name = "tianshu-text2sql-agent"
-version = "0.1.0"
+version = "1.0.0"
 description = "TianShu 数据仓库的中文问数分析 Agent —— 自然语言 → 三层 IR → 只读 SQL → 中文解释"
 requires-python = ">=3.10"
 license = { text = "MIT" }

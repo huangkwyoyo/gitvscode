@@ -1,0 +1,27 @@
+{
+  "contract_version": "1.0",
+  "response_type": "clarification",
+  "question": "最近每天有多少事故？",
+  "answer": {
+    "text": ""
+  },
+  "clarification": {
+    "needed": true,
+    "message": "\"最近\"的时间范围不够明确。请问您指的是最近7天、最近30天还是最近90天？"
+  },
+  "refusal": {
+    "refused": false,
+    "reason": null
+  },
+  "data": {
+    "is_multi_plan": false,
+    "summaries": [],
+    "merged_result": null,
+    "chart_spec": null,
+    "sources": []
+  },
+  "warnings": [],
+  "meta": {
+    "execution_mode": "single"
+  }
+}

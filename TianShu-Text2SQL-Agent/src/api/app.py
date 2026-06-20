@@ -125,7 +125,7 @@ def create_app(
     app = FastAPI(
         title="TianShu Text2SQL Agent API",
         description="基于 Phase 6A 统一公开响应契约的只读中文问数服务（本地安全闭环）",
-        version="0.1.0",
+        version="1.0.0",
         lifespan=lifespan,
         docs_url="/docs",
     )
