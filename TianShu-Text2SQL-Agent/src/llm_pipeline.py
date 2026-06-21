@@ -27,20 +27,12 @@ from .ir import (
 )
 from .llm import LLMClient, LLMRequest, PromptLoader
 from .sql_gen import sql_plan_to_sql, validate_sql_safety
-from .safety_policy_loader import load_forbidden_keywords
+from .safety_policy_loader import (
+    load_forbidden_keywords,
+    load_join_whitelist,
+    load_available_tables_from_contracts,
+)
 
-
-AVAILABLE_TABLES = {
-    "gold.dws_daily_trip_summary",
-    "gold.dws_daily_parking_summary",
-    "gold.dws_daily_crash_summary",
-    "gold.dim_date",
-}
-JOIN_WHITELIST = {
-    ("gold.dws_daily_trip_summary", "gold.dim_date"),
-    ("gold.dws_daily_parking_summary", "gold.dim_date"),
-    ("gold.dws_daily_crash_summary", "gold.dim_date"),
-}
 
 # C-2 修复：移除硬编码的 FORBIDDEN_KEYWORDS（只含 7 个关键字，缺失 12 个），
 # 改为从契约文件动态加载完整 19 关键字列表
@@ -64,6 +56,43 @@ def _clear_forbidden_keywords_cache() -> None:
     """清理禁止关键字缓存（供测试使用）"""
     global _FORBIDDEN_KEYWORDS_CACHE
     _FORBIDDEN_KEYWORDS_CACHE = None
+
+
+# JOIN 白名单缓存 + 可用表缓存（从契约加载，fail-closed）
+_JOIN_WHITELIST_CACHE: set[tuple[str, str]] | None = None
+_AVAILABLE_TABLES_CACHE: set[str] | None = None
+
+
+def _get_join_whitelist() -> set[tuple[str, str]]:
+    """获取 JOIN 白名单（从契约加载，fail-closed）。
+
+    使用模块级缓存避免重复文件 I/O，缓存可被测试清理。
+    """
+    global _JOIN_WHITELIST_CACHE
+    if _JOIN_WHITELIST_CACHE is not None:
+        return _JOIN_WHITELIST_CACHE
+    wl = load_join_whitelist(strict=True)
+    _JOIN_WHITELIST_CACHE = set(wl.allowed)
+    return _JOIN_WHITELIST_CACHE
+
+
+def _get_available_tables() -> set[str]:
+    """获取可用表集合（从语义契约加载，fail-closed）。
+
+    使用模块级缓存避免重复文件 I/O，缓存可被测试清理。
+    """
+    global _AVAILABLE_TABLES_CACHE
+    if _AVAILABLE_TABLES_CACHE is not None:
+        return _AVAILABLE_TABLES_CACHE
+    _AVAILABLE_TABLES_CACHE = load_available_tables_from_contracts(strict=True)
+    return _AVAILABLE_TABLES_CACHE
+
+
+def _clear_join_whitelist_cache() -> None:
+    """清理 JOIN 白名单和可用表缓存（供测试使用）"""
+    global _JOIN_WHITELIST_CACHE, _AVAILABLE_TABLES_CACHE
+    _JOIN_WHITELIST_CACHE = None
+    _AVAILABLE_TABLES_CACHE = None
 
 
 @dataclass(frozen=True)
@@ -425,7 +454,9 @@ class PromptFixtureRunner:
                 check["passed"] = True
                 return check
 
-            plan_errors = plan.validate(AVAILABLE_TABLES, JOIN_WHITELIST)
+            available_tables = _get_available_tables()
+            join_whitelist = _get_join_whitelist()
+            plan_errors = plan.validate(available_tables, join_whitelist)
             if plan_errors:
                 check["schema_validation_failed"] = True
                 check["errors"].extend(plan_errors)
@@ -435,8 +466,8 @@ class PromptFixtureRunner:
             safety_errors = validate_sql_safety(
                 sql,
                 forbidden_keywords=_get_forbidden_keywords(),
-                available_tables=AVAILABLE_TABLES,
-                join_whitelist=JOIN_WHITELIST,
+                available_tables=available_tables,
+                join_whitelist=join_whitelist,
             )
             check["errors"].extend(safety_errors)
         except Exception as exc:

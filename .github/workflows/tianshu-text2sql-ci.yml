@@ -1,0 +1,211 @@
+# ============================================================
+# TianShu Text2SQL Agent CI / 质量门禁分层
+#
+# 位置：仓库根目录 .github/workflows/（GitHub 可识别）
+# 工作目录：所有项目命令在 TianShu-Text2SQL-Agent 下执行
+#
+# 快速门禁 (fast-gate)：阻断合并
+#   - compileall + pytest + harness + mock 回归 + mock E2E
+#   - 纯离线，不调用 LLM
+#   - 失败 → CI 标红，禁止合并
+#
+# 慢速门禁 (slow-gate)：观测报告，不阻断
+#   - 真实 LLM Prompt 回归 + E2E Eval
+#   - 需要在仓库 Settings → Secrets 中配置 DEEPSEEK_API_KEY
+#   - API Key 缺失 → 明确跳过，不产生误导性成功结果
+#   - 失败 → 仅生成观测报告，不阻断合并
+# ============================================================
+
+name: TianShu Quality Gates
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  # 允许手动触发
+  workflow_dispatch:
+    inputs:
+      run_slow_gate:
+        description: '同时运行慢速门禁（需要 API Key）'
+        type: boolean
+        default: false
+
+# 所有 run 步骤的默认工作目录
+defaults:
+  run:
+    working-directory: TianShu-Text2SQL-Agent
+
+jobs:
+  # ════════════════════════════════════════════════════════
+  # 快速门禁 — 必须全部通过，失败阻断合并
+  # ════════════════════════════════════════════════════════
+  fast-gate:
+    name: 快速门禁 (Fast Gate)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 设置 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: ① 代码编译检查
+        run: python -m compileall -q src harness tests
+
+      - name: ② 单元测试 (Mock 模式)
+        run: python -m pytest -q --tb=short --basetemp harness/reports/test_tmp/pytest_ci
+
+      - name: ③ Harness 安全检查
+        run: python harness/run_harness.py
+
+      - name: ④ Mock Prompt 回归
+        run: python harness/run_prompt_regression.py --provider mock
+
+      - name: ⑤ Mock E2E 端到端评测
+        run: python harness/run_llm_e2e_eval.py --provider mock
+
+      - name: ⑥ JOIN 白名单无硬编码检查
+        run: python harness/checks/check_join_whitelist_no_hardcode.py
+
+      - name: 📊 快速门禁汇总
+        if: always()
+        run: |
+          echo "============================================"
+          echo "  快速门禁完成"
+          echo "  结果: ${{ job.status }}"
+          echo "============================================"
+
+      - name: 上传快速门禁报告
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fast-gate-reports
+          path: |
+            TianShu-Text2SQL-Agent/harness/reports/fast_gate_latest.*
+            TianShu-Text2SQL-Agent/harness/reports/harness_report_latest.md
+            TianShu-Text2SQL-Agent/harness/reports/prompt_regression_latest.*
+            TianShu-Text2SQL-Agent/harness/reports/llm_e2e_eval_latest.*
+
+  # ════════════════════════════════════════════════════════
+  # 慢速门禁 — 仅观测，不阻断合并
+  # 只在 push main 或手动触发时运行
+  # ════════════════════════════════════════════════════════
+  slow-gate:
+    name: 慢速门禁 (Slow Gate — 观测)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # 只在 push 到 main 或手动触发时运行（不在 PR 上自动跑）
+    if: |
+      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'workflow_dispatch' && inputs.run_slow_gate)
+    # 即使失败也不阻断 CI
+    continue-on-error: true
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 设置 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: 检查 API Key
+        id: check_key
+        run: |
+          if [ -z "${{ secrets.DEEPSEEK_API_KEY }}" ]; then
+            echo "api_key_available=false" >> $GITHUB_OUTPUT
+            echo "::warning::DEEPSEEK_API_KEY 未配置，跳过慢速门禁（非失败）"
+          else
+            echo "api_key_available=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: ① 真实 LLM Prompt 回归
+        if: steps.check_key.outputs.api_key_available == 'true'
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+        run: python harness/run_prompt_regression.py --provider deepseek
+        continue-on-error: true
+
+      - name: ① 跳过 Prompt 回归（无 API Key）
+        if: steps.check_key.outputs.api_key_available != 'true'
+        run: |
+          echo "============================================"
+          echo "  ⏭️ 跳过真实 LLM Prompt 回归"
+          echo "  原因: DEEPSEEK_API_KEY 未配置"
+          echo "  此为正常跳过，非失败"
+          echo "============================================"
+
+      - name: ② 真实 LLM E2E 端到端评测
+        if: steps.check_key.outputs.api_key_available == 'true'
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+        run: python harness/run_llm_e2e_eval.py --provider deepseek
+        continue-on-error: true
+
+      - name: ② 跳过 E2E 评测（无 API Key）
+        if: steps.check_key.outputs.api_key_available != 'true'
+        run: |
+          echo "============================================"
+          echo "  ⏭️ 跳过真实 LLM E2E 评测"
+          echo "  原因: DEEPSEEK_API_KEY 未配置"
+          echo "  此为正常跳过，非失败"
+          echo "============================================"
+
+      - name: 📊 慢速门禁观测汇总
+        if: always()
+        run: |
+          echo "============================================"
+          echo "  慢速门禁观测完成"
+          echo "  ⚠️ 此报告为观测数据，不作为门禁阻断信号"
+          echo "============================================"
+
+      - name: 上传慢速门禁观测报告
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: slow-gate-reports
+          path: |
+            TianShu-Text2SQL-Agent/harness/reports/slow_gate_latest.*
+            TianShu-Text2SQL-Agent/harness/reports/prompt_regression_latest.*
+            TianShu-Text2SQL-Agent/harness/reports/llm_e2e_eval_latest.*
+            TianShu-Text2SQL-Agent/harness/reports/llm_raw_outputs/
+
+  # ════════════════════════════════════════════════════════
+  # CI 汇总 comment（PR 上自动贴出门禁结果）
+  # ════════════════════════════════════════════════════════
+  gate-summary:
+    name: 门禁汇总
+    runs-on: ubuntu-latest
+    needs: [fast-gate, slow-gate]
+    if: always()
+    steps:
+      - name: 生成门禁汇总
+        run: |
+          echo "## TianShu Quality Gates 汇总" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| 门禁 | 结果 | 说明 |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|------|------|" >> $GITHUB_STEP_SUMMARY
+          echo "| 快速门禁 | ${{ needs.fast-gate.result }} | 代码编译 + 测试 + 安全检查 + JOIN白名单 |" >> $GITHUB_STEP_SUMMARY
+          echo "| 慢速门禁 | ${{ needs.slow-gate.result }} | 真实 LLM 观测（不阻断） |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ needs.fast-gate.result }}" != "success" ]; then
+            echo "❌ **快速门禁失败，请修复后重新提交。**" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "✅ 快速门禁通过。" >> $GITHUB_STEP_SUMMARY
+          fi

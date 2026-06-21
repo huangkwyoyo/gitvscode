@@ -350,7 +350,7 @@ class TianShuResolver:
         available_tables = self.discover_tables() if self._conn else self._tables_from_contracts()
         available_metrics = self.discover_metrics()
 
-        # 4. 从契约中提取规则
+        # 4. 从契约中提取 JOIN 白名单
         join_whitelist: list[tuple[str, str]] = []
         sql_safety = self._contracts.get("sql_safety_policy", {})
         for rule in sql_safety.get("table_reference_rules", []):
@@ -362,13 +362,7 @@ class TianShuResolver:
                         left = parts[0].strip().split("(")[0].strip()
                         right = parts[1].strip().split("(")[0].strip()
                         join_whitelist.append((left, right))
-
-        # G3 日汇总表按契约必须经 dim_date 做日期过滤，补齐本 Agent 的查询路径。
-        join_whitelist.extend([
-            ("gold.dws_daily_trip_summary", "gold.dim_date"),
-            ("gold.dws_daily_parking_summary", "gold.dim_date"),
-            ("gold.dws_daily_crash_summary", "gold.dim_date"),
-        ])
+                        join_whitelist.append((right, left))  # 双向对称
 
         forbidden_patterns: list[str] = []
         semantic = self._contracts.get("semantic_contract", {})

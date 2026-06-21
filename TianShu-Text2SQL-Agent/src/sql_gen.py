@@ -281,6 +281,17 @@ def _check_join_whitelist(
     """
     violations: list[str] = []
 
+    # 检测 CROSS JOIN（笛卡尔积）—— 无论表对是否在白名单，一律拒绝
+    cross_join_match = re.search(
+        r'CROSS\s+JOIN\s+([a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)?)',
+        sql, re.IGNORECASE,
+    )
+    if cross_join_match:
+        violations.append(
+            f"CROSS JOIN 被禁止（笛卡尔积不允许）: {cross_join_match.group(0)}"
+        )
+        return violations  # CROSS JOIN 是致命违规，立即返回
+
     # 提取 FROM 后的主表
     from_match = re.search(r'FROM\s+([a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)?)', sql, re.IGNORECASE)
     main_table = from_match.group(1) if from_match else None
@@ -288,9 +299,9 @@ def _check_join_whitelist(
     if not main_table:
         return violations
 
-    # 提取所有 JOIN 子句引用的表
+    # 提取所有 JOIN 子句引用的表（排除 CROSS JOIN，已在上面处理）
     join_matches = re.findall(
-        r'(?:INNER\s+|LEFT\s+|RIGHT\s+|FULL\s+|CROSS\s+)?JOIN\s+([a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)?)',
+        r'(?:INNER\s+|LEFT\s+|RIGHT\s+|FULL\s+)?JOIN\s+([a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)?)',
         sql, re.IGNORECASE,
     )
 

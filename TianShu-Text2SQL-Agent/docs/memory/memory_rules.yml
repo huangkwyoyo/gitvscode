@@ -592,3 +592,47 @@ rules:
     required_evals:
       - evals/unsafe_questions.yml
     notes: "本轮按晋升流程保持 proposed + blocking=false。晋升前需确认 sqlglot DuckDB 方言兼容性、正反探针稳定运行且无合法查询误报。"
+
+  # ═════════════════════════════════════════════════════════════════════════════
+  # TA-R033: JOIN 白名单必须来自权威契约，禁止硬编码绕过
+  # 来源: 经验复盘.md R013
+  # ═════════════════════════════════════════════════════════════════════════════
+  - rule_id: TA-R033
+    title: "JOIN 白名单只能从 TianShu 权威契约加载，不得通过硬编码、默认列表或 agent_config 补充"
+    status: active
+    blocking: true
+    severity: high
+    source_memory: "docs/memory/经验复盘.md#R013"
+    risk_ids:
+      - RISK-031
+      - RISK-033
+    applies_to:
+      - src/resolver.py
+      - src/llm_pipeline.py
+      - src/safety_policy_loader.py
+      - src/sql_gen.py
+    required_checks:
+      - harness/checks/check_join_whitelist_no_hardcode.py
+    required_tests:
+      - tests/test_join_whitelist_contract.py
+    required_evals: []
+    notes: "resolver.py 的 build_context() 和 llm_pipeline.py 的 _check_safety() 已清除硬编码 JOIN 追加。契约缺失/格式非法时 fail-closed。G3 日汇总→dim_date JOIN 需 TianShu Dev Agent 更新契约后方可恢复。"
+
+  # ═════════════════════════════════════════════════════════════════════════════
+  # TA-R034: GitHub Actions 工作流位于仓库根目录
+  # 来源: 经验复盘.md R013
+  # ═════════════════════════════════════════════════════════════════════════════
+  - rule_id: TA-R034
+    title: "GitHub Actions 工作流文件必须位于仓库根目录 .github/workflows/，使用 working-directory 指向子项目"
+    status: active
+    blocking: false
+    severity: medium
+    source_memory: "docs/memory/经验复盘.md#R013"
+    risk_ids:
+      - RISK-032
+    applies_to:
+      - .github/workflows/tianshu-text2sql-ci.yml
+    required_checks: []
+    required_tests: []
+    required_evals: []
+    notes: "原始工作流位于 TianShu-Text2SQL-Agent/.github/workflows/ci.yml（GitHub 无法识别），已迁移至仓库根目录并停用旧文件。新增 API Key 缺失时显式跳过慢速门禁的逻辑。"
