@@ -559,17 +559,18 @@ scripts/dev_agent/                 ← v2 CLI 入口
 | **M4c 跨 package 注册表** | ✅ | package_registry + list/deps/status + SUPERSEDED 传播 + 一致性检查 |
 | **M5a 查询内核与写入外壳分离** | ✅ | 双内核 Manifest、确定性部署外壳、双审批快照、篡改失效 |
 | v1 pipeline 保留 | ✅ | `scripts/pipeline/` 完整保留，143 测试通过 |
-| 测试 | ✅ | 629 passed，零回归 |
+| **M5b-1 DuckDB CTAS Sandbox** | ✅ | `sandbox/duckdb_ctas_executor.py`——一次性可写 Sandbox，12 步生命周期 + 白名单 + 物化验证 |
+| **M5b-1 物化静态验证** | ✅ | `verify/materialization_validator.py`——15 项检查 + 物化状态机 |
+| 测试 | ✅ | `pytest tests/ -q`（最近验收：2026-06-19，669 passed，零回归） |
 
 ### 10.3 部分完成（PARTIAL）
 
 | 模块 | 状态 | 说明 |
 |------|------|------|
-| Spark 只读样本执行 | ⚠️ | `sandbox/spark_executor.py` 是桩，始终返回 SKIPPED/PENDING |
-| SQL/Spark 交叉验证 | ⚠️ | `verify/cross_validation.py` 逻辑完整，但输入缺失→始终 SKIPPED |
-| 跨 package SUPERSEDED 传播 | ✅ | M4c 已实现——注册表 + 自动传播 + 一致性检查 |
+| Spark 只读样本执行 | ⚠️ | `sandbox/spark_executor.py`——12 层防御受控执行已实现，PySpark 不可用时 SKIPPED |
+| SQL/Spark 交叉验证 | ⚠️ | `verify/cross_validation.py`——7 维度比较已实现，Spark 不可用时 NOT_EXECUTED |
 
-### 10.4 部分完成（PARTIAL）——新增
+### 10.4 设计完成（DESIGN DONE）
 
 | 模块 | 状态 | 说明 |
 |------|------|------|
@@ -579,8 +580,7 @@ scripts/dev_agent/                 ← v2 CLI 入口
 
 | 模块 | 状态 | 阻塞原因 |
 |------|------|---------|
-| **M5b-1 DuckDB CTAS Sandbox** | 🔵 设计完成，待实现 | 本阶段只设计，不实现 |
-| 真实 SQL/Spark 交叉验证 | ❌ | 需 Spark 环境就绪 |
+| 真实 SQL/Spark 交叉验证（PySpark 环境） | ❌ | 需 PySpark 安装 + 本地 SparkSession |
 | LLM 接入代码生成 | ❌ | 项目边界：当前不接真实 LLM API |
 | Prompt 回归系统 | ❌ | 需 LLM API |
 | ColumnBindingTable 动态加载增强 | ❌ | 当前 fallback 可用 |

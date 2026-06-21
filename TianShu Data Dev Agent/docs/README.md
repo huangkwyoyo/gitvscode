@@ -122,40 +122,36 @@ Obsidian/
 
 ## 当前实现状态 / Implementation Status
 
-> 2026-06-17 更新。本节对齐代码真实状态，详见项目根目录 `README.md` "当前实现状态"。
+> **权威事实源：项目根目录 `AGENTS.md` §10。** 本节为摘要索引，详细状态以 AGENTS.md 为准。
+>
+> 最近验收：2026-06-19，`pytest tests/ -q` → 669 passed，零回归。
 
 ### ✅ DONE（已完成）
 
 | 模块 | 状态 | 说明 |
 |------|------|------|
-| M2 Review Package 完整生成 | ✅ | `src/agent/workflow.py` → `build_review_package()` 输出 9 文件审查材料包（M4a：+decision.yml +decision_log.yml） |
-| `generated/review_packages/{request_id}/` 结构 | ✅ | 完整 9 文件目录骨架 |
-| SQL + Spark DSL 双份草案 | ✅ | `dual_code_generator.py` 确定性生成（不接 LLM） |
-| `reports/verification.md` 真实验证报告 | ✅ | M3 运行后覆盖 M2 占位桩，含静态检查 + WARN/FAIL 明细 |
-| M3 静态检查（5 项） | ✅ | `Validator.validate_static()` —— SQL/Spark 前缀 + 关键字 + lineage |
-| M3 SQL 样本执行 | ✅ | `sandbox/executor.py`，只读 + LIMIT 1000 + 超时保护 |
-| M3 安全压实（3 缺口闭合） | ✅ | `check_sample_execution` / `execute_sql` / `validate_context` 防御纵深 |
-| **M4a 人审状态机最小实现** | ✅ | DecisionStatus enum + decision.yml（机读权威状态）+ decision_log.yml（审计日志）+ verification_summary.yml（结构化摘要） |
-| **M4b 状态机完整实现** | ✅ | SUPERSEDED 自动转换 + artifact_hashes + decision_manager + 人审 CLI，581 测试零回归 |
-| **M4c 跨 package 注册表** | ✅ | package_registry + list/deps/status + SUPERSEDED 传播 + 一致性检查，629 测试零回归 |
-| 测试 | ✅ | 629 passed，零回归 |
-| `src/agent/` 模块直接测试 | ✅ | 6 文件、142 测试覆盖 6 个 M2/M3 核心模块 |
+| M2 Review Package 完整生成 | ✅ | `src/agent/workflow.py` → `build_review_package()` 输出 9 文件审查材料包 |
+| M3 静态检查 + SQL 样本执行 | ✅ | 5 项静态检查 + 只读 DuckDB 执行 + LIMIT 1000 + 超时保护 |
+| M3 安全压实（3 缺口闭合） | ✅ | G1/G2/G3 修复 |
+| **M4a/b/c 人审状态机** | ✅ | DecisionStatus enum + decision.yml + CLI + SUPERSEDED 自动转换 + 跨包注册表 |
+| **M5a 查询内核与写入外壳分离** | ✅ | 双内核 Manifest、确定性部署外壳、双审批快照、篡改失效 |
+| **M5b-1 DuckDB CTAS Sandbox** | ✅ | `duckdb_ctas_executor.py`——一次性可写 Sandbox，12 步生命周期 + 白名单 + 物化验证 |
+| **Spark 只读样本执行** | ✅ | `spark_executor.py`——12 层防御受控执行（PySpark 不可用时 SKIPPED） |
+| **SQL/Spark 交叉验证** | ✅ | `cross_validation.py`——7 维度比较（列名/类型/行数/抽样行/空值/数值合计/快照哈希） |
+| 测试 | ✅ | 669 passed，零回归 |
 
 ### ⚠️ PARTIAL（部分完成）
 
 | 模块 | 状态 | 说明 |
 |------|------|------|
-| `reports/cross_validation.md` | ⚠️ | 逻辑完整，但始终 SKIPPED（Spark executor 是桩） |
-| `decision.md` + `decision.yml` | ✅ | M4b 完成程序化状态机（SUPERSEDED 自动转换 + 人审 CLI + artifact_hashes） |
-| 跨 package SUPERSEDED 传播 | ✅ | M4c 已实现——注册表 + 自动传播 + 一致性检查 |
-| Spark 只读样本执行 | ⚠️ | `spark_executor.py` 始终返回 SKIPPED/PENDING |
-| SQL/Spark 双结果交叉验证 | ⚠️ | `cross_validation.py` 逻辑完整，输入缺失→始终 SKIPPED |
+| Spark 交叉验证 | ⚠️ | Spark 可用时产出 CONSISTENT_SAMPLE，PySpark 不可用时 NOT_EXECUTED |
+| 物化验证 | ⚠️ | 单表 CTAS 已实现，多表 JOIN / INSERT 策略延后 |
+
 ### ❌ TODO（待完成）
 
 | 模块 | 阻塞原因 |
 |------|---------|
 | LLM 接入代码生成 | 项目边界：当前不接真实 LLM API |
-| 真实 SQL/Spark 交叉验证 | 需 Spark 环境就绪 |
 | Prompt 回归系统 | 需 LLM API |
 
 ### Legacy boundary（v1 / v2 边界）
@@ -172,9 +168,9 @@ Obsidian/
 
 - **不接真实 LLM API**——M2 代码生成使用确定性模板
 - **不自动上线、不写生产库**——Agent 只连开发库，只读、限行、限时
-- **Spark 不可用时为 SKIPPED/PENDING**——不能说 Spark 已完整验证
-- **`decision.md` 是人审模板**，不是正式审批系统
-- **交叉验证始终 SKIPPED**——因 Spark executor 是桩
+- **Spark 不可用时为 SKIPPED/NOT_EXECUTED**——不能说 Spark 已完整验证
+- **物化验证仅支持单表 CTAS**——多表 JOIN / INSERT 策略延后
+- **交叉验证仅证明样本一致**——不证明全量或生产行为一致
 
 ---
 
