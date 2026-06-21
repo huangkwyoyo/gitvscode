@@ -12,11 +12,13 @@ Phase 6A —— 统一公开响应契约。
     4. answer / clarification / refusal / error 互斥
     5. sources 只来自真实 SQLResult / ResultSummary
     6. 不修改传入的 AgentResponse
+    7. 输出必须是 JSON-native 类型（date/datetime/tuple 等已规范化）
 """
 
 from __future__ import annotations
 
 import re
+from datetime import date, datetime
 from typing import Any
 
 from .ir import AgentResponse
@@ -61,7 +63,7 @@ def build_public_response(response: AgentResponse) -> dict[str, Any]:
     warnings = _build_warnings_section(response)
     meta = _build_meta_section(response)
 
-    return {
+    return _normalize_json_value({
         "contract_version": CONTRACT_VERSION,
         "response_type": response_type,
         "question": response.question,
@@ -71,7 +73,62 @@ def build_public_response(response: AgentResponse) -> dict[str, Any]:
         "data": data,
         "warnings": warnings,
         "meta": meta,
-    }
+    })
+
+
+# ═══════════════════════════════════════════════════════════════
+# JSON-native 类型规范化
+# ═══════════════════════════════════════════════════════════════
+
+
+def _normalize_json_value(obj: Any, _path: str = "$") -> Any:
+    """
+    递归将 Python 运行时类型转换为 JSON-native 类型。
+
+    转换规则：
+        - datetime.date       → ISO 字符串 "YYYY-MM-DD"
+        - datetime.datetime   → ISO 字符串 "YYYY-MM-DDTHH:MM:SS"
+        - tuple               → list
+        - dict                → 递归处理所有 value
+        - list                → 递归处理所有元素
+        - str/int/float/bool/None → 原样返回（已是 JSON-native）
+
+    不可转换的未知类型 → 抛出 TypeError（fail-loud 原则，避免静默丢失数据）。
+
+    注意：Public response 不应包含 Decimal/numpy/DuckDB 特殊类型，
+    这些类型应在更早的阶段（Agent 层）就转为 Python 标量。
+    """
+    # JSON-native 原子类型直通（不检查 bool/isinstance，因为 bool 是 int 的子类）
+    if obj is None or isinstance(obj, (bool, str)):
+        return obj
+    # int 检查必须在 float 之前（bool 也满足 isinstance(True, int) 但上面已处理）
+    if isinstance(obj, int):
+        return obj
+    if isinstance(obj, float):
+        return obj
+
+    # Python 日期时间类型 → ISO 字符串
+    if isinstance(obj, datetime):
+        return obj.isoformat()
+    if isinstance(obj, date):
+        return obj.isoformat()
+
+    # tuple → list
+    if isinstance(obj, tuple):
+        return [_normalize_json_value(v, f"{_path}[{i}]") for i, v in enumerate(obj)]
+
+    # 递归处理容器类型
+    if isinstance(obj, dict):
+        return {k: _normalize_json_value(v, f"{_path}.{k}") for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_normalize_json_value(v, f"{_path}[{i}]") for i, v in enumerate(obj)]
+
+    # 未知类型：fail-loud，不在公开响应中静默丢弃数据
+    raise TypeError(
+        f"build_public_response 输出包含非 JSON-native 类型 "
+        f"{type(obj).__module__}.{type(obj).__qualname__} "
+        f"位于 {_path}。请在调用方提前规范化。"
+    )
 
 
 # ═══════════════════════════════════════════════════════════════

@@ -19,10 +19,12 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import time
 import uuid
 from contextlib import asynccontextmanager
+from datetime import date, datetime
 from typing import Any
 
 from pathlib import Path as _FilePath
@@ -432,6 +434,8 @@ def create_app(
 
         try:
             public = await runtime.ask(ask_req.question)
+            # ── 确保响应可 JSON 序列化（date/datetime → ISO 字符串）──
+            public_safe = _make_json_safe(public)
             # ── 记录审计：completed ──
             await _audit_event(
                 request,
@@ -442,7 +446,7 @@ def create_app(
                 question_length=question_len,
                 execution_mode=public.get("meta", {}).get("execution_mode", ""),
             )
-            return JSONResponse(content=public, status_code=200)
+            return JSONResponse(content=public_safe, status_code=200)
 
         except ServiceNotReadyError:
             await _audit_event(request, AuditEvent.REJECTED, 503,
@@ -531,6 +535,27 @@ def _now_iso() -> str:
     """生成 ISO 8601 时间戳（UTC）"""
     from datetime import datetime, timezone
     return datetime.now(timezone.utc).isoformat()
+
+
+def _make_json_safe(obj: Any) -> Any:
+    """递归转换对象中不可 JSON 序列化的类型（date/datetime → ISO 字符串）。
+
+    在 DuckDB 查询结果中，DATE 列返回 datetime.date 对象，
+    Python 标准 json.dumps 无法直接序列化，需要提前转换。
+    """
+    if obj is None or isinstance(obj, (bool, int, float, str)):
+        return obj
+    if isinstance(obj, (date, datetime)):
+        return obj.isoformat()
+    if isinstance(obj, dict):
+        return {k: _make_json_safe(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_make_json_safe(v) for v in obj]
+    # 其他类型 → 字符串回退
+    try:
+        return str(obj)
+    except Exception:
+        return repr(obj)
 
 
 def main():
