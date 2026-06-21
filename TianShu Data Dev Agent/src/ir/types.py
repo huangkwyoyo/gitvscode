@@ -279,6 +279,7 @@ class ArtifactHashes:
     deploy_sql: str = ""                # M5：deploy/main.sql 哈希
     deploy_spark: str = ""              # M5：deploy/main.py 哈希
     deployment_manifest: str = ""       # M5：deployment_manifest.yml 哈希
+    materialization_verification: Optional[str] = None  # M5b：materialization_verification.yml 哈希
 
     def to_dict(self) -> dict[str, Any]:
         """序列化为字典"""
@@ -290,6 +291,7 @@ class ArtifactHashes:
             "deploy_sql": self.deploy_sql,
             "deploy_spark": self.deploy_spark,
             "deployment_manifest": self.deployment_manifest,
+            "materialization_verification": self.materialization_verification,
         }
 
 

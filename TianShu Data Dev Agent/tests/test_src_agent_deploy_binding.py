@@ -449,6 +449,9 @@ def test_only_human_can_set_release_approval(tmp_path):
     logic_result = _approve_logic(package_dir)
     assert logic_result.returncode == 0, logic_result.stderr
 
+    # M5b-2：RELEASE_APPROVED 要求物化验证通过
+    _setup_materialized_package(package_dir)
+
     result = subprocess.run(
         [sys.executable, str(REVIEW_CLI), "release", str(package_dir),
          "--state", "RELEASE_APPROVED", "--message", "部署产物已审查通过", "--user", "ops_reviewer"],
@@ -640,6 +643,8 @@ def test_release_approval_requires_all_artifact_hashes(tmp_path):
     """旧格式缺少任一发布哈希时必须阻断发布审批。"""
     package_dir = _build_and_verify(tmp_path)
     _approve_logic(package_dir)
+    # M5b-2：先创建物化报告以填充 materialization_verification 哈希
+    _setup_materialized_package(package_dir)
     decision_path = package_dir / "decision.yml"
     decision = yaml.safe_load(decision_path.read_text(encoding="utf-8"))
     decision["artifact_hashes"].pop("deploy_spark")
@@ -659,6 +664,9 @@ def test_release_approval_records_hash_snapshot(tmp_path):
     package_dir = _build_and_verify(tmp_path)
     _approve_logic(package_dir)
 
+    # M5b-2：RELEASE_APPROVED 要求物化验证通过
+    _setup_materialized_package(package_dir)
+
     result = _approve_release(package_dir)
 
     assert result.returncode == 0, result.stderr
@@ -667,8 +675,11 @@ def test_release_approval_records_hash_snapshot(tmp_path):
     for key in [
         "sql_main", "spark_main", "lineage_source_refs", "verification_summary",
         "deployment_manifest", "deploy_sql", "deploy_spark",
+        "materialization_verification",
     ]:
-        assert len(snapshot[key]) == 64, f"发布审批快照缺少 {key}"
+        assert len(snapshot[key]) == 64 or snapshot[key] is None, (
+            f"发布审批快照缺少 {key}"
+        )
     assert decision["logic_approval_state"] == "LOGIC_APPROVED"
     assert decision["release_approval_state"] == "RELEASE_APPROVED"
 
@@ -680,6 +691,7 @@ def test_modified_deploy_sql_supersedes_only_release_approval(tmp_path):
     """部署外壳变化只使发布批准失效，不影响逻辑批准。"""
     package_dir = _build_and_verify(tmp_path)
     _approve_logic(package_dir)
+    _setup_materialized_package(package_dir)
     assert _approve_release(package_dir).returncode == 0
     deploy_path = package_dir / "deploy" / "main.sql"
     deploy_path.write_text(
@@ -704,6 +716,7 @@ def test_modified_query_supersedes_logic_and_release_approvals(tmp_path):
     """转换内核变化必须同时使逻辑批准与发布批准失效。"""
     package_dir = _build_and_verify(tmp_path)
     _approve_logic(package_dir)
+    _setup_materialized_package(package_dir)
     assert _approve_release(package_dir).returncode == 0
     sql_path = package_dir / "sql" / "main.sql"
     sql_path.write_text(
@@ -792,6 +805,7 @@ def test_tampered_release_artifact_blocks_existing_approval(tmp_path, relative_p
     """任一发布制品被篡改后，旧发布批准必须失效。"""
     package_dir = _build_and_verify(tmp_path)
     assert _approve_logic(package_dir).returncode == 0
+    _setup_materialized_package(package_dir)
     assert _approve_release(package_dir).returncode == 0
     target = package_dir / relative_path
     target.write_text(
@@ -804,3 +818,458 @@ def test_tampered_release_artifact_blocks_existing_approval(tmp_path, relative_p
     assert result.returncode != 0
     decision = yaml.safe_load((package_dir / "decision.yml").read_text(encoding="utf-8"))
     assert decision["release_approval_state"] == "SUPERSEDED"
+
+
+# ═══════════════════════════════════════════════════════════════
+# M5b-2 P0：物化验证闸门——RELEASE_APPROVED 前置条件
+# ═══════════════════════════════════════════════════════════════
+
+
+def _setup_materialized_package(package_dir: Path, **report_overrides) -> Path:
+    """设置已完成物化验证的 package——用于测试发布闸门。
+
+    创建合法的 materialization_verification.yml 并更新 decision.yml 中的哈希，
+    使后续 RELEASE_APPROVED 的 artifact integrity 检查能通过。
+    """
+    from src.agent.decision_manager import (
+        compute_artifact_hashes,
+        update_artifact_hashes_in_decision,
+    )
+
+    # 设置 manifest materialization_status
+    manifest_path = package_dir / "deployment_manifest.yml"
+    manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
+    manifest["materialization_status"] = "MATERIALIZATION_VALIDATED"
+    manifest_path.write_text(
+        yaml.safe_dump(manifest, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
+
+    # 创建物化验证报告
+    reports_dir = package_dir / "reports"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    report = {
+        "verification_id": "mat_test_0001",
+        "request_id": report_overrides.get("request_id", "trip_daily_report_m2"),
+        "sandbox_id": "test-sandbox-uuid",
+        "sandbox_path": "/tmp/test_sandbox",
+        "declared_target": "generated.trip_daily_report_m2",
+        "sandbox_target": "sandbox_output",
+        "engine": "duckdb",
+        "operation": "CTAS",
+        "started_at": "2026-01-01T00:00:00+00:00",
+        "finished_at": "2026-01-01T00:00:01+00:00",
+        "overall_status": report_overrides.get("overall_status", "PASS"),
+        "cleanup_status": "PASS",
+        "source_query_hash_status": report_overrides.get(
+            "source_query_hash_status", "PASS"
+        ),
+        "deploy_artifact_hash_status": report_overrides.get(
+            "deploy_artifact_hash_status", "PASS"
+        ),
+        "static_validation_status": "PASS",
+        "execution_status": "PASS",
+        "output_schema_status": "PASS",
+        "row_count_status": "PASS",
+        "null_check_status": "PASS",
+        "uniqueness_status": "PENDING",
+        "idempotency_status": "PASS",
+        "checks": [],
+        "output_row_count": 100,
+        "select_row_count": 100,
+        "output_columns": ["col1"],
+        "output_column_types": ["VARCHAR"],
+        "null_rates": {},
+        "numeric_sums": {},
+        "warnings": [],
+        "failures": [],
+        "human_review_required": True,
+        "generated_at": "2026-01-01T00:00:01+00:00",
+    }
+    mat_report_path = reports_dir / "materialization_verification.yml"
+    mat_report_path.write_text(
+        yaml.safe_dump(report, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
+
+    # 更新 decision.yml——写入包含 materialization_verification 的哈希
+    hashes = compute_artifact_hashes(package_dir)
+    update_artifact_hashes_in_decision(package_dir, hashes)
+
+    return package_dir
+
+
+# ── 测试 1：materialization_status=PENDING → 拒绝 ──
+
+
+def test_materialization_pending_blocks_release_approval(tmp_path):
+    """materialization_status 仍为 PENDING 时必须拒绝 RELEASE_APPROVED。"""
+    package_dir = _build_and_verify(tmp_path)
+    _approve_logic(package_dir)
+
+    result = _approve_release(package_dir)
+
+    assert result.returncode != 0, (
+        "materialization_status=PENDING 时应拒绝 RELEASE_APPROVED"
+    )
+    assert "materialization_status" in result.stderr
+
+
+# ── 测试 2：materialization_status=FAILED → 拒绝 ──
+
+
+def test_materialization_failed_blocks_release_approval(tmp_path):
+    """materialization_status 为 FAILED 时必须拒绝 RELEASE_APPROVED。"""
+    package_dir = _build_and_verify(tmp_path)
+    _approve_logic(package_dir)
+
+    # 设置 manifest materialization_status=FAILED
+    manifest_path = package_dir / "deployment_manifest.yml"
+    manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
+    manifest["materialization_status"] = "FAILED"
+    manifest_path.write_text(
+        yaml.safe_dump(manifest, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
+
+    result = _approve_release(package_dir)
+
+    assert result.returncode != 0, (
+        "materialization_status=FAILED 时应拒绝 RELEASE_APPROVED"
+    )
+    assert "materialization_status" in result.stderr
+
+
+# ── 测试 3：materialization_status=WARN → 拒绝 ──
+
+
+def test_materialization_warn_blocks_release_approval(tmp_path):
+    """materialization_status 为 WARN 时必须拒绝 RELEASE_APPROVED。
+
+    WARN ≠ MATERIALIZATION_VALIDATED——只有全部通过才是 VALIDATED。
+    """
+    package_dir = _build_and_verify(tmp_path)
+    _approve_logic(package_dir)
+
+    # 设置 manifest materialization_status=WARN
+    manifest_path = package_dir / "deployment_manifest.yml"
+    manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
+    manifest["materialization_status"] = "WARN"
+    manifest_path.write_text(
+        yaml.safe_dump(manifest, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
+
+    result = _approve_release(package_dir)
+
+    assert result.returncode != 0, (
+        "materialization_status=WARN 时应拒绝 RELEASE_APPROVED"
+    )
+    assert "materialization_status" in result.stderr
+
+
+# ── 测试 4：缺少 materialization_verification.yml → 拒绝 ──
+
+
+def test_missing_materialization_report_blocks_release_approval(tmp_path):
+    """缺少 materialization_verification.yml 时必须拒绝 RELEASE_APPROVED。"""
+    package_dir = _build_and_verify(tmp_path)
+    _approve_logic(package_dir)
+
+    # 设置 manifest materialization_status=MATERIALIZATION_VALIDATED 但不创建报告
+    manifest_path = package_dir / "deployment_manifest.yml"
+    manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
+    manifest["materialization_status"] = "MATERIALIZATION_VALIDATED"
+    manifest_path.write_text(
+        yaml.safe_dump(manifest, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
+
+    result = _approve_release(package_dir)
+
+    assert result.returncode != 0, (
+        "缺少 materialization_verification.yml 时应拒绝 RELEASE_APPROVED"
+    )
+    assert "materialization_verification" in result.stderr
+
+
+# ── 测试 5：物化报告 overall_status 非 PASS → 拒绝 ──
+
+
+def test_materialization_overall_not_pass_blocks_release_approval(tmp_path):
+    """物化报告 overall_status 非 PASS 时必须拒绝 RELEASE_APPROVED。"""
+    package_dir = _build_and_verify(tmp_path)
+    _approve_logic(package_dir)
+
+    _setup_materialized_package(package_dir, overall_status="FAIL")
+
+    result = _approve_release(package_dir)
+
+    assert result.returncode != 0, (
+        "物化报告 overall_status=FAIL 时应拒绝 RELEASE_APPROVED"
+    )
+    assert "overall_status" in result.stderr
+
+
+# ── 测试 6：报告 request_id 与 Manifest 不一致 → 拒绝 ──
+
+
+def test_materialization_request_id_mismatch_blocks_release_approval(tmp_path):
+    """物化报告 request_id 与 Manifest 不一致时必须拒绝 RELEASE_APPROVED。"""
+    package_dir = _build_and_verify(tmp_path)
+    _approve_logic(package_dir)
+
+    _setup_materialized_package(package_dir, request_id="different_package_m2")
+
+    result = _approve_release(package_dir)
+
+    assert result.returncode != 0, (
+        "request_id 不一致时应拒绝 RELEASE_APPROVED"
+    )
+    assert "request_id" in result.stderr
+
+
+# ── 测试 7：报告对应旧 deploy/main.sql → 拒绝 ──
+
+
+def test_stale_deploy_artifact_hash_blocks_release_approval(tmp_path):
+    """deploy_artifact_hash_status 非 PASS 时必须拒绝 RELEASE_APPROVED。
+
+    模拟场景：物化验证后 deploy/main.sql 被修改，
+    重新计算 artifact hashes 后 deploy_sql 哈希变化，
+    但报告的 deploy_artifact_hash_status 仍为 FAIL。
+    """
+    package_dir = _build_and_verify(tmp_path)
+    _approve_logic(package_dir)
+
+    _setup_materialized_package(package_dir, deploy_artifact_hash_status="FAIL")
+
+    result = _approve_release(package_dir)
+
+    assert result.returncode != 0, (
+        "deploy_artifact_hash_status=FAIL 时应拒绝 RELEASE_APPROVED"
+    )
+    assert "deploy_artifact_hash_status" in result.stderr
+
+
+# ── 测试 8：报告对应旧 sql/main.sql → 拒绝 ──
+
+
+def test_stale_source_query_hash_blocks_release_approval(tmp_path):
+    """source_query_hash_status 非 PASS 时必须拒绝 RELEASE_APPROVED。
+
+    模拟场景：物化验证后 sql/main.sql 被修改，
+    报告的 source_query_hash_status 为 FAIL。
+    """
+    package_dir = _build_and_verify(tmp_path)
+    _approve_logic(package_dir)
+
+    _setup_materialized_package(package_dir, source_query_hash_status="FAIL")
+
+    result = _approve_release(package_dir)
+
+    assert result.returncode != 0, (
+        "source_query_hash_status=FAIL 时应拒绝 RELEASE_APPROVED"
+    )
+    assert "source_query_hash_status" in result.stderr
+
+
+# ── 测试 9：所有条件满足 → 人工 RELEASE_APPROVED 成功 ──
+
+
+def test_all_conditions_met_release_approval_succeeds(tmp_path):
+    """所有闸门条件满足时，人工 RELEASE_APPROVED 应成功。"""
+    package_dir = _build_and_verify(tmp_path)
+    _approve_logic(package_dir)
+
+    _setup_materialized_package(package_dir)
+
+    result = _approve_release(package_dir)
+
+    assert result.returncode == 0, (
+        f"所有条件满足时应成功 RELEASE_APPROVED，但失败: {result.stderr}"
+    )
+    manifest = yaml.safe_load(
+        (package_dir / "deployment_manifest.yml").read_text(encoding="utf-8")
+    )
+    assert manifest["release_status"] == "RELEASE_APPROVED"
+    assert manifest["release_approved_by"] == "human:release_reviewer"
+
+
+# ── 测试 10：RELEASE_REJECTED 不受物化状态限制 ──
+
+
+def test_release_rejected_not_blocked_by_materialization_status(tmp_path):
+    """RELEASE_REJECTED 不应受物化验证闸门限制。
+
+    人可以在物化验证未完成时拒绝发布。
+    """
+    package_dir = _build_and_verify(tmp_path)
+    _approve_logic(package_dir)
+
+    # materialization_status 仍为 PENDING，不创建物化报告
+    result = subprocess.run(
+        [sys.executable, str(REVIEW_CLI), "release", str(package_dir),
+         "--state", "RELEASE_REJECTED", "--message", "部署方案有设计问题，拒绝发布",
+         "--user", "release_reviewer"],
+        cwd=PROJECT_ROOT, text=True, capture_output=True, check=False,
+    )
+
+    assert result.returncode == 0, (
+        f"RELEASE_REJECTED 不应受物化状态限制，但失败: {result.stderr}"
+    )
+    manifest = yaml.safe_load(
+        (package_dir / "deployment_manifest.yml").read_text(encoding="utf-8")
+    )
+    assert manifest["release_status"] == "RELEASE_REJECTED"
+
+
+# ── 测试 11：拒绝路径不得修改 release_status ──
+
+
+def test_rejected_release_does_not_modify_release_status(tmp_path):
+    """物化验证闸门拒绝时，release_status 必须保持原值不变。"""
+    package_dir = _build_and_verify(tmp_path)
+    _approve_logic(package_dir)
+
+    # 读取原始 release_status
+    manifest_path = package_dir / "deployment_manifest.yml"
+    original_manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
+    original_status = original_manifest["release_status"]
+
+    # 尝试 RELEASE_APPROVED（会因缺少物化验证而失败）
+    result = _approve_release(package_dir)
+
+    assert result.returncode != 0, "无物化验证时应拒绝"
+    # 重新读取——release_status 必须不变
+    manifest_after = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
+    assert manifest_after["release_status"] == original_status, (
+        f"拒绝后 release_status 应保持 {original_status}，"
+        f"实际为 {manifest_after['release_status']}"
+    )
+
+
+# ── 测试 12：check_materialization_gate 单元测试 ──
+
+
+def test_check_materialization_gate_all_pass():
+    """单元测试：所有闸门条件通过时返回空列表。"""
+    import tempfile
+    from src.agent.decision_manager import check_materialization_gate
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        pkg = Path(tmpdir)
+        # 创建必要文件
+        (pkg / "reports").mkdir()
+        manifest = {"request_id": "test_pkg", "materialization_status": "MATERIALIZATION_VALIDATED"}
+        (pkg / "deployment_manifest.yml").write_text(
+            yaml.safe_dump(manifest), encoding="utf-8"
+        )
+        report = {
+            "request_id": "test_pkg",
+            "overall_status": "PASS",
+            "source_query_hash_status": "PASS",
+            "deploy_artifact_hash_status": "PASS",
+        }
+        (pkg / "reports" / "materialization_verification.yml").write_text(
+            yaml.safe_dump(report), encoding="utf-8"
+        )
+
+        errors = check_materialization_gate(pkg)
+        assert errors == [], f"所有条件通过时应返回空列表，实际: {errors}"
+
+
+def test_check_materialization_gate_each_gate_fails():
+    """单元测试：逐一验证每个闸门条件的失败路径。"""
+    import tempfile
+    from src.agent.decision_manager import check_materialization_gate
+
+    base_manifest = {
+        "request_id": "test_pkg",
+        "materialization_status": "MATERIALIZATION_VALIDATED",
+    }
+    base_report = {
+        "request_id": "test_pkg",
+        "overall_status": "PASS",
+        "source_query_hash_status": "PASS",
+        "deploy_artifact_hash_status": "PASS",
+    }
+
+    # 1. 缺少报告
+    with tempfile.TemporaryDirectory() as tmpdir:
+        pkg = Path(tmpdir)
+        (pkg / "deployment_manifest.yml").write_text(
+            yaml.safe_dump(base_manifest), encoding="utf-8"
+        )
+        errors = check_materialization_gate(pkg)
+        assert len(errors) > 0 and "materialization_verification" in errors[0]
+
+    # 2. materialization_status 非 MATERIALIZATION_VALIDATED
+    with tempfile.TemporaryDirectory() as tmpdir:
+        pkg = Path(tmpdir)
+        (pkg / "reports").mkdir()
+        bad_manifest = dict(base_manifest, materialization_status="PENDING")
+        (pkg / "deployment_manifest.yml").write_text(
+            yaml.safe_dump(bad_manifest), encoding="utf-8"
+        )
+        (pkg / "reports" / "materialization_verification.yml").write_text(
+            yaml.safe_dump(base_report), encoding="utf-8"
+        )
+        errors = check_materialization_gate(pkg)
+        assert len(errors) > 0 and "materialization_status" in errors[0]
+
+    # 3. overall_status 非 PASS
+    with tempfile.TemporaryDirectory() as tmpdir:
+        pkg = Path(tmpdir)
+        (pkg / "reports").mkdir()
+        (pkg / "deployment_manifest.yml").write_text(
+            yaml.safe_dump(base_manifest), encoding="utf-8"
+        )
+        bad_report = dict(base_report, overall_status="FAIL")
+        (pkg / "reports" / "materialization_verification.yml").write_text(
+            yaml.safe_dump(bad_report), encoding="utf-8"
+        )
+        errors = check_materialization_gate(pkg)
+        assert len(errors) > 0 and "overall_status" in errors[0]
+
+    # 4. request_id 不一致
+    with tempfile.TemporaryDirectory() as tmpdir:
+        pkg = Path(tmpdir)
+        (pkg / "reports").mkdir()
+        (pkg / "deployment_manifest.yml").write_text(
+            yaml.safe_dump(base_manifest), encoding="utf-8"
+        )
+        bad_report = dict(base_report, request_id="other_package")
+        (pkg / "reports" / "materialization_verification.yml").write_text(
+            yaml.safe_dump(bad_report), encoding="utf-8"
+        )
+        errors = check_materialization_gate(pkg)
+        assert len(errors) > 0 and "request_id" in errors[0]
+
+    # 5. source_query_hash_status 非 PASS
+    with tempfile.TemporaryDirectory() as tmpdir:
+        pkg = Path(tmpdir)
+        (pkg / "reports").mkdir()
+        (pkg / "deployment_manifest.yml").write_text(
+            yaml.safe_dump(base_manifest), encoding="utf-8"
+        )
+        bad_report = dict(base_report, source_query_hash_status="FAIL")
+        (pkg / "reports" / "materialization_verification.yml").write_text(
+            yaml.safe_dump(bad_report), encoding="utf-8"
+        )
+        errors = check_materialization_gate(pkg)
+        assert len(errors) > 0 and "source_query_hash_status" in errors[0]
+
+    # 6. deploy_artifact_hash_status 非 PASS
+    with tempfile.TemporaryDirectory() as tmpdir:
+        pkg = Path(tmpdir)
+        (pkg / "reports").mkdir()
+        (pkg / "deployment_manifest.yml").write_text(
+            yaml.safe_dump(base_manifest), encoding="utf-8"
+        )
+        bad_report = dict(base_report, deploy_artifact_hash_status="FAIL")
+        (pkg / "reports" / "materialization_verification.yml").write_text(
+            yaml.safe_dump(bad_report), encoding="utf-8"
+        )
+        errors = check_materialization_gate(pkg)
+        assert len(errors) > 0 and "deploy_artifact_hash_status" in errors[0]

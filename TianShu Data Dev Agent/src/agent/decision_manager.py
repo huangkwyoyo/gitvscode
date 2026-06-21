@@ -32,6 +32,8 @@ RELEASE_ARTIFACT_FILES: dict[str, str] = {
     "deployment_manifest": "deployment_manifest.yml",
     "deploy_sql": "deploy/main.sql",
     "deploy_spark": "deploy/main.py",
+    # M5b 物化验证报告——RELEASE_APPROVED 前必须存在且未被篡改
+    "materialization_verification": "reports/materialization_verification.yml",
 }
 
 
@@ -298,6 +300,8 @@ def compute_artifact_hashes(package_dir: Path) -> ArtifactHashes:
     deploy_sql_path = package_dir / "deploy" / "main.sql"
     deploy_spark_path = package_dir / "deploy" / "main.py"
     deploy_manifest_path = package_dir / "deployment_manifest.yml"
+    # M5b：物化验证报告也纳入哈希
+    mat_verification_path = package_dir / "reports" / "materialization_verification.yml"
 
     for required in [sql_path, spark_path, lineage_path]:
         if not required.is_file():
@@ -310,12 +314,15 @@ def compute_artifact_hashes(package_dir: Path) -> ArtifactHashes:
     deploy_sql_hash = ""
     deploy_spark_hash = ""
     deploy_manifest_hash = ""
+    mat_verification_hash = None
     if deploy_sql_path.is_file():
         deploy_sql_hash = _hash_file(deploy_sql_path)
     if deploy_spark_path.is_file():
         deploy_spark_hash = _hash_file(deploy_spark_path)
     if deploy_manifest_path.is_file():
         deploy_manifest_hash = _hash_file(deploy_manifest_path)
+    if mat_verification_path.is_file():
+        mat_verification_hash = _hash_file(mat_verification_path)
 
     return ArtifactHashes(
         sql_main=_hash_file(sql_path),
@@ -325,6 +332,7 @@ def compute_artifact_hashes(package_dir: Path) -> ArtifactHashes:
         deploy_sql=deploy_sql_hash,
         deploy_spark=deploy_spark_hash,
         deployment_manifest=deploy_manifest_hash,
+        materialization_verification=mat_verification_hash,
     )
 
 
@@ -350,6 +358,8 @@ def check_artifact_integrity(
         "deploy_sql": "deploy/main.sql",
         "deploy_spark": "deploy/main.py",
         "deployment_manifest": "deployment_manifest.yml",
+        # M5b：物化验证报告
+        "materialization_verification": "reports/materialization_verification.yml",
     }
 
     for hash_key, rel_path in file_map.items():
@@ -396,6 +406,91 @@ def check_required_artifact_integrity(
                 f"审批制品哈希不一致: {rel_path} "
                 f"(记录 {stored[:12]}...，当前 {current_hash[:12]}...)"
             )
+    return errors
+
+
+def check_materialization_gate(package_dir: Path) -> list[str]:
+    """检查物化验证闸门——RELEASE_APPROVED 前必须全部通过。
+
+    验证项（按设计文档 §2.1 和 §8）：
+      1. materialization_verification.yml 存在（由 artifact integrity 检查保证）
+      2. deployment_manifest.yml 的 materialization_status == MATERIALIZATION_VALIDATED
+      3. 物化报告 overall_status == PASS
+      4. 物化报告 request_id 与 Manifest 一致
+      5. 物化报告的 source_query_hash_status == PASS（证明 sql/main.sql 未变更）
+      6. 物化报告的 deploy_artifact_hash_status == PASS（证明部署制品未变更）
+
+    注意：文件存在性和哈希完整性由 check_required_artifact_integrity() 负责，
+    本函数只做语义级检查。
+
+    Args:
+        package_dir: Review Package 目录路径
+
+    Returns:
+        错误列表——空列表表示所有闸门条件通过
+    """
+    errors: list[str] = []
+
+    mat_report_path = package_dir / "reports" / "materialization_verification.yml"
+    manifest_path = package_dir / "deployment_manifest.yml"
+
+    # 文件存在性由 artifact integrity 检查保证，此处做防御性检查
+    if not mat_report_path.is_file():
+        errors.append(
+            "缺少 materialization_verification.yml——"
+            "请先运行 M5b 物化验证（python scripts/dev_agent/verify_duckdb_ctas.py）"
+        )
+        return errors
+
+    if not manifest_path.is_file():
+        errors.append("缺少 deployment_manifest.yml——请先运行 M2 build")
+        return errors
+
+    mat_report = yaml.safe_load(mat_report_path.read_text(encoding="utf-8")) or {}
+    manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8")) or {}
+
+    # ── 闸门 1：materialization_status 必须为 MATERIALIZATION_VALIDATED ──
+    mat_status = manifest.get("materialization_status", "PENDING")
+    if mat_status != "MATERIALIZATION_VALIDATED":
+        errors.append(
+            f"物化验证未完成：materialization_status={mat_status}，"
+            f"必须为 MATERIALIZATION_VALIDATED 才能 RELEASE_APPROVED。"
+            f"请先运行 M5b 物化验证。"
+        )
+
+    # ── 闸门 2：物化报告 overall_status 必须为 PASS ──
+    overall = mat_report.get("overall_status", "PENDING")
+    if overall != "PASS":
+        errors.append(
+            f"物化验证未通过：overall_status={overall}，"
+            f"必须为 PASS 才能 RELEASE_APPROVED"
+        )
+
+    # ── 闸门 3：request_id 一致性 ──
+    manifest_rid = manifest.get("request_id", "")
+    report_rid = mat_report.get("request_id", "")
+    if manifest_rid != report_rid:
+        errors.append(
+            f"物化报告 request_id（{report_rid}）与 Manifest（{manifest_rid}）不一致——"
+            f"报告可能来自其他 Review Package"
+        )
+
+    # ── 闸门 4 & 5：hash 状态——确保报告对应当前制品 ──
+    # source_query_hash_status=PASS 表示当前 sql/main.sql 与物化时一致
+    source_hash_status = mat_report.get("source_query_hash_status", "PENDING")
+    if source_hash_status != "PASS":
+        errors.append(
+            f"物化报告的 source_query_hash_status={source_hash_status}——"
+            f"源查询（sql/main.sql）可能与物化时不一致，请重新运行 M5b 物化验证"
+        )
+
+    deploy_hash_status = mat_report.get("deploy_artifact_hash_status", "PENDING")
+    if deploy_hash_status != "PASS":
+        errors.append(
+            f"物化报告的 deploy_artifact_hash_status={deploy_hash_status}——"
+            f"部署制品可能与物化时不一致，请重新运行 M5b 物化验证"
+        )
+
     return errors
 
 

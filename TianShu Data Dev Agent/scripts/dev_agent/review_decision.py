@@ -46,6 +46,7 @@ from src.agent.decision_manager import (
     RELEASE_ARTIFACT_FILES,
     append_decision_log,
     attach_snapshot_to_latest_log,
+    check_materialization_gate,
     check_required_artifact_integrity,
     compute_artifact_hashes,
     invalidate_release_approval,
@@ -765,6 +766,15 @@ def cmd_release_set(
                 "发布闸门检测到制品缺失或哈希变化，旧发布批准失效",
             )
             for error in integrity_errors:
+                print(f"[ERROR] {error}", file=sys.stderr)
+            return EXIT_INVALID_STATE
+
+        # ── M5b 物化验证闸门（M5b-2 P0 修复）──
+        # 设计依据：docs/m5b_duckdb_sandbox_design_20260619_2230.md §2.1
+        # "materialization_status != MATERIALIZATION_VALIDATED 时不得 RELEASE_APPROVED"
+        mat_gate_errors = check_materialization_gate(package_dir)
+        if mat_gate_errors:
+            for error in mat_gate_errors:
                 print(f"[ERROR] {error}", file=sys.stderr)
             return EXIT_INVALID_STATE
 

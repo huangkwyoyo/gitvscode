@@ -244,6 +244,23 @@ def verify_materialization(
         )
         tmp_path.replace(manifest_path)
 
+    # ── 步骤 8：同步物化验证报告哈希到 decision.yml ──
+    # M5b-2 P0 修复：RELEASE_APPROVED 必须验证 materialization_verification.yml
+    # 哈希完整性。此处将当前制品哈希（含刚写入的物化报告）回写到 decision.yml，
+    # 以便 review_decision.py 的 artifact integrity 检查能验证报告未被篡改。
+    decision_path = package_dir / "decision.yml"
+    if decision_path.is_file():
+        try:
+            from src.agent.decision_manager import (
+                compute_artifact_hashes,
+                update_artifact_hashes_in_decision,
+            )
+            hashes = compute_artifact_hashes(package_dir)
+            update_artifact_hashes_in_decision(package_dir, hashes)
+        except Exception:
+            # 哈希更新失败不影响物化验证结果——仅影响后续 RELEASE_APPROVED 闸门
+            pass
+
     result.generated_at = _iso_now()
     return result
 
