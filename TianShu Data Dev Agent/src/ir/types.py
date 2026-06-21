@@ -299,13 +299,18 @@ class ArtifactHashes:
 class MaterializationCheckResult:
     """单条物化验证检查的结果——M5b 新增。
 
-    每条检查有独立状态和详细信息，支持 PENDING/WARN/FAIL/PASS。
+    每条检查有独立状态和详细信息，支持 PENDING/WARN/FAIL/PASS/NOT_APPLICABLE。
+
+    required 标志区分必需检查和可选检查：
+      - required=True：该检查的状态直接影响 overall_status 聚合
+      - required=False：NOT_APPLICABLE 不阻止 PASS；但若实际执行后 FAIL，不得被忽略
     """
     check_id: str                                   # 检查项标识（如 "output_object_exists"）
     name: str                                       # 人类可读的检查名（如 "目标对象存在"）
-    status: str = "PENDING"                         # PASS | FAIL | WARN | PENDING | SKIPPED
+    status: str = "PENDING"                         # PASS | FAIL | WARN | PENDING | SKIPPED | NOT_APPLICABLE
     detail: str = ""                                # 详细信息
     severity: str = "FAIL"                          # FAIL | WARN
+    required: bool = True                           # 是否为必需检查——默认 True 保证向后兼容
 
     def to_dict(self) -> dict[str, Any]:
         """序列化为字典"""
@@ -315,6 +320,7 @@ class MaterializationCheckResult:
             "status": self.status,
             "detail": self.detail,
             "severity": self.severity,
+            "required": self.required,
         }
 
 

@@ -328,27 +328,40 @@ def _load_sample_from_db(
 def _finalize_status(result: MaterializationResult) -> MaterializationResult:
     """最终聚合所有检查项状态。
 
-    规则：
+    M5b-2 P0 修复：区分必需检查和可选检查。
       - 清理失败 → FAIL（最高优先级）
-      - 任一 FAIL 检查 → FAIL
-      - 有 WARN 且无 FAIL → WARN
-      - 全 PASS → PASS
+      - 任一必需检查 FAIL → FAIL
+      - 可选检查实际执行后 FAIL → FAIL（不得被忽略）
+      - 任一必需检查 WARN → WARN
+      - 任一必需检查 PENDING/SKIPPED → PENDING
+      - 所有必需检查 PASS，可选 NOT_APPLICABLE 不阻止 → PASS
     """
     if result.cleanup_status == "FAIL":
         result.overall_status = "FAIL"
         return result
 
-    check_statuses = [c.status for c in result.checks]
-    if "FAIL" in check_statuses or result.failures:
+    # 区分必需和可选检查
+    required_statuses = [
+        c.status for c in result.checks
+        if getattr(c, "required", True)
+    ]
+    # 可选检查中实际执行过的（排除 NOT_APPLICABLE）
+    executed_optional = [
+        c.status for c in result.checks
+        if not getattr(c, "required", True) and c.status != "NOT_APPLICABLE"
+    ]
+
+    # 聚合：必需检查 + 实际执行的可选检查
+    actionable = required_statuses + executed_optional
+
+    if "FAIL" in actionable or result.failures:
         result.overall_status = "FAIL"
-    elif "WARN" in check_statuses or result.warnings:
+    elif "WARN" in actionable or result.warnings:
         result.overall_status = "WARN"
-    elif all(s in {"PASS", "PENDING", "SKIPPED"} for s in check_statuses):
-        # 没有 FAIL/WARN → 看是否有 PENDING
-        if all(s == "PASS" for s in check_statuses):
-            result.overall_status = "PASS"
-        else:
-            result.overall_status = "PENDING"
+    elif "PENDING" in required_statuses or "SKIPPED" in required_statuses:
+        result.overall_status = "PENDING"
+    elif all(s == "PASS" for s in required_statuses):
+        result.overall_status = "PASS"
     else:
         result.overall_status = "PENDING"
 
@@ -413,18 +426,40 @@ def _build_materialization_report_md(result: MaterializationResult) -> str:
     lines.extend([
         "## 检查明细",
         "",
-        "| # | 检查项 | 状态 | 详情 |",
-        "|------|------|------|------|",
+        "| # | 检查项 | 必需 | 状态 | 详情 |",
+        "|------|------|------|------|------|",
     ])
     for i, check in enumerate(result.checks):
         status_icon = {
             "PASS": "✅", "FAIL": "❌", "WARN": "⚠️",
             "PENDING": "⏳", "SKIPPED": "⏭️",
+            "NOT_APPLICABLE": "➖",
         }.get(check.status, "❓")
+        required_label = "是" if getattr(check, "required", True) else "否"
         lines.append(
-            f"| {i + 1} | {check.name} | {status_icon} {check.status} | {check.detail} |"
+            f"| {i + 1} | {check.name} | {required_label} | "
+            f"{status_icon} {check.status} | {check.detail} |"
         )
     lines.append("")
+
+    # 未提供的验证背书
+    not_applicable_checks = [
+        c for c in result.checks
+        if c.status == "NOT_APPLICABLE"
+    ]
+    if not_applicable_checks:
+        lines.extend([
+            "## ⚠️ 当前验证未提供以下背书",
+            "",
+        ])
+        for c in not_applicable_checks:
+            lines.append(f"- **{c.name}**：{c.detail}")
+        lines.append("")
+        lines.append(
+            "上述项不阻止物化验证通过，但表示当前验证范围有限——"
+            "人审时需根据业务需求判断是否可接受。"
+        )
+        lines.append("")
 
     if result.warnings:
         lines.extend([

@@ -70,7 +70,18 @@ properties:
     const: generated
   materialization_status:
     type: string
-    enum: [PENDING, STATIC_VALIDATED, FAILED]
+    enum: [PENDING, RUNNING, MATERIALIZATION_VALIDATED, FAILED, CLEANUP_FAILED, WARN]
+    description: >
+      M5b 物化验证状态——MATERIALIZATION_VALIDATED 是 RELEASE_APPROVED 的必要前置条件。
+      CLEANUP_FAILED 优先级高于 FAILED——表示系统处于不干净状态。
+  unique_keys:
+    type: array
+    description: >
+      可选的唯一键列名列表——声明后物化验证将执行实际唯一性检查。
+      未声明时唯一键检查为 NOT_APPLICABLE，不阻止 PASS。
+    items:
+      type: string
+      minLength: 1
   human_review_required:
     const: true
   release_status:

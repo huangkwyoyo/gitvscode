@@ -311,7 +311,7 @@ def execute_ctas_in_sandbox(
         ))
 
         # ── 步骤 9：验证输出结果 ──
-        _verify_output(conn, sandbox_target, result)
+        _verify_output(conn, sandbox_target, result, manifest)
 
         # ── 步骤 10：检查源表数据未被修改 ──
         try:
@@ -562,11 +562,18 @@ def _verify_output(
     conn: Any,
     sandbox_target: str,
     result: MaterializationResult,
+    manifest: dict[str, Any] | None = None,
 ) -> None:
-    """验证 CTAS 输出结果——表存在、schema、行数、空值率。
+    """验证 CTAS 输出结果——表存在、schema、行数、空值率、唯一键。
 
     所有检查结果写入 result.checks 列表。
+
+    唯一键检查：
+      - 如果 manifest 中声明了 unique_keys（非空列表）→ 实际执行检查（required=True）
+      - 如果未声明 → NOT_APPLICABLE（required=False），不阻止 PASS
     """
+    if manifest is None:
+        manifest = {}
     # ── 检查 1：目标表存在 ──
     try:
         desc_result = conn.execute(f"DESCRIBE {sandbox_target}").fetchall()
@@ -722,40 +729,155 @@ def _verify_output(
             numeric_sums[col] = 0.0
     result.numeric_sums = numeric_sums
 
-    # ── 检查 6：唯一键（如有声明）──
-    # M5b-1 暂不强制要求声明唯一键——标记 PENDING
-    result.checks.append(MaterializationCheckResult(
-        check_id="uniqueness",
-        name="唯一键检查",
-        status="PENDING",
-        detail="唯一键契约未定义——需人工审查确认",
-        severity="WARN",
-    ))
-    result.uniqueness_status = "PENDING"
+    # ── 检查 6：唯一键（根据契约决定是否必需）──
+    # M5b-2 P0 修复：未声明唯一键时 NOT_APPLICABLE，不阻塞 PASS。
+    # 已声明唯一键时执行实际 GROUP BY/HAVING 检查，required=True。
+    unique_keys: list[str] = (
+        manifest.get("unique_keys", []) or []
+    )
+    if unique_keys:
+        # 已声明唯一键——执行实际检查
+        _check_uniqueness(conn, sandbox_target, unique_keys, result)
+    else:
+        # 未声明唯一键——NOT_APPLICABLE，不提供唯一性背书
+        result.checks.append(MaterializationCheckResult(
+            check_id="uniqueness",
+            name="唯一键检查",
+            status="NOT_APPLICABLE",
+            detail="未声明唯一键契约——当前验证不提供唯一性背书。如需唯一性保证，请在 deployment_manifest.yml 中声明 unique_keys。",
+            severity="WARN",
+            required=False,
+        ))
+        result.uniqueness_status = "NOT_APPLICABLE"
+
+
+def _check_uniqueness(
+    conn: Any,
+    sandbox_target: str,
+    unique_keys: list[str],
+    result: MaterializationResult,
+) -> None:
+    """执行唯一键检查——GROUP BY + HAVING COUNT(*) > 1。
+
+    检查指定的唯一键列组合是否存在重复行。
+    列名不存在或检查失败均报告 FAIL。
+
+    Args:
+        conn: DuckDB 连接
+        sandbox_target: Sandbox 内部目标表名
+        unique_keys: 唯一键列名列表（来自 manifest.unique_keys）
+        result: 物化验证结果（原地修改）
+    """
+    # 验证列名存在
+    output_columns = result.output_columns
+    missing_cols = [col for col in unique_keys if col not in output_columns]
+    if missing_cols:
+        result.checks.append(MaterializationCheckResult(
+            check_id="uniqueness",
+            name="唯一键检查",
+            status="FAIL",
+            detail=(
+                f"声明的唯一键列不存在: {', '.join(missing_cols)}。"
+                f"输出列为: {', '.join(output_columns)}"
+            ),
+            severity="FAIL",
+            required=True,
+        ))
+        result.uniqueness_status = "FAIL"
+        result.failures.append(
+            f"唯一键检查失败——声明的列 {missing_cols} 不在输出中"
+        )
+        return
+
+    # 执行唯一性检查
+    key_cols = ", ".join(f'"{col}"' for col in unique_keys)
+    try:
+        dup_result = conn.execute(
+            f"SELECT COUNT(*) FROM ("
+            f"  SELECT {key_cols}, COUNT(*) AS _cnt "
+            f"  FROM {sandbox_target} "
+            f"  GROUP BY {key_cols} "
+            f"  HAVING COUNT(*) > 1"
+            f") AS _dup_check"
+        ).fetchone()
+        dup_count = dup_result[0] if dup_result else 0
+    except Exception as exc:
+        result.checks.append(MaterializationCheckResult(
+            check_id="uniqueness",
+            name="唯一键检查",
+            status="FAIL",
+            detail=f"唯一键检查执行失败: {exc}",
+            severity="FAIL",
+            required=True,
+        ))
+        result.uniqueness_status = "FAIL"
+        result.failures.append(f"唯一键检查执行失败: {exc}")
+        return
+
+    if dup_count == 0:
+        result.checks.append(MaterializationCheckResult(
+            check_id="uniqueness",
+            name="唯一键检查",
+            status="PASS",
+            detail=f"唯一键 ({', '.join(unique_keys)}) 无重复——{result.output_row_count} 行全部唯一",
+            severity="FAIL",
+            required=True,
+        ))
+        result.uniqueness_status = "PASS"
+    else:
+        result.checks.append(MaterializationCheckResult(
+            check_id="uniqueness",
+            name="唯一键检查",
+            status="FAIL",
+            detail=(
+                f"唯一键 ({', '.join(unique_keys)}) 存在 {dup_count} 组重复——"
+                f"数据不符合唯一约束"
+            ),
+            severity="FAIL",
+            required=True,
+        ))
+        result.uniqueness_status = "FAIL"
+        result.failures.append(
+            f"唯一键检查失败——{dup_count} 组重复行（键: {unique_keys}）"
+        )
 
 
 def _aggregate_status(result: MaterializationResult) -> MaterializationResult:
     """聚合所有检查项的状态到 overall_status。
 
-    规则：
+    M5b-2 P0 修复：区分必需检查和可选检查。
       - 清理失败 → FAIL（最高优先级）
-      - 任一检查 FAIL → FAIL
-      - 有 WARN 且无 FAIL → WARN
-      - 全 PASS → PASS
-      - 否则 PENDING
+      - 任一必需检查 FAIL → FAIL
+      - 可选检查实际执行后 FAIL → FAIL（不得被忽略）
+      - 任一必需检查 WARN → WARN
+      - 任一必需检查 PENDING/SKIPPED → PENDING
+      - 所有必需检查 PASS，可选 NOT_APPLICABLE 不阻止 → PASS
     """
     if result.cleanup_status == "FAIL":
         result.overall_status = "FAIL"
         return result
 
-    check_statuses = [c.status for c in result.checks]
-    if "FAIL" in check_statuses:
+    # 区分必需和可选检查
+    required_statuses = [
+        c.status for c in result.checks
+        if getattr(c, "required", True)
+    ]
+    # 可选检查中实际执行过的（排除 NOT_APPLICABLE）
+    executed_optional = [
+        c.status for c in result.checks
+        if not getattr(c, "required", True) and c.status != "NOT_APPLICABLE"
+    ]
+
+    # 聚合：必需检查 + 实际执行的可选检查
+    actionable = required_statuses + executed_optional
+
+    if "FAIL" in actionable or result.failures:
         result.overall_status = "FAIL"
-    elif result.failures:
-        result.overall_status = "FAIL"
-    elif "WARN" in check_statuses or result.warnings:
+    elif "WARN" in actionable or result.warnings:
         result.overall_status = "WARN"
-    elif all(s == "PASS" for s in check_statuses if s != "PENDING"):
+    elif "PENDING" in required_statuses or "SKIPPED" in required_statuses:
+        result.overall_status = "PENDING"
+    elif all(s == "PASS" for s in required_statuses):
         result.overall_status = "PASS"
     else:
         result.overall_status = "PENDING"

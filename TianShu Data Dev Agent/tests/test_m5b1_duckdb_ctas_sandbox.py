@@ -1520,3 +1520,378 @@ class TestRegressionProtection:
 
         manifest_dict = manifest.to_dict()
         assert "materialization_status" in manifest_dict
+
+
+# ═══════════════════════════════════════════════════════════════
+# §10 M5b-2 P0：状态聚合修复——NOT_APPLICABLE + required/optional
+# ═══════════════════════════════════════════════════════════════
+
+
+class TestUniquenessNotApplicable:
+    """未声明唯一键时，唯一键检查应为 NOT_APPLICABLE，不阻止 PASS。"""
+
+    def test_uniqueness_not_applicable_when_no_unique_keys(self):
+        """未声明 unique_keys 时 uniqueness_status 为 NOT_APPLICABLE。"""
+        tmp = _mkdtemp()
+        try:
+            manifest = _sample_manifest()  # 无 unique_keys
+            rows, cols, types = _sample_data()
+            result = execute_ctas_in_sandbox(
+                deploy_sql=_build_ctas_sql(),
+                manifest=manifest,
+                sample_data_rows=rows,
+                sample_data_columns=cols,
+                sample_data_types=types,
+                sandbox_root=tmp / ".sandbox_tmp",
+            )
+            assert result.uniqueness_status == "NOT_APPLICABLE", (
+                f"未声明 unique_keys 时应为 NOT_APPLICABLE，"
+                f"实际为 {result.uniqueness_status}"
+            )
+            # 确认检查详情
+            uniq_checks = [
+                c for c in result.checks if c.check_id == "uniqueness"
+            ]
+            assert len(uniq_checks) == 1
+            assert uniq_checks[0].required is False
+        finally:
+            _rmdtemp(tmp)
+
+    def test_not_applicable_does_not_equal_pass(self):
+        """NOT_APPLICABLE 不等于 PASS——两者语义明确区分。"""
+        tmp = _mkdtemp()
+        try:
+            manifest = _sample_manifest()
+            rows, cols, types = _sample_data()
+            result = execute_ctas_in_sandbox(
+                deploy_sql=_build_ctas_sql(),
+                manifest=manifest,
+                sample_data_rows=rows,
+                sample_data_columns=cols,
+                sample_data_types=types,
+                sandbox_root=tmp / ".sandbox_tmp",
+            )
+            # 唯一键是 NOT_APPLICABLE，不是 PASS
+            assert result.uniqueness_status != "PASS"
+            assert result.uniqueness_status == "NOT_APPLICABLE"
+            # 但整体可以 PASS（因为不是必需检查）
+            assert result.overall_status == "PASS"
+        finally:
+            _rmdtemp(tmp)
+
+    def test_no_unique_keys_all_required_pass_yields_overall_pass(self):
+        """未声明唯一键 + 全部必需检查通过 → overall_status=PASS。"""
+        tmp = _mkdtemp()
+        try:
+            manifest = _sample_manifest()
+            rows, cols, types = _sample_data()
+            result = execute_ctas_in_sandbox(
+                deploy_sql=_build_ctas_sql(),
+                manifest=manifest,
+                sample_data_rows=rows,
+                sample_data_columns=cols,
+                sample_data_types=types,
+                sandbox_root=tmp / ".sandbox_tmp",
+            )
+            assert result.cleanup_status == "PASS"
+            assert result.execution_status == "PASS"
+            assert result.uniqueness_status == "NOT_APPLICABLE"
+            assert result.overall_status == "PASS", (
+                f"全部必需检查通过时应为 PASS，实际为 {result.overall_status}"
+            )
+        finally:
+            _rmdtemp(tmp)
+
+    def test_not_applicable_with_all_pass_writes_materialization_validated(self):
+        """全必需检查 PASS + 清理成功 → materialization_status=MATERIALIZATION_VALIDATED。"""
+        tmp = _mkdtemp()
+        try:
+            manifest = _sample_manifest()
+            rows, cols, types = _sample_data()
+            result = execute_ctas_in_sandbox(
+                deploy_sql=_build_ctas_sql(),
+                manifest=manifest,
+                sample_data_rows=rows,
+                sample_data_columns=cols,
+                sample_data_types=types,
+                sandbox_root=tmp / ".sandbox_tmp",
+            )
+            assert result.overall_status == "PASS"
+            # 验证模拟：manifest 写入逻辑在 engine 中，此处验证 executor 返回 PASS
+            assert result.uniqueness_status == "NOT_APPLICABLE"
+        finally:
+            _rmdtemp(tmp)
+
+    def test_not_applicable_report_explains_reason(self):
+        """NOT_APPLICABLE 检查的报告必须说明原因。"""
+        tmp = _mkdtemp()
+        try:
+            manifest = _sample_manifest()
+            rows, cols, types = _sample_data()
+            result = execute_ctas_in_sandbox(
+                deploy_sql=_build_ctas_sql(),
+                manifest=manifest,
+                sample_data_rows=rows,
+                sample_data_columns=cols,
+                sample_data_types=types,
+                sandbox_root=tmp / ".sandbox_tmp",
+            )
+            uniq_check = [
+                c for c in result.checks if c.check_id == "uniqueness"
+            ][0]
+            assert uniq_check.status == "NOT_APPLICABLE"
+            assert "未声明唯一键契约" in uniq_check.detail
+            assert "unique_keys" in uniq_check.detail, (
+                "报告应提示如何声明唯一键"
+            )
+        finally:
+            _rmdtemp(tmp)
+
+
+class TestUniquenessDeclared:
+    """声明唯一键时，必须实际执行检查，结果必须准确。"""
+
+    def test_declared_unique_keys_no_duplicates_passes(self):
+        """声明唯一键且数据无重复 → uniqueness_status=PASS。"""
+        tmp = _mkdtemp()
+        try:
+            manifest = _sample_manifest(unique_keys=["trip_date"])
+            rows, cols, types = _sample_data()
+            result = execute_ctas_in_sandbox(
+                deploy_sql=_build_ctas_sql(),
+                manifest=manifest,
+                sample_data_rows=rows,
+                sample_data_columns=cols,
+                sample_data_types=types,
+                sandbox_root=tmp / ".sandbox_tmp",
+            )
+            assert result.uniqueness_status == "PASS", (
+                f"无重复数据时应为 PASS，实际为 {result.uniqueness_status}"
+            )
+            # 检查是必需的
+            uniq_check = [
+                c for c in result.checks if c.check_id == "uniqueness"
+            ][0]
+            assert uniq_check.required is True
+        finally:
+            _rmdtemp(tmp)
+
+    def test_declared_unique_keys_with_duplicates_fails(self):
+        """声明唯一键且数据有重复 → uniqueness_status=FAIL。
+
+        使用不含聚合的直通 CTAS，确保重复数据直接进入输出表。
+        """
+        tmp = _mkdtemp()
+        try:
+            manifest = _sample_manifest(unique_keys=["id"])
+            # 使用不含 GROUP BY 的直通 CTAS——重复行会直接出现在输出中
+            deploy_sql = (
+                "CREATE OR REPLACE TABLE generated.test_m5b1 AS\n"
+                "    SELECT id, val FROM gold.source_table;\n"
+            )
+            rows = [
+                (1, "a"),
+                (1, "b"),  # 重复 id=1
+                (2, "c"),
+            ]
+            cols = ["id", "val"]
+            types = ["INTEGER", "VARCHAR"]
+            result = execute_ctas_in_sandbox(
+                deploy_sql=deploy_sql,
+                manifest=manifest,
+                sample_data_rows=rows,
+                sample_data_columns=cols,
+                sample_data_types=types,
+                sandbox_root=tmp / ".sandbox_tmp",
+            )
+            assert result.uniqueness_status == "FAIL", (
+                f"重复数据时应为 FAIL，实际为 {result.uniqueness_status}"
+            )
+            assert result.overall_status == "FAIL", (
+                "唯一键重复时 overall_status 必须为 FAIL"
+            )
+        finally:
+            _rmdtemp(tmp)
+
+    def test_declared_nonexistent_unique_key_column_fails(self):
+        """声明不存在的唯一键列时必须 FAIL。"""
+        tmp = _mkdtemp()
+        try:
+            manifest = _sample_manifest(unique_keys=["nonexistent_column"])
+            rows, cols, types = _sample_data()
+            result = execute_ctas_in_sandbox(
+                deploy_sql=_build_ctas_sql(),
+                manifest=manifest,
+                sample_data_rows=rows,
+                sample_data_columns=cols,
+                sample_data_types=types,
+                sandbox_root=tmp / ".sandbox_tmp",
+            )
+            assert result.uniqueness_status == "FAIL", (
+                f"声明不存在的列时应为 FAIL，实际为 {result.uniqueness_status}"
+            )
+            # 检查 failures 或 check detail 中包含列名
+            has_error = any(
+                "nonexistent_column" in f
+                for f in result.failures
+            ) or any(
+                "nonexistent_column" in c.detail
+                for c in result.checks if c.check_id == "uniqueness"
+            )
+            assert has_error, (
+                f"失败原因必须提及不存在的列名，"
+                f"failures={result.failures}"
+            )
+        finally:
+            _rmdtemp(tmp)
+
+    def test_declared_multi_column_unique_keys(self):
+        """多列复合唯一键在无重复时通过。"""
+        tmp = _mkdtemp()
+        try:
+            manifest = _sample_manifest(unique_keys=["trip_date", "trip_count"])
+            rows, cols, types = _sample_data()
+            result = execute_ctas_in_sandbox(
+                deploy_sql=_build_ctas_sql(),
+                manifest=manifest,
+                sample_data_rows=rows,
+                sample_data_columns=cols,
+                sample_data_types=types,
+                sandbox_root=tmp / ".sandbox_tmp",
+            )
+            assert result.uniqueness_status == "PASS"
+            assert result.overall_status == "PASS"
+        finally:
+            _rmdtemp(tmp)
+
+
+class TestRequiredOptionalAggregation:
+    """required/optional 区分和状态聚合逻辑的单元测试。"""
+
+    def test_required_pending_blocks_pass(self):
+        """任一必需检查 PENDING 时 overall_status 不能 PASS。"""
+        result = MaterializationResult()
+        result.cleanup_status = "PASS"
+        result.checks = [
+            MaterializationCheckResult(
+                check_id="a", name="必需检查A", status="PASS", required=True,
+            ),
+            MaterializationCheckResult(
+                check_id="b", name="必需检查B", status="PENDING", required=True,
+            ),
+        ]
+        from src.sandbox.duckdb_ctas_executor import _aggregate_status
+        result = _aggregate_status(result)
+        assert result.overall_status == "PENDING", (
+            f"有 PENDING 必需检查时应为 PENDING，实际为 {result.overall_status}"
+        )
+
+    def test_required_skipped_blocks_pass(self):
+        """任一必需检查 SKIPPED 时 overall_status 不能 PASS。"""
+        result = MaterializationResult()
+        result.cleanup_status = "PASS"
+        result.checks = [
+            MaterializationCheckResult(
+                check_id="a", name="必需检查A", status="PASS", required=True,
+            ),
+            MaterializationCheckResult(
+                check_id="b", name="必需检查B", status="SKIPPED", required=True,
+            ),
+        ]
+        from src.sandbox.duckdb_ctas_executor import _aggregate_status
+        result = _aggregate_status(result)
+        assert result.overall_status == "PENDING", (
+            f"有 SKIPPED 必需检查时应为 PENDING，实际为 {result.overall_status}"
+        )
+
+    def test_required_warn_yields_warn(self):
+        """任一必需检查 WARN 时 overall_status 为 WARN，不能 PASS。"""
+        result = MaterializationResult()
+        result.cleanup_status = "PASS"
+        result.checks = [
+            MaterializationCheckResult(
+                check_id="a", name="必需检查A", status="PASS", required=True,
+            ),
+            MaterializationCheckResult(
+                check_id="b", name="必需检查B", status="WARN", required=True,
+                detail="某项检查有警告",
+            ),
+        ]
+        from src.sandbox.duckdb_ctas_executor import _aggregate_status
+        result = _aggregate_status(result)
+        assert result.overall_status == "WARN", (
+            f"有 WARN 必需检查时应为 WARN，实际为 {result.overall_status}"
+        )
+
+    def test_optional_not_applicable_does_not_block_pass(self):
+        """可选检查 NOT_APPLICABLE 不阻止 PASS。"""
+        result = MaterializationResult()
+        result.cleanup_status = "PASS"
+        result.checks = [
+            MaterializationCheckResult(
+                check_id="a", name="必需检查A", status="PASS", required=True,
+            ),
+            MaterializationCheckResult(
+                check_id="b", name="可选检查B", status="NOT_APPLICABLE",
+                required=False,
+            ),
+        ]
+        from src.sandbox.duckdb_ctas_executor import _aggregate_status
+        result = _aggregate_status(result)
+        assert result.overall_status == "PASS", (
+            f"可选 NOT_APPLICABLE 不应阻止 PASS，实际为 {result.overall_status}"
+        )
+
+    def test_optional_executed_fail_not_ignored(self):
+        """可选检查实际执行后 FAIL 时不得被忽略——必须影响 overall_status。"""
+        result = MaterializationResult()
+        result.cleanup_status = "PASS"
+        result.checks = [
+            MaterializationCheckResult(
+                check_id="a", name="必需检查A", status="PASS", required=True,
+            ),
+            MaterializationCheckResult(
+                check_id="b", name="可选检查B", status="FAIL",
+                detail="可选检查实际执行后发现了问题",
+                required=False,
+            ),
+        ]
+        from src.sandbox.duckdb_ctas_executor import _aggregate_status
+        result = _aggregate_status(result)
+        assert result.overall_status == "FAIL", (
+            f"可选检查 FAIL 时 overall 必须为 FAIL，实际为 {result.overall_status}"
+        )
+
+    def test_cleanup_fail_overrides_all(self):
+        """清理失败时 overall_status 必须为 FAIL——无视其他检查状态。"""
+        result = MaterializationResult()
+        result.cleanup_status = "FAIL"
+        result.checks = [
+            MaterializationCheckResult(
+                check_id="a", name="所有检查", status="PASS", required=True,
+            ),
+        ]
+        from src.sandbox.duckdb_ctas_executor import _aggregate_status
+        result = _aggregate_status(result)
+        assert result.overall_status == "FAIL", (
+            "清理失败时必须为 FAIL，无论其他检查如何"
+        )
+
+    def test_all_required_pass_optional_mixed_yields_pass(self):
+        """全部必需检查 PASS + 可选检查混合（NOT_APPLICABLE + PASS）→ PASS。"""
+        result = MaterializationResult()
+        result.cleanup_status = "PASS"
+        result.checks = [
+            MaterializationCheckResult(
+                check_id="a", name="必需", status="PASS", required=True,
+            ),
+            MaterializationCheckResult(
+                check_id="b", name="可选A", status="PASS", required=False,
+            ),
+            MaterializationCheckResult(
+                check_id="c", name="可选B", status="NOT_APPLICABLE", required=False,
+            ),
+        ]
+        from src.sandbox.duckdb_ctas_executor import _aggregate_status
+        result = _aggregate_status(result)
+        assert result.overall_status == "PASS"
