@@ -70,10 +70,12 @@ properties:
     const: generated
   materialization_status:
     type: string
-    enum: [PENDING, RUNNING, MATERIALIZATION_VALIDATED, FAILED, CLEANUP_FAILED, WARN]
+    enum: [PENDING, RUNNING, MATERIALIZATION_VALIDATED, FAILED, CLEANUP_FAILED, SUPERSEDED]
     description: >
       M5b 物化验证状态——MATERIALIZATION_VALIDATED 是 RELEASE_APPROVED 的必要前置条件。
       CLEANUP_FAILED 优先级高于 FAILED——表示系统处于不干净状态。
+      SUPERSEDED 表示制品发生变化导致旧物化验证失效——必须重新验证后才能 RELEASE_APPROVED。
+      禁止使用 WARN 作为持久化状态——WARN 仅用于 overall_status 过渡态。
   unique_keys:
     type: array
     description: >
@@ -95,4 +97,10 @@ properties:
     type: array
     items:
       type: string
-additionalProperties: true
+  release_approved_by:
+    type: string
+    description: "发布审批人标识——仅在 RELEASE_APPROVED 时写入（如 human:username）"
+  release_message:
+    type: string
+    description: "发布审批理由——仅在 RELEASE_APPROVED 时写入"
+additionalProperties: false

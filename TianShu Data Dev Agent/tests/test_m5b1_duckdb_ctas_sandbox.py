@@ -2289,9 +2289,9 @@ class TestStateInvalidation:
             assert manifest_after["materialization_status"] != "MATERIALIZATION_VALIDATED", (
                 "WARN 状态不得保留 MATERIALIZATION_VALIDATED"
             )
-            # WARN → FAILED
-            assert manifest_after["materialization_status"] == "FAILED", (
-                f"WARN 应映射为 FAILED，实际: {manifest_after['materialization_status']}"
+            # WARN → PENDING（不确定结果不得伪装为通过）
+            assert manifest_after["materialization_status"] == "PENDING", (
+                f"WARN 应映射为 PENDING，实际: {manifest_after['materialization_status']}"
             )
 
             # 测试 PENDING 场景
@@ -2505,6 +2505,316 @@ class TestCLIExitCode:
             )
         finally:
             _rmdtemp(tmp)
+
+
+# ═══════════════════════════════════════════════════════════════
+# §11 M5b-2 P0：MaterializationStatus Enum ↔ Schema 一致性
+# ═══════════════════════════════════════════════════════════════
+
+
+class TestMaterializationStatusSchemaConsistency:
+    """验证 MaterializationStatus Enum 与 deployment_manifest_schema.yml 枚举值完全一致。
+
+    禁止在不同模块重复维护不一致的字符串列表——
+    Enum 是代码侧事实源，Schema 是外部契约，必须通过一致性测试保证对齐。
+    """
+
+    @staticmethod
+    def _load_schema():
+        """加载部署 Manifest JSON Schema。"""
+        schema_path = PROJECT_ROOT / "contracts" / "deployment_manifest_schema.yml"
+        return yaml.safe_load(schema_path.read_text(encoding="utf-8"))
+
+    @staticmethod
+    def _enum_values() -> set[str]:
+        """获取 MaterializationStatus Enum 的所有值。"""
+        from src.ir.types import MaterializationStatus
+        return {s.value for s in MaterializationStatus}
+
+    def test_enum_and_schema_status_sets_identical(self):
+        """Enum 与 Schema 的 materialization_status 枚举值集合必须完全一致。"""
+        schema = self._load_schema()
+        schema_enum = set(
+            schema["properties"]["materialization_status"]["enum"]
+        )
+        enum_values = self._enum_values()
+
+        # 双向检查：Schema 中有但 Enum 中没有
+        missing_from_enum = schema_enum - enum_values
+        assert not missing_from_enum, (
+            f"Schema 声明了 Enum 中不存在的状态: {sorted(missing_from_enum)}——"
+            f"必须在 MaterializationStatus 中添加或从 Schema 中移除"
+        )
+
+        # 双向检查：Enum 中有但 Schema 中没有
+        missing_from_schema = enum_values - schema_enum
+        assert not missing_from_schema, (
+            f"Enum 声明了 Schema 中不存在的状态: {sorted(missing_from_schema)}——"
+            f"必须在 Schema 中添加或从 Enum 中移除"
+        )
+
+    def test_materialization_validated_in_both(self):
+        """MATERIALIZATION_VALIDATED 同时存在于 Enum 和 Schema。"""
+        from src.ir.types import MaterializationStatus
+        schema = self._load_schema()
+        schema_enum = schema["properties"]["materialization_status"]["enum"]
+        assert "MATERIALIZATION_VALIDATED" in schema_enum
+        assert MaterializationStatus.MATERIALIZATION_VALIDATED.value == "MATERIALIZATION_VALIDATED"
+
+    def test_cleanup_failed_in_both(self):
+        """CLEANUP_FAILED 同时存在于 Enum 和 Schema。"""
+        from src.ir.types import MaterializationStatus
+        schema = self._load_schema()
+        schema_enum = schema["properties"]["materialization_status"]["enum"]
+        assert "CLEANUP_FAILED" in schema_enum
+        assert MaterializationStatus.CLEANUP_FAILED.value == "CLEANUP_FAILED"
+
+    def test_superseded_in_both(self):
+        """SUPERSEDED 同时存在于 Enum 和 Schema。"""
+        from src.ir.types import MaterializationStatus
+        schema = self._load_schema()
+        schema_enum = schema["properties"]["materialization_status"]["enum"]
+        assert "SUPERSEDED" in schema_enum, (
+            "Schema 必须包含 SUPERSEDED——制品变化导致旧物化验证失效"
+        )
+        assert MaterializationStatus.SUPERSEDED.value == "SUPERSEDED"
+
+    def test_warn_not_in_schema_enum(self):
+        """WARN 不得出现在 Schema 的 materialization_status 枚举中。
+
+        WARN 仅用于 overall_status 过渡态——不能作为持久化状态。
+        """
+        schema = self._load_schema()
+        schema_enum = schema["properties"]["materialization_status"]["enum"]
+        assert "WARN" not in schema_enum, (
+            "WARN 不能作为 materialization_status 的持久化值——"
+            "WARN 应映射为 PENDING（不确定结果不得伪装为通过）"
+        )
+
+    def test_no_duplicate_status_values(self):
+        """Enum 中不允许重复的状态值。"""
+        enum_values = list(self._enum_values())
+        assert len(enum_values) == len(set(enum_values)), (
+            f"Enum 中存在重复值: {enum_values}"
+        )
+
+    def test_schema_additional_properties_false(self):
+        """Schema 必须设置 additionalProperties: false——封闭性契约。"""
+        schema = self._load_schema()
+        assert schema.get("additionalProperties") is False, (
+            "deployment_manifest_schema.yml 必须设置 additionalProperties: false——"
+            "所有合法字段必须显式声明，不得通过开放字段规避契约设计"
+        )
+
+
+class TestDeploymentManifestSchemaValidation:
+    """使用 jsonschema 库验证 DeploymentManifest 的 JSON Schema 校验。
+
+    覆盖有效状态、无效状态、额外字段、缺失必需字段等场景。
+    """
+
+    @staticmethod
+    def _load_schema():
+        """加载部署 Manifest JSON Schema。"""
+        schema_path = PROJECT_ROOT / "contracts" / "deployment_manifest_schema.yml"
+        return yaml.safe_load(schema_path.read_text(encoding="utf-8"))
+
+    @staticmethod
+    def _valid_manifest(**overrides) -> dict:
+        """构建一个应该通过 Schema 校验的合法 Manifest dict。"""
+        base = {
+            "request_id": "test_schema_validation",
+            "mode": "MATERIALIZE",
+            "source_sql_ref": "sql/main.sql",
+            "source_sql_hash": "a" * 64,
+            "source_spark_ref": "spark/main.py",
+            "source_spark_hash": "b" * 64,
+            "target_environment": "SANDBOX",
+            "target_table": "generated.test_output",
+            "write_strategy": "CREATE_TABLE_AS_SELECT",
+            "partition_columns": [],
+            "sql_deploy_artifact": "deploy/main.sql",
+            "spark_deploy_artifact": "deploy/main.py",
+            "allowed_write_schema": "generated",
+            "materialization_status": "PENDING",
+            "human_review_required": True,
+            "release_status": "DRAFT",
+            "warnings": [],
+            "human_review_points": [],
+        }
+        base.update(overrides)
+        return base
+
+    def test_materialization_validated_passes_schema(self):
+        """materialization_status=MATERIALIZATION_VALIDATED 可以通过 Schema 校验。"""
+        import jsonschema
+        schema = self._load_schema()
+        manifest = self._valid_manifest(
+            materialization_status="MATERIALIZATION_VALIDATED",
+            release_status="PENDING_RELEASE_REVIEW",
+        )
+        # 不应抛出异常
+        jsonschema.validate(manifest, schema)
+
+    def test_cleanup_failed_passes_schema(self):
+        """materialization_status=CLEANUP_FAILED 可以通过 Schema 校验。"""
+        import jsonschema
+        schema = self._load_schema()
+        manifest = self._valid_manifest(
+            materialization_status="CLEANUP_FAILED",
+        )
+        jsonschema.validate(manifest, schema)
+
+    def test_superseded_passes_schema(self):
+        """materialization_status=SUPERSEDED 可以通过 Schema 校验。"""
+        import jsonschema
+        schema = self._load_schema()
+        manifest = self._valid_manifest(
+            materialization_status="SUPERSEDED",
+        )
+        jsonschema.validate(manifest, schema)
+
+    def test_unknown_status_rejected(self):
+        """未知的 materialization_status 值必须被 Schema 拒绝。"""
+        import jsonschema
+        schema = self._load_schema()
+        manifest = self._valid_manifest(
+            materialization_status="UNKNOWN_STATE_XYZ",
+        )
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(manifest, schema)
+
+    def test_warn_status_rejected(self):
+        """WARN 作为 materialization_status 必须被 Schema 拒绝。"""
+        import jsonschema
+        schema = self._load_schema()
+        manifest = self._valid_manifest(
+            materialization_status="WARN",
+        )
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(manifest, schema)
+
+    def test_undeclared_field_rejected(self):
+        """未声明的额外字段必须被 Schema 拒绝（additionalProperties: false）。"""
+        import jsonschema
+        schema = self._load_schema()
+        manifest = self._valid_manifest()
+        manifest["unknown_field_xyz"] = "should_not_pass"
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(manifest, schema)
+
+    def test_valid_manifest_passes_schema(self):
+        """当前合法的 DeploymentManifest 可以通过 Schema 校验。"""
+        import jsonschema
+        schema = self._load_schema()
+        manifest = self._valid_manifest()
+        jsonschema.validate(manifest, schema)
+
+    def test_release_approved_by_field_passes(self):
+        """release_approved_by 显式声明后可以通过 Schema 校验。"""
+        import jsonschema
+        schema = self._load_schema()
+        manifest = self._valid_manifest(
+            materialization_status="MATERIALIZATION_VALIDATED",
+            release_status="RELEASE_APPROVED",
+            release_approved_by="human:release_reviewer",
+            release_message="已审查物化验证报告——批准发布",
+        )
+        jsonschema.validate(manifest, schema)
+
+    def test_missing_required_field_fails(self):
+        """缺少 required 字段（如 request_id）必须被 Schema 拒绝。"""
+        import jsonschema
+        schema = self._load_schema()
+        manifest = self._valid_manifest()
+        del manifest["request_id"]
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(manifest, schema)
+
+    def test_illegal_target_table_fails(self):
+        """非法 target_table（非 generated schema）必须被 Schema 拒绝。"""
+        import jsonschema
+        schema = self._load_schema()
+        manifest = self._valid_manifest(
+            target_table="production.secret_data",
+        )
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(manifest, schema)
+
+    def test_illegal_target_environment_fails(self):
+        """非法 target_environment 必须被 Schema 拒绝。"""
+        import jsonschema
+        schema = self._load_schema()
+        manifest = self._valid_manifest(
+            target_environment="PRODUCTION",
+        )
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(manifest, schema)
+
+    def test_illegal_write_strategy_fails(self):
+        """非法 write_strategy 必须被 Schema 拒绝。"""
+        import jsonschema
+        schema = self._load_schema()
+        manifest = self._valid_manifest(
+            write_strategy="ARBITRARY_FILE_WRITE",
+        )
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(manifest, schema)
+
+    def test_empty_partition_columns_allowed(self):
+        """空的 partition_columns 应该通过校验（非分区表合法）。"""
+        import jsonschema
+        schema = self._load_schema()
+        manifest = self._valid_manifest(
+            partition_columns=[],
+        )
+        jsonschema.validate(manifest, schema)
+
+    def test_manifest_with_unique_keys_passes(self):
+        """包含 unique_keys 的合法 Manifest 可以通过 Schema 校验。"""
+        import jsonschema
+        schema = self._load_schema()
+        manifest = self._valid_manifest(
+            unique_keys=["trip_date", "region_id"],
+        )
+        jsonschema.validate(manifest, schema)
+
+    def test_source_spark_hash_invalid_pattern_fails(self):
+        """source_spark_hash 格式不合法时必须被拒绝。"""
+        import jsonschema
+        schema = self._load_schema()
+        manifest = self._valid_manifest(
+            source_spark_hash="not-a-hex-string!!!",
+        )
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(manifest, schema)
+
+    def test_warnings_with_valid_entries_passes(self):
+        """warnings 数组包含合法字符串时可以通过校验。"""
+        import jsonschema
+        schema = self._load_schema()
+        manifest = self._valid_manifest(
+            warnings=["提醒：样本数据仅包含 3 行——不代表全量行为"],
+        )
+        jsonschema.validate(manifest, schema)
+
+    def test_all_valid_materialization_statuses_pass(self):
+        """MaterializationStatus Enum 中所有值依次通过 Schema 校验。"""
+        import jsonschema
+        from src.ir.types import MaterializationStatus
+        schema = self._load_schema()
+
+        for status in MaterializationStatus:
+            manifest = self._valid_manifest(
+                materialization_status=status.value,
+            )
+            try:
+                jsonschema.validate(manifest, schema)
+            except jsonschema.ValidationError as e:
+                pytest.fail(
+                    f"MaterializationStatus.{status.name}（{status.value}）"
+                    f"应通过 Schema 校验，但被拒绝: {e.message}"
+                )
 
 
 # 模块级 PROJECT_ROOT 定义（用于 CLI 测试）

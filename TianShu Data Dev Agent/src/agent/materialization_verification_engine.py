@@ -48,22 +48,33 @@ def _generate_verification_id() -> str:
 def _map_overall_to_materialization_status(result: MaterializationResult) -> str:
     """将 overall_status 映射为 MaterializationStatus 枚举值。
 
-    映射规则（fail-closed）：
-      - cleanup_status=FAIL → CLEANUP_FAILED（最高优先级——系统处于不干净状态）
-      - overall_status=PASS → MATERIALIZATION_VALIDATED（唯一通过状态）
-      - overall_status=FAIL → FAILED
-      - overall_status=WARN → FAILED（WARN 绝对不能映射为 MATERIALIZATION_VALIDATED）
-      - overall_status=PENDING → PENDING
-      - 其他未知状态 → FAILED（安全侧——宁可误拒也不漏过）
+    映射规则（fail-closed，按优先级从高到低）：
+      1. cleanup_status=FAIL → CLEANUP_FAILED（最高优先级——系统处于不干净状态）
+      2. 制品哈希校验失败 → SUPERSEDED（制品变化使旧验证失效）
+      3. overall_status=PASS → MATERIALIZATION_VALIDATED（唯一通过状态）
+      4. overall_status=FAIL → FAILED
+      5. overall_status=WARN/PENDING/SKIPPED → PENDING（不确定结果不得伪装为通过）
+      6. 其他未知状态 → FAILED（安全侧——宁可误拒也不漏过）
     """
+    # 规则 1：清理失败——最高优先级
     if result.cleanup_status == "FAIL":
         return "CLEANUP_FAILED"
+
+    # 规则 2：制品哈希变化——旧物化验证不再代表当前代码
+    if (
+        result.source_query_hash_status == "FAIL"
+        or result.deploy_artifact_hash_status == "FAIL"
+    ):
+        return "SUPERSEDED"
+
+    # 规则 3-6：基于 overall_status 映射
     status = result.overall_status
     if status == "PASS":
         return "MATERIALIZATION_VALIDATED"
-    elif status in ("FAIL", "WARN"):
+    elif status == "FAIL":
         return "FAILED"
-    elif status == "PENDING":
+    elif status in ("WARN", "PENDING", "SKIPPED"):
+        # WARN/PENDING/SKIPPED 绝对不能映射为 MATERIALIZATION_VALIDATED
         return "PENDING"
     else:
         # 未知状态——fail-closed：从不假设通过

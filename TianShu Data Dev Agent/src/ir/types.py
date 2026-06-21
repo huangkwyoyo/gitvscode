@@ -250,17 +250,22 @@ class ReleaseStatus(str, Enum):
 
 
 class MaterializationStatus(str, Enum):
-    """物化验证状态——M5b 新增。
+    """物化验证状态——M5b 权威枚举（单一事实源）。
 
     跟踪一次性可写 Sandbox 中部署写入代码的执行验证状态。
     只有清理成功后状态才能转为 MATERIALIZATION_VALIDATED。
     CLEANUP_FAILED 优先级高于 FAILED——因为系统处于不干净状态。
+    SUPERSEDED 表示制品变化导致旧物化验证失效——旧验证不再代表当前代码。
+
+    禁止在其他模块重复维护不一致的字符串列表——
+    所有状态判断必须引用此 Enum 或通过一致性测试保证与 Schema 对齐。
     """
     PENDING = "PENDING"                           # 尚未执行物化验证
     RUNNING = "RUNNING"                           # 正在执行物化验证
     MATERIALIZATION_VALIDATED = "MATERIALIZATION_VALIDATED"  # 物化验证通过 + 清理成功
     FAILED = "FAILED"                             # 物化验证失败
     CLEANUP_FAILED = "CLEANUP_FAILED"             # 清理失败（优先级高于 FAILED）
+    SUPERSEDED = "SUPERSEDED"                     # 制品变化导致旧物化验证失效
 
 
 
@@ -431,12 +436,15 @@ class DeploymentManifest:
     materialization_status: str = "PENDING"      # M5a 仅静态验证，不执行写入
     human_review_required: bool = True           # 必须人审
     release_status: str = "DRAFT"                # ReleaseStatus 值——默认 DRAFT
+    release_approved_by: str = ""                # 发布审批人标识（仅 RELEASE_APPROVED 时写入）
+    release_message: str = ""                    # 发布审批理由（仅 RELEASE_APPROVED 时写入）
     warnings: list[str] = field(default_factory=list)  # 人审提醒
     human_review_points: list[str] = field(default_factory=list)  # 人审关注点
+    unique_keys: list[str] = field(default_factory=list)  # 唯一键列名（可选——声明后物化验证执行唯一性检查）
 
     def to_dict(self) -> dict[str, Any]:
-        """序列化为字典"""
-        return {
+        """序列化为字典——包含所有 Schema 声明的字段"""
+        result: dict[str, Any] = {
             "request_id": self.request_id,
             "mode": self.mode,
             "source_sql_ref": self.source_sql_ref,
@@ -455,9 +463,13 @@ class DeploymentManifest:
             "materialization_status": self.materialization_status,
             "human_review_required": self.human_review_required,
             "release_status": self.release_status,
+            "release_approved_by": self.release_approved_by,
+            "release_message": self.release_message,
             "warnings": self.warnings,
             "human_review_points": self.human_review_points,
+            "unique_keys": self.unique_keys,
         }
+        return result
 
 
 
