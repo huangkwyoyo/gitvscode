@@ -45,6 +45,161 @@ def _generate_verification_id() -> str:
     return f"mat_{ts}_{short}"
 
 
+def _map_overall_to_materialization_status(result: MaterializationResult) -> str:
+    """将 overall_status 映射为 MaterializationStatus 枚举值。
+
+    映射规则（fail-closed）：
+      - cleanup_status=FAIL → CLEANUP_FAILED（最高优先级——系统处于不干净状态）
+      - overall_status=PASS → MATERIALIZATION_VALIDATED（唯一通过状态）
+      - overall_status=FAIL → FAILED
+      - overall_status=WARN → FAILED（WARN 绝对不能映射为 MATERIALIZATION_VALIDATED）
+      - overall_status=PENDING → PENDING
+      - 其他未知状态 → FAILED（安全侧——宁可误拒也不漏过）
+    """
+    if result.cleanup_status == "FAIL":
+        return "CLEANUP_FAILED"
+    status = result.overall_status
+    if status == "PASS":
+        return "MATERIALIZATION_VALIDATED"
+    elif status in ("FAIL", "WARN"):
+        return "FAILED"
+    elif status == "PENDING":
+        return "PENDING"
+    else:
+        # 未知状态——fail-closed：从不假设通过
+        return "FAILED"
+
+
+def _finalize_and_persist_materialization(
+    package_dir: Path,
+    result: MaterializationResult,
+    manifest: dict[str, Any],
+) -> MaterializationResult:
+    """统一收尾路径——所有验证出口必须经过此函数。
+
+    职责（严格按顺序执行）：
+      1. 聚合最终状态（_finalize_status）
+      2. 设置 generated_at / finished_at 时间戳
+      3. 原子写入 YAML 报告（tmp + replace）
+      4. 原子写入 Markdown 报告（tmp + replace）
+      5. 更新 Manifest materialization_status
+      6. 必要时使 RELEASE_APPROVED 失效（写审计日志）
+      7. 同步制品哈希到 decision.yml
+
+    报告或 Manifest 持久化失败时：
+      - 记录到 result.failures
+      - overall_status 变为 FAIL
+      - 不抛出异常——返回带失败信息的 result
+
+    Args:
+        package_dir: Review Package 目录路径
+        result: 待持久化的验证结果
+        manifest: deployment_manifest.yml 解析后的 dict
+
+    Returns:
+        最终 MaterializationResult（可能因持久化失败而改变状态）
+    """
+    # ── 1. 聚合最终状态 ──
+    result = _finalize_status(result)
+
+    # ── 2. 设置时间戳 ──
+    now = _iso_now()
+    result.generated_at = now
+    if not result.finished_at:
+        result.finished_at = now
+
+    # ── 3. 原子写入 YAML 报告 ──
+    reports_dir = package_dir / "reports"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+
+    yml_path = reports_dir / "materialization_verification.yml"
+    try:
+        yml_content = yaml.safe_dump(
+            result.to_dict(), allow_unicode=True, sort_keys=False
+        )
+        yml_tmp = yml_path.with_suffix(".tmp")
+        yml_tmp.write_text(yml_content, encoding="utf-8")
+        yml_tmp.replace(yml_path)
+    except Exception as e:
+        result.overall_status = "FAIL"
+        result.failures.append(f"无法写入 YAML 报告: {e}")
+
+    # ── 4. 原子写入 Markdown 报告 ──
+    md_path = reports_dir / "materialization_verification.md"
+    try:
+        md_content = _build_materialization_report_md(result)
+        md_tmp = md_path.with_suffix(".tmp")
+        md_tmp.write_text(md_content, encoding="utf-8")
+        md_tmp.replace(md_path)
+    except Exception as e:
+        result.overall_status = "FAIL"
+        result.failures.append(f"无法写入 Markdown 报告: {e}")
+
+    # ── 5. 更新 Manifest materialization_status ──
+    manifest_path = package_dir / "deployment_manifest.yml"
+    new_mat_status = _map_overall_to_materialization_status(result)
+
+    if manifest_path.is_file():
+        try:
+            manifest_data = (
+                yaml.safe_load(manifest_path.read_text(encoding="utf-8")) or {}
+            )
+            manifest_data["materialization_status"] = new_mat_status
+            tmp_path = manifest_path.with_suffix(".tmp")
+            tmp_path.write_text(
+                yaml.safe_dump(manifest_data, allow_unicode=True, sort_keys=False),
+                encoding="utf-8",
+            )
+            tmp_path.replace(manifest_path)
+        except Exception as e:
+            result.overall_status = "FAIL"
+            result.failures.append(f"Manifest 更新失败: {e}")
+    else:
+        # Manifest 文件缺失——防御性处理
+        result.overall_status = "FAIL"
+        result.failures.append(
+            "deployment_manifest.yml 缺失——无法更新 materialization_status"
+        )
+
+    # ── 6. 必要时使 RELEASE_APPROVED 失效 ──
+    # 当前验证非 PASS 时，如果存在 RELEASE_APPROVED，必须将其失效为 SUPERSEDED
+    if result.overall_status != "PASS":
+        try:
+            from src.agent.decision_manager import invalidate_release_approval
+            superseded = invalidate_release_approval(
+                package_dir,
+                f"物化验证未通过（overall_status={result.overall_status}，"
+                f"verification_id={result.verification_id}）——"
+                f"旧 RELEASE_APPROVED 不再有效",
+            )
+            if superseded:
+                result.warnings.append(
+                    "已将旧的 RELEASE_APPROVED 失效为 SUPERSEDED——"
+                    "请重新运行物化验证并通过后再次审批。"
+                )
+        except Exception:
+            # 审批失效失败不阻塞验证结果——但记录警告
+            result.warnings.append(
+                "检查 RELEASE_APPROVED 失效时发生异常——请手动确认发布审批状态"
+            )
+
+    # ── 7. 同步制品哈希到 decision.yml ──
+    decision_path = package_dir / "decision.yml"
+    if decision_path.is_file():
+        try:
+            from src.agent.decision_manager import (
+                compute_artifact_hashes,
+                update_artifact_hashes_in_decision,
+            )
+            hashes = compute_artifact_hashes(package_dir)
+            update_artifact_hashes_in_decision(package_dir, hashes)
+        except Exception:
+            # 哈希更新失败不影响物化验证结果
+            pass
+
+    return result
+
+
 # ═══════════════════════════════════════════════════════════════
 # 编排出入口
 # ═══════════════════════════════════════════════════════════════
@@ -60,13 +215,15 @@ def verify_materialization(
 ) -> MaterializationResult:
     """执行完整的物化验证流程。
 
+    所有出口均通过 _finalize_and_persist_materialization() 收尾，
+    确保每次验证都写入最新报告、更新 Manifest 状态、必要时使旧审批失效。
+
     流程：
       1. 静态校验部署产物
       2. 加载 sample 数据（从 DB 或直接传入的行数据）
       3. 在一次性 DuckDB Sandbox 中执行 CTAS
       4. 执行幂等性检查
-      5. 聚合并写入报告
-      6. 更新 materialization_status
+      5. 统一收尾——聚合、持久化、审批失效
 
     Args:
         package_dir: Review Package 目录路径
@@ -86,8 +243,8 @@ def verify_materialization(
     static_failures = [c for c in static_checks if c.status == "FAIL"]
 
     if static_failures:
-        # 静态校验失败——不执行 Sandbox，直接返回 FAIL
-        return MaterializationResult(
+        # 静态校验失败——不执行 Sandbox，通过统一收尾路径返回
+        result = MaterializationResult(
             verification_id=verification_id,
             request_id=manifest_dict.get("request_id", ""),
             overall_status="FAIL",
@@ -97,7 +254,9 @@ def verify_materialization(
                 f"[静态校验] {c.name}: {c.detail}" for c in static_failures
             ],
             human_review_required=True,
-            generated_at=_iso_now(),
+        )
+        return _finalize_and_persist_materialization(
+            package_dir, result, manifest_dict,
         )
 
     static_passed = all(
@@ -107,7 +266,7 @@ def verify_materialization(
     # ── 步骤 2：读取部署 SQL ──
     deploy_sql_path = package_dir / "deploy" / "main.sql"
     if not deploy_sql_path.is_file():
-        return MaterializationResult(
+        result = MaterializationResult(
             verification_id=verification_id,
             request_id=manifest_dict.get("request_id", ""),
             overall_status="FAIL",
@@ -115,7 +274,9 @@ def verify_materialization(
             checks=static_checks,
             failures=["deploy/main.sql 不存在——无法执行物化验证"],
             human_review_required=True,
-            generated_at=_iso_now(),
+        )
+        return _finalize_and_persist_materialization(
+            package_dir, result, manifest_dict,
         )
     deploy_sql = deploy_sql_path.read_text(encoding="utf-8")
 
@@ -123,14 +284,28 @@ def verify_materialization(
     if sample_data_rows is None and sample_data_columns is None:
         # 尝试从 sample_db_path 加载
         if sample_db_path:
-            rows, cols, types = _load_sample_from_db(
-                sample_db_path, manifest_dict,
-            )
-            sample_data_rows = rows
-            sample_data_columns = cols
-            sample_data_types = types
+            try:
+                rows, cols, types = _load_sample_from_db(
+                    sample_db_path, manifest_dict,
+                )
+                sample_data_rows = rows
+                sample_data_columns = cols
+                sample_data_types = types
+            except Exception as e:
+                # sample DB 加载异常——通过统一收尾路径返回
+                result = MaterializationResult(
+                    verification_id=verification_id,
+                    request_id=manifest_dict.get("request_id", ""),
+                    overall_status="FAIL",
+                    checks=static_checks,
+                    failures=[f"sample 数据库加载异常: {e}"],
+                    human_review_required=True,
+                )
+                return _finalize_and_persist_materialization(
+                    package_dir, result, manifest_dict,
+                )
         else:
-            return MaterializationResult(
+            result = MaterializationResult(
                 verification_id=verification_id,
                 request_id=manifest_dict.get("request_id", ""),
                 overall_status="FAIL",
@@ -139,18 +314,22 @@ def verify_materialization(
                     "未提供 sample 数据——需要 --sample-db 或直接传入数据"
                 ],
                 human_review_required=True,
-                generated_at=_iso_now(),
+            )
+            return _finalize_and_persist_materialization(
+                package_dir, result, manifest_dict,
             )
 
     if not sample_data_rows or not sample_data_columns:
-        return MaterializationResult(
+        result = MaterializationResult(
             verification_id=verification_id,
             request_id=manifest_dict.get("request_id", ""),
             overall_status="FAIL",
             checks=static_checks,
             failures=["sample 数据为空——无法执行物化验证"],
             human_review_required=True,
-            generated_at=_iso_now(),
+        )
+        return _finalize_and_persist_materialization(
+            package_dir, result, manifest_dict,
         )
 
     # ── 步骤 4：执行一次性 Sandbox CTAS ──
@@ -177,9 +356,6 @@ def verify_materialization(
         ])
 
     # ── 同步 hash 状态字段到顶层（修复 M5b-1a #2）──
-    # 静态校验的 hash checks 已合并到 result.checks，
-    # 但顶层 source_query_hash_status / deploy_artifact_hash_status 仍为默认 PENDING。
-    # 此处从 checks 中提取实际状态，确保报告展示与检查明细一致。
     for check in static_checks:
         if check.check_id == "source_query_hash":
             result.source_query_hash_status = check.status
@@ -207,62 +383,10 @@ def verify_materialization(
         if idempotency["status"] != "PASS":
             result.warnings.append(idempotency["detail"])
 
-    # ── 重新聚合状态 ──
-    result = _finalize_status(result)
-
-    # ── 步骤 6：写入物化验证报告 ──
-    reports_dir = package_dir / "reports"
-    reports_dir.mkdir(parents=True, exist_ok=True)
-
-    yml_path = reports_dir / "materialization_verification.yml"
-    yml_path.write_text(
-        yaml.safe_dump(result.to_dict(), allow_unicode=True, sort_keys=False),
-        encoding="utf-8",
+    # ── 统一收尾：聚合、持久化、审批失效 ──
+    return _finalize_and_persist_materialization(
+        package_dir, result, manifest_dict,
     )
-
-    md_path = reports_dir / "materialization_verification.md"
-    md_path.write_text(
-        _build_materialization_report_md(result),
-        encoding="utf-8",
-    )
-
-    # ── 步骤 7：更新 deployment_manifest.yml 的 materialization_status ──
-    manifest_path = package_dir / "deployment_manifest.yml"
-    if manifest_path.is_file():
-        manifest_data = (
-            yaml.safe_load(manifest_path.read_text(encoding="utf-8")) or {}
-        )
-        manifest_data["materialization_status"] = (
-            "MATERIALIZATION_VALIDATED"
-            if result.overall_status == "PASS"
-            else result.overall_status
-        )
-        tmp_path = manifest_path.with_suffix(".tmp")
-        tmp_path.write_text(
-            yaml.safe_dump(manifest_data, allow_unicode=True, sort_keys=False),
-            encoding="utf-8",
-        )
-        tmp_path.replace(manifest_path)
-
-    # ── 步骤 8：同步物化验证报告哈希到 decision.yml ──
-    # M5b-2 P0 修复：RELEASE_APPROVED 必须验证 materialization_verification.yml
-    # 哈希完整性。此处将当前制品哈希（含刚写入的物化报告）回写到 decision.yml，
-    # 以便 review_decision.py 的 artifact integrity 检查能验证报告未被篡改。
-    decision_path = package_dir / "decision.yml"
-    if decision_path.is_file():
-        try:
-            from src.agent.decision_manager import (
-                compute_artifact_hashes,
-                update_artifact_hashes_in_decision,
-            )
-            hashes = compute_artifact_hashes(package_dir)
-            update_artifact_hashes_in_decision(package_dir, hashes)
-        except Exception:
-            # 哈希更新失败不影响物化验证结果——仅影响后续 RELEASE_APPROVED 闸门
-            pass
-
-    result.generated_at = _iso_now()
-    return result
 
 
 # ═══════════════════════════════════════════════════════════════

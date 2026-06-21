@@ -1895,3 +1895,617 @@ class TestRequiredOptionalAggregation:
         from src.sandbox.duckdb_ctas_executor import _aggregate_status
         result = _aggregate_status(result)
         assert result.overall_status == "PASS"
+
+
+# ═══════════════════════════════════════════════════════════════
+# §8 M5b-2 P0 修复：失败路径持久化与状态失效测试
+# ═══════════════════════════════════════════════════════════════
+
+
+def _setup_package_for_verification(base_dir: Path, **overrides) -> Path:
+    """构建可通过物化验证的完整 Review Package 结构。
+
+    创建 sql/main.sql、deploy/main.sql、deployment_manifest.yml、
+    decision.yml，使 verify_materialization 可以成功执行。
+    """
+    package_dir = base_dir / "test_pkg"
+    (package_dir / "sql").mkdir(parents=True)
+    (package_dir / "deploy").mkdir(parents=True)
+
+    sql_content = overrides.get("sql_content", "SELECT trip_date FROM gold.dws_daily_trip_summary;\n")
+    (package_dir / "sql" / "main.sql").write_text(sql_content, encoding="utf-8")
+
+    deploy_sql_content = overrides.get("deploy_sql_content", _build_ctas_sql())
+    (package_dir / "deploy" / "main.sql").write_text(deploy_sql_content, encoding="utf-8")
+
+    actual_sql_hash = _hash_content(sql_content)
+    actual_deploy_hash = _hash_content(deploy_sql_content)
+
+    manifest = _sample_manifest(source_query_hash=actual_sql_hash)
+    manifest_path = package_dir / "deployment_manifest.yml"
+    manifest_path.write_text(
+        yaml.safe_dump(manifest, allow_unicode=True), encoding="utf-8",
+    )
+
+    decision = {
+        "request_id": "test_m5b1",
+        "current_state": "PENDING_REVIEW",
+        "artifact_hashes": {
+            "deploy_sql": actual_deploy_hash,
+            "sql_main": actual_sql_hash,
+        },
+    }
+    (package_dir / "decision.yml").write_text(
+        yaml.safe_dump(decision, allow_unicode=True), encoding="utf-8",
+    )
+
+    # 创建空的 decision_log.yml——审批失效需要此文件存在
+    decision_log = {"entries": []}
+    (package_dir / "decision_log.yml").write_text(
+        yaml.safe_dump(decision_log, allow_unicode=True), encoding="utf-8",
+    )
+
+    # 创建 spark/main.py——静态校验需要
+    (package_dir / "spark").mkdir(parents=True, exist_ok=True)
+    (package_dir / "spark" / "main.py").write_text("# Spark placeholder\n", encoding="utf-8")
+
+    return package_dir
+
+
+def _run_verify(package_dir: Path, **kwargs):
+    """运行物化验证引擎——便捷包装。"""
+    from src.agent.materialization_verification_engine import verify_materialization
+
+    rows, cols, types = _sample_data()
+    return verify_materialization(
+        package_dir=package_dir,
+        sample_data_rows=rows,
+        sample_data_columns=cols,
+        sample_data_types=types,
+        **kwargs,
+    )
+
+
+class TestPersistOnFailure:
+    """M5b-2 P0：所有失败路径都必须生成最新报告。"""
+
+    def test_static_check_failure_generates_reports(self):
+        """静态校验失败时仍生成 YAML 和 Markdown 报告。"""
+        tmp = _mkdtemp()
+        try:
+            package_dir = _setup_package_for_verification(tmp)
+            # 写入一个包含非法 schema 的 CTAS——静态校验会拦截
+            (package_dir / "deploy" / "main.sql").write_text(
+                "CREATE TABLE illegal_schema.test AS SELECT 1;\n",
+                encoding="utf-8",
+            )
+
+            result = _run_verify(package_dir)
+
+            # 验证结果
+            assert result.overall_status == "FAIL", (
+                f"静态校验失败时 overall_status 必须为 FAIL，实际: {result.overall_status}"
+            )
+            # YAML 报告必须存在
+            yml_path = package_dir / "reports" / "materialization_verification.yml"
+            assert yml_path.is_file(), "失败路径也必须生成 YAML 报告"
+            report = yaml.safe_load(yml_path.read_text(encoding="utf-8"))
+            assert report["overall_status"] == "FAIL"
+            # Markdown 报告必须存在
+            md_path = package_dir / "reports" / "materialization_verification.md"
+            assert md_path.is_file(), "失败路径也必须生成 Markdown 报告"
+        finally:
+            _rmdtemp(tmp)
+
+    def test_deploy_sql_missing_generates_failure_report(self):
+        """deploy/main.sql 缺失时仍生成最新失败报告。
+
+        注意：deploy/main.sql 缺失时静态校验（deploy artifact hash + CTAS 结构检查）
+        会先捕获，故 failures 中包含静态校验消息而非 step 2 的消息。
+        """
+        tmp = _mkdtemp()
+        try:
+            package_dir = _setup_package_for_verification(tmp)
+            # 删除 deploy/main.sql
+            (package_dir / "deploy" / "main.sql").unlink()
+
+            result = _run_verify(package_dir)
+
+            assert result.overall_status == "FAIL"
+            # 静态校验会捕获缺失——通过 checks 中的 FAIL 来确认
+            static_fails = [
+                c for c in result.checks
+                if c.status == "FAIL" and "deploy" in c.detail.lower()
+            ]
+            assert len(static_fails) > 0, (
+                f"应有与 deploy 相关的失败检查，实际 checks: "
+                f"{[(c.name, c.status) for c in result.checks]}"
+            )
+
+            # 报告必须生成
+            yml_path = package_dir / "reports" / "materialization_verification.yml"
+            assert yml_path.is_file(), "deploy SQL 缺失时也必须生成 YAML 报告"
+            md_path = package_dir / "reports" / "materialization_verification.md"
+            assert md_path.is_file(), "deploy SQL 缺失时也必须生成 MD 报告"
+        finally:
+            _rmdtemp(tmp)
+
+    def test_no_sample_data_generates_failure_report(self):
+        """未提供 sample 数据时生成最新失败报告。"""
+        tmp = _mkdtemp()
+        try:
+            package_dir = _setup_package_for_verification(tmp)
+            from src.agent.materialization_verification_engine import verify_materialization
+
+            # 不传 sample 数据，也不提供 sample-db
+            result = verify_materialization(package_dir=package_dir)
+
+            assert result.overall_status == "FAIL"
+            assert any("未提供 sample 数据" in f for f in result.failures)
+
+            yml_path = package_dir / "reports" / "materialization_verification.yml"
+            assert yml_path.is_file(), "无 sample 数据时也必须生成 YAML 报告"
+            md_path = package_dir / "reports" / "materialization_verification.md"
+            assert md_path.is_file(), "无 sample 数据时也必须生成 MD 报告"
+        finally:
+            _rmdtemp(tmp)
+
+    def test_sample_data_empty_generates_failure_report(self):
+        """sample 数据为空时生成最新失败报告。"""
+        tmp = _mkdtemp()
+        try:
+            package_dir = _setup_package_for_verification(tmp)
+            from src.agent.materialization_verification_engine import verify_materialization
+
+            # 传入空数据
+            result = verify_materialization(
+                package_dir=package_dir,
+                sample_data_rows=[],
+                sample_data_columns=[],
+                sample_data_types=[],
+            )
+
+            assert result.overall_status == "FAIL"
+            assert any("sample 数据为空" in f for f in result.failures)
+
+            yml_path = package_dir / "reports" / "materialization_verification.yml"
+            assert yml_path.is_file(), "sample 为空时也必须生成 YAML 报告"
+            md_path = package_dir / "reports" / "materialization_verification.md"
+            assert md_path.is_file(), "sample 为空时也必须生成 MD 报告"
+        finally:
+            _rmdtemp(tmp)
+
+    def test_sample_db_load_exception_generates_failure_report(self):
+        """sample DB 加载异常时生成最新失败报告。"""
+        tmp = _mkdtemp()
+        try:
+            package_dir = _setup_package_for_verification(tmp)
+            from src.agent.materialization_verification_engine import verify_materialization
+
+            # 提供不存在的 DB 路径——加载会失败
+            result = verify_materialization(
+                package_dir=package_dir,
+                sample_db_path="/nonexistent/path/to/sample.duckdb",
+            )
+
+            assert result.overall_status == "FAIL"
+            assert any("sample 数据库加载异常" in f for f in result.failures), (
+                f"应包含加载异常信息，实际 failures: {result.failures}"
+            )
+
+            yml_path = package_dir / "reports" / "materialization_verification.yml"
+            assert yml_path.is_file(), "DB 加载异常时也必须生成 YAML 报告"
+            md_path = package_dir / "reports" / "materialization_verification.md"
+            assert md_path.is_file(), "DB 加载异常时也必须生成 MD 报告"
+        finally:
+            _rmdtemp(tmp)
+
+
+class TestStateInvalidation:
+    """M5b-2 P0：失败时必须使旧的 MATERIALIZATION_VALIDATED 失效。"""
+
+    def test_success_then_static_failure_invalidates_state(self):
+        """先成功后静态失败：状态不再是 MATERIALIZATION_VALIDATED，报告变为最新 FAIL。"""
+        tmp = _mkdtemp()
+        try:
+            package_dir = _setup_package_for_verification(tmp)
+
+            # 第一次：成功验证
+            result1 = _run_verify(package_dir)
+            assert result1.overall_status == "PASS", (
+                f"第一次验证应通过，实际: {result1.overall_status}"
+            )
+            # 确认状态为 MATERIALIZATION_VALIDATED
+            manifest1 = yaml.safe_load(
+                (package_dir / "deployment_manifest.yml").read_text(encoding="utf-8")
+            )
+            assert manifest1["materialization_status"] == "MATERIALIZATION_VALIDATED"
+
+            # 第二次：修改 SQL 使静态校验失败（写入非法 schema 的 CTAS）
+            (package_dir / "deploy" / "main.sql").write_text(
+                "CREATE TABLE illegal_schema.test AS SELECT 1;\n",
+                encoding="utf-8",
+            )
+
+            result2 = _run_verify(package_dir)
+            assert result2.overall_status == "FAIL", (
+                f"第二次验证应失败，实际: {result2.overall_status}"
+            )
+
+            # Manifest 状态不再是 MATERIALIZATION_VALIDATED
+            manifest2 = yaml.safe_load(
+                (package_dir / "deployment_manifest.yml").read_text(encoding="utf-8")
+            )
+            assert manifest2["materialization_status"] != "MATERIALIZATION_VALIDATED", (
+                "失败后 materialization_status 不得保留 MATERIALIZATION_VALIDATED"
+            )
+            assert manifest2["materialization_status"] == "FAILED", (
+                f"失败后状态应为 FAILED，实际: {manifest2['materialization_status']}"
+            )
+
+            # 报告被覆盖为最新 FAIL
+            yml_path = package_dir / "reports" / "materialization_verification.yml"
+            report = yaml.safe_load(yml_path.read_text(encoding="utf-8"))
+            assert report["overall_status"] == "FAIL", (
+                "报告必须反映最新验证结果——应为 FAIL"
+            )
+            assert report["verification_id"] == result2.verification_id, (
+                "报告应包含最新验证的 verification_id"
+            )
+        finally:
+            _rmdtemp(tmp)
+
+    def test_success_then_missing_sample_invalidates_state(self):
+        """先成功后缺少 sample：状态失效，旧 PASS 报告被覆盖。"""
+        tmp = _mkdtemp()
+        try:
+            package_dir = _setup_package_for_verification(tmp)
+
+            # 第一次：成功验证
+            result1 = _run_verify(package_dir)
+            assert result1.overall_status == "PASS"
+
+            manifest1 = yaml.safe_load(
+                (package_dir / "deployment_manifest.yml").read_text(encoding="utf-8")
+            )
+            assert manifest1["materialization_status"] == "MATERIALIZATION_VALIDATED"
+
+            # 第二次：不传 sample 数据
+            from src.agent.materialization_verification_engine import verify_materialization
+            result2 = verify_materialization(package_dir=package_dir)
+
+            assert result2.overall_status == "FAIL"
+
+            # 状态已失效
+            manifest2 = yaml.safe_load(
+                (package_dir / "deployment_manifest.yml").read_text(encoding="utf-8")
+            )
+            assert manifest2["materialization_status"] != "MATERIALIZATION_VALIDATED", (
+                "失败后不得保留 MATERIALIZATION_VALIDATED"
+            )
+
+            # 报告被覆盖
+            yml_path = package_dir / "reports" / "materialization_verification.yml"
+            report = yaml.safe_load(yml_path.read_text(encoding="utf-8"))
+            assert report["overall_status"] == "FAIL"
+        finally:
+            _rmdtemp(tmp)
+
+    def test_cleanup_failure_writes_cleanup_failed(self):
+        """cleanup 失败时写入 CLEANUP_FAILED 而非 FAILED。"""
+        tmp = _mkdtemp()
+        try:
+            package_dir = _setup_package_for_verification(tmp)
+            from src.agent.materialization_verification_engine import (
+                verify_materialization,
+                _finalize_and_persist_materialization,
+            )
+            from src.agent.materialization_verification_engine import (
+                validate_materialization_static,
+            )
+
+            # 先正常执行 Sandbox
+            rows, cols, types = _sample_data()
+            manifest_dict = yaml.safe_load(
+                (package_dir / "deployment_manifest.yml").read_text(encoding="utf-8")
+            )
+
+            # 构建一个 cleanup_status=FAIL 的 result
+            result = MaterializationResult(
+                verification_id="test_cleanup_fail",
+                request_id="test_m5b1",
+                overall_status="FAIL",
+                cleanup_status="FAIL",
+                execution_status="PASS",
+                checks=[
+                    MaterializationCheckResult(
+                        check_id="output_object_exists",
+                        name="目标对象存在",
+                        status="PASS",
+                        detail="已创建",
+                    ),
+                ],
+                failures=["清理失败：无法删除临时表"],
+            )
+
+            result = _finalize_and_persist_materialization(
+                package_dir, result, manifest_dict,
+            )
+
+            # Manifest 状态应为 CLEANUP_FAILED
+            manifest = yaml.safe_load(
+                (package_dir / "deployment_manifest.yml").read_text(encoding="utf-8")
+            )
+            assert manifest["materialization_status"] == "CLEANUP_FAILED", (
+                f"cleanup 失败时应写 CLEANUP_FAILED，实际: {manifest['materialization_status']}"
+            )
+
+            # 报告也要反映 CLEANUP_FAILED
+            yml_path = package_dir / "reports" / "materialization_verification.yml"
+            assert yml_path.is_file()
+            report = yaml.safe_load(yml_path.read_text(encoding="utf-8"))
+            assert report["cleanup_status"] == "FAIL"
+        finally:
+            _rmdtemp(tmp)
+
+    def test_warn_or_pending_does_not_retain_materialization_validated(self):
+        """WARN 或 PENDING 状态不得保留 MATERIALIZATION_VALIDATED。"""
+        tmp = _mkdtemp()
+        try:
+            package_dir = _setup_package_for_verification(tmp)
+            from src.agent.materialization_verification_engine import (
+                _finalize_and_persist_materialization,
+            )
+
+            manifest_dict = yaml.safe_load(
+                (package_dir / "deployment_manifest.yml").read_text(encoding="utf-8")
+            )
+
+            # 先设置 manifest 为 MATERIALIZATION_VALIDATED
+            manifest_dict["materialization_status"] = "MATERIALIZATION_VALIDATED"
+            (package_dir / "deployment_manifest.yml").write_text(
+                yaml.safe_dump(manifest_dict, allow_unicode=True), encoding="utf-8",
+            )
+
+            # 测试 WARN 场景
+            warn_result = MaterializationResult(
+                verification_id="test_warn",
+                request_id="test_m5b1",
+                overall_status="WARN",
+                checks=[
+                    MaterializationCheckResult(
+                        check_id="some_check", name="某检查", status="WARN",
+                        detail="数据异常但不阻断", severity="WARN",
+                    ),
+                ],
+                warnings=["数据异常——建议人审时关注"],
+            )
+            result = _finalize_and_persist_materialization(
+                package_dir, warn_result, manifest_dict,
+            )
+            manifest_after = yaml.safe_load(
+                (package_dir / "deployment_manifest.yml").read_text(encoding="utf-8")
+            )
+            assert manifest_after["materialization_status"] != "MATERIALIZATION_VALIDATED", (
+                "WARN 状态不得保留 MATERIALIZATION_VALIDATED"
+            )
+            # WARN → FAILED
+            assert manifest_after["materialization_status"] == "FAILED", (
+                f"WARN 应映射为 FAILED，实际: {manifest_after['materialization_status']}"
+            )
+
+            # 测试 PENDING 场景
+            pending_result = MaterializationResult(
+                verification_id="test_pending",
+                request_id="test_m5b1",
+                overall_status="PENDING",
+                checks=[
+                    MaterializationCheckResult(
+                        check_id="some_check", name="某检查", status="PENDING",
+                        detail="尚未执行",
+                    ),
+                ],
+            )
+            result2 = _finalize_and_persist_materialization(
+                package_dir, pending_result, manifest_dict,
+            )
+            manifest_after2 = yaml.safe_load(
+                (package_dir / "deployment_manifest.yml").read_text(encoding="utf-8")
+            )
+            assert manifest_after2["materialization_status"] != "MATERIALIZATION_VALIDATED", (
+                "PENDING 状态不得保留 MATERIALIZATION_VALIDATED"
+            )
+            assert manifest_after2["materialization_status"] == "PENDING", (
+                f"PENDING 应映射为 PENDING，实际: {manifest_after2['materialization_status']}"
+            )
+        finally:
+            _rmdtemp(tmp)
+
+
+class TestReleaseApprovalInvalidation:
+    """M5b-2 P0：验证失败时必须使 RELEASE_APPROVED 失效。"""
+
+    def test_release_approved_invalidated_on_reverify_fail(self):
+        """已有 RELEASE_APPROVED 时重新验证失败 → SUPERSEDED + 审计日志。"""
+        tmp = _mkdtemp()
+        try:
+            package_dir = _setup_package_for_verification(tmp)
+            from src.agent.materialization_verification_engine import (
+                verify_materialization,
+            )
+            from src.agent.decision_manager import (
+                read_decision,
+                write_decision,
+                read_decision_log,
+            )
+
+            # 先成功验证
+            result1 = _run_verify(package_dir)
+            assert result1.overall_status == "PASS"
+
+            # 设置决策状态为 RELEASE_APPROVED
+            decision = read_decision(package_dir)
+            decision["release_approval_state"] = "RELEASE_APPROVED"
+            decision["last_updated_by"] = "human:release_reviewer"
+            write_decision(package_dir, decision)
+            # Manifest 的 release_status 也设为 RELEASE_APPROVED
+            manifest_path = package_dir / "deployment_manifest.yml"
+            manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
+            manifest["release_status"] = "RELEASE_APPROVED"
+            manifest_path.write_text(
+                yaml.safe_dump(manifest, allow_unicode=True), encoding="utf-8",
+            )
+
+            # 再制造失败验证（删除 deploy SQL）
+            (package_dir / "deploy" / "main.sql").unlink()
+            result2 = verify_materialization(package_dir=package_dir)
+
+            assert result2.overall_status == "FAIL"
+
+            # RELEASE_APPROVED 应被失效
+            decision_after = read_decision(package_dir)
+            assert decision_after.get("release_approval_state") == "SUPERSEDED", (
+                f"RELEASE_APPROVED 应被失效为 SUPERSEDED，"
+                f"实际: {decision_after.get('release_approval_state')}"
+            )
+
+            # Manifest release_status 应更新为 SUPERSEDED
+            manifest_after = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
+            assert manifest_after["release_status"] == "SUPERSEDED", (
+                f"release_status 应为 SUPERSEDED，实际: {manifest_after['release_status']}"
+            )
+
+            # decision_log.yml 应有审计记录
+            log = read_decision_log(package_dir)
+            audit_entries = [
+                e for e in log.get("entries", [])
+                if "SUPERSEDED" in str(e.get("to_state", ""))
+            ]
+            assert len(audit_entries) >= 1, (
+                f"decision_log 应有 SUPERSEDED 审计记录，实际 entries: {log.get('entries', [])}"
+            )
+        finally:
+            _rmdtemp(tmp)
+
+
+class TestSuccessPath:
+    """M5b-2 P0：验证成功时正常写入 MATERIALIZATION_VALIDATED。"""
+
+    def test_verification_success_writes_materialization_validated(self):
+        """验证成功时仍可写 MATERIALIZATION_VALIDATED——修复不得破坏正常路径。"""
+        tmp = _mkdtemp()
+        try:
+            package_dir = _setup_package_for_verification(tmp)
+
+            result = _run_verify(package_dir)
+
+            assert result.overall_status == "PASS", (
+                f"验证应通过，实际: {result.overall_status} —— "
+                f"failures: {result.failures}"
+            )
+
+            # Manifest 状态为 MATERIALIZATION_VALIDATED
+            manifest = yaml.safe_load(
+                (package_dir / "deployment_manifest.yml").read_text(encoding="utf-8")
+            )
+            assert manifest["materialization_status"] == "MATERIALIZATION_VALIDATED", (
+                f"PASS 应写 MATERIALIZATION_VALIDATED，实际: {manifest['materialization_status']}"
+            )
+
+            # 报告存在且为 PASS
+            yml_path = package_dir / "reports" / "materialization_verification.yml"
+            assert yml_path.is_file()
+            report = yaml.safe_load(yml_path.read_text(encoding="utf-8"))
+            assert report["overall_status"] == "PASS"
+
+            md_path = package_dir / "reports" / "materialization_verification.md"
+            assert md_path.is_file()
+        finally:
+            _rmdtemp(tmp)
+
+
+class TestPersistenceFailure:
+    """M5b-2 P0：持久化失败时不得返回 PASS。"""
+
+    def test_persistence_failure_does_not_return_pass(self):
+        """报告或 Manifest 持久化失败时不能返回 PASS。
+
+        通过 patch Path.write_text 模拟写入失败（磁盘满），验证持久化失败后
+        result.overall_status 变为 FAIL。
+        """
+        tmp = _mkdtemp()
+        try:
+            package_dir = _setup_package_for_verification(tmp)
+            from src.agent.materialization_verification_engine import (
+                _finalize_and_persist_materialization,
+            )
+
+            manifest_dict = yaml.safe_load(
+                (package_dir / "deployment_manifest.yml").read_text(encoding="utf-8")
+            )
+
+            # 构建一个原本 PASS 的 result
+            pass_result = MaterializationResult(
+                verification_id="test_persist_fail",
+                request_id="test_m5b1",
+                overall_status="PASS",
+                execution_status="PASS",
+                checks=[
+                    MaterializationCheckResult(
+                        check_id="all_pass", name="全部通过", status="PASS",
+                    ),
+                ],
+            )
+
+            # patch Path.write_text 模拟磁盘写失败——仅影响报告写入
+            with patch("pathlib.Path.write_text", side_effect=PermissionError("模拟磁盘满")):
+                result = _finalize_and_persist_materialization(
+                    package_dir, pass_result, manifest_dict,
+                )
+
+            # 持久化失败后不得返回 PASS
+            assert result.overall_status != "PASS", (
+                f"持久化失败后不得返回 PASS，实际: {result.overall_status}"
+            )
+            assert result.overall_status == "FAIL", (
+                f"持久化失败后 overall_status 必须为 FAIL，实际: {result.overall_status}"
+            )
+            assert any("无法写入" in f for f in result.failures), (
+                f"应包含持久化失败信息，实际 failures: {result.failures}"
+            )
+        finally:
+            _rmdtemp(tmp)
+
+
+class TestCLIExitCode:
+    """M5b-2 P0：CLI 对 FAIL 返回非零退出码。"""
+
+    def test_cli_returns_nonzero_on_fail(self):
+        """CLI 对 FAIL 结果返回非零退出码。"""
+        tmp = _mkdtemp()
+        try:
+            package_dir = _setup_package_for_verification(tmp)
+            # 删除 deploy SQL 制造失败
+            (package_dir / "deploy" / "main.sql").unlink()
+
+            # 通过 CLI 调用
+            import subprocess
+            import sys
+            cli_path = PROJECT_ROOT / "scripts" / "dev_agent" / "verify_duckdb_ctas.py"
+            result = subprocess.run(
+                [sys.executable, str(cli_path), "-p", str(package_dir)],
+                cwd=PROJECT_ROOT, text=True, capture_output=True, check=False,
+            )
+
+            assert result.returncode != 0, (
+                f"FAIL 时 CLI 必须返回非零退出码，实际: {result.returncode}"
+            )
+            assert result.returncode == 1, (
+                f"FAIL 时 CLI 应返回 1，实际: {result.returncode}"
+            )
+        finally:
+            _rmdtemp(tmp)
+
+
+# 模块级 PROJECT_ROOT 定义（用于 CLI 测试）
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
