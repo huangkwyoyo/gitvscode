@@ -83,8 +83,6 @@ STEPS: list[dict[str, Any]] = [
             "-m",
             "pytest",
             "-q",
-            "--basetemp",
-            "harness/reports/test_tmp/pytest_fast_gate",
         ],
         "estimate": "< 30s",
     },
@@ -385,8 +383,8 @@ def render_markdown(report: FastGateReport) -> str:
     lines.append("## 汇总")
     lines.append("")
     overall_icon = "✅" if report.overall == "PASS" else "❌"
-    lines.append(f"| 状态 | 总数 | 通过 | 失败 | 跳过 | 警告 | 总耗时 |")
-    lines.append(f"|------|------|------|------|------|------|--------|")
+    lines.append("| 状态 | 总数 | 通过 | 失败 | 跳过 | 警告 | 总耗时 |")
+    lines.append("|------|------|------|------|------|------|--------|")
     lines.append(
         f"| {overall_icon} **{report.overall}** "
         f"| {report.total_steps} "
@@ -402,8 +400,8 @@ def render_markdown(report: FastGateReport) -> str:
     if WARN_ONLY_CHECK_INDICES:
         lines.append("### 观察期检查（warn-only）")
         lines.append("")
-        lines.append(f"| 指标 | 数量 |")
-        lines.append(f"|------|------|")
+        lines.append("| 指标 | 数量 |")
+        lines.append("|------|------|")
         lines.append(f"| 通过 | {report.warn_checks_passed} |")
         lines.append(f"| 警告 | {report.warn_checks_warned} |")
         lines.append(f"| 基础设施失败 | {report.warn_checks_infra_fail} |")
@@ -455,8 +453,8 @@ def render_markdown(report: FastGateReport) -> str:
         enf_exit_affected = enf.get("exit_code_should_fail", False)
         lines.append("## Memory Rule Enforcement (Step 18b)")
         lines.append("")
-        lines.append(f"| 指标 | 数量 |")
-        lines.append(f"|------|------|")
+        lines.append("| 指标 | 数量 |")
+        lines.append("|------|------|")
         lines.append(f"| 总规则数 | {enf_summary.get('total_rules', 0)} |")
         lines.append(f"| proposed（仅可见） | {enf_summary.get('proposed', 0)} |")
         lines.append(f"| active+blocking=false（警告） | {enf_summary.get('active_warning', 0)} |")
@@ -692,7 +690,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"模式: 单步 (第 {args.step} 步)")
     else:
         print(f"模式: 完整检查 ({TOTAL_STEP_COUNT} 项)")
-    print(f"约束: 纯离线，不调用任何 LLM")
+    print("约束: 纯离线，不调用任何 LLM")
     print("=" * 60)
     print()
 
@@ -720,7 +718,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"   {report.warned} 个顶级步骤存在警告")
     print(f"   总耗时: {report.duration_total_seconds:.1f}s")
     if WARN_ONLY_CHECK_INDICES:
-        print(f"")
+        print("")
         print(f"   ⚠️ {len(WARN_ONLY_CHECK_INDICES)} 项安全检查处于观察期（warn-only），不阻断")
     print(f"{'=' * 60}")
 

@@ -470,7 +470,7 @@ def _perform_readiness_checks(
     obs_summary = observation.get("observation_summary", {})
     dev_exp = observation.get("developer_experience", {})
     boundary = observation.get("boundary_confirmations", {})
-    neg_verify = observation.get("negative_verification", {})
+    _neg_verify = observation.get("negative_verification", {})
     pollution = observation.get("worktree_pollution", {})
 
     checks: list[dict[str, Any]] = []
@@ -897,15 +897,15 @@ def render_readiness_markdown(review: ReadinessReview) -> str:
     lines.append("")
     lines.append(f"**Run ID:** `{review.run_id}`")
     lines.append(f"**时间:** {review.timestamp}")
-    lines.append(f"**Step:** 22 — Blocking Readiness Review")
+    lines.append("**Step:** 22 — Blocking Readiness Review")
     lines.append("")
 
     # 汇总
     status_icon = "🟢" if review.readiness_status == READY_FOR_BLOCKING else "🟡"
     lines.append("## Summary")
     lines.append("")
-    lines.append(f"| 指标 | 值 |")
-    lines.append(f"|------|-----|")
+    lines.append("| 指标 | 值 |")
+    lines.append("|------|-----|")
     lines.append(f"| readiness_status | {status_icon} **{review.readiness_status}** |")
     lines.append(f"| 观察次数 | {review.observation_total_runs} |")
     lines.append(f"| 观察天数 | {review.observation_span_days} |")
@@ -925,8 +925,8 @@ def render_readiness_markdown(review: ReadinessReview) -> str:
     # 观察证据
     lines.append("## Observation Evidence")
     lines.append("")
-    lines.append(f"| 指标 | 值 |")
-    lines.append(f"|------|-----|")
+    lines.append("| 指标 | 值 |")
+    lines.append("|------|-----|")
     lines.append(f"| 数据来源 | {review.observation_source} |")
     lines.append(f"| 观察次数 | {review.observation_total_runs} |")
     lines.append(f"| 观察天数 | {review.observation_span_days} |")
@@ -937,8 +937,8 @@ def render_readiness_markdown(review: ReadinessReview) -> str:
     # Readiness Checklist
     lines.append("## Readiness Checklist")
     lines.append("")
-    lines.append(f"| # | 条件 | 结果 | 详情 |")
-    lines.append(f"|---|------|:--:|------|")
+    lines.append("| # | 条件 | 结果 | 详情 |")
+    lines.append("|---|------|:--:|------|")
     for c in review.checks:
         icon = "✅" if c.get("passed") else "❌"
         lines.append(
@@ -962,8 +962,8 @@ def render_readiness_markdown(review: ReadinessReview) -> str:
     lines.append("## False Positive Review")
     lines.append("")
     fpr = review.false_positive_review
-    lines.append(f"| 指标 | 值 |")
-    lines.append(f"|------|-----|")
+    lines.append("| 指标 | 值 |")
+    lines.append("|------|-----|")
     lines.append(f"| 误报 | {fpr.get('has_false_positives', False)} |")
     lines.append(f"| 总运行次数 | {fpr.get('total_runs', 0)} |")
     lines.append(f"| warning 次数 | {fpr.get('warning_runs', 0)} |")
@@ -976,8 +976,8 @@ def render_readiness_markdown(review: ReadinessReview) -> str:
     lines.append("## Runtime Cost Review")
     lines.append("")
     rcr = review.runtime_cost_review
-    lines.append(f"| 指标 | 值 |")
-    lines.append(f"|------|-----|")
+    lines.append("| 指标 | 值 |")
+    lines.append("|------|-----|")
     lines.append(f"| 平均耗时 | {rcr.get('average_seconds', 0):.3f}s |")
     lines.append(f"| 最小耗时 | {rcr.get('min_seconds', 0):.3f}s |")
     lines.append(f"| 最大耗时 | {rcr.get('max_seconds', 0):.3f}s |")
@@ -991,8 +991,8 @@ def render_readiness_markdown(review: ReadinessReview) -> str:
     lines.append("## Worktree Pollution Review")
     lines.append("")
     wpr = review.worktree_pollution_review
-    lines.append(f"| 指标 | 值 |")
-    lines.append(f"|------|-----|")
+    lines.append("| 指标 | 值 |")
+    lines.append("|------|-----|")
     lines.append(f"| 工作区污染 | {wpr.get('has_pollution', False)} |")
     lines.append(f"| 新 untracked 文件 | {wpr.get('new_untracked_files', 0)} |")
     lines.append(f"| 新 modified 文件 | {wpr.get('new_modified_files', 0)} |")
@@ -1050,7 +1050,7 @@ def render_readiness_markdown(review: ReadinessReview) -> str:
     lines.append("---")
     lines.append("")
     lines.append(f"*审查生成: {review.timestamp}*")
-    lines.append(f"*审查者: Claude Code Agent (Step 22)*")
+    lines.append("*审查者: Claude Code Agent (Step 22)*")
 
     return "\n".join(lines)
 

@@ -7,7 +7,6 @@ B-7 JOIN 白名单两层防线职责分离测试。
     3. 两层独立工作，不重复报错
 """
 
-import pytest
 
 from src.ir import (
     JoinPlan,

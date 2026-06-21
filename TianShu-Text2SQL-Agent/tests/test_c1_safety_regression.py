@@ -13,12 +13,10 @@ C-1 安全回归测试：异常降级路径导致安全校验静默绕过。
     - 离线模式下 SQL 执行必须被阻断（防御深度）
 """
 
-import pytest
 
 from src.ir import (
     SQLPlan,
     Strategy,
-    Aggregation,
     JoinPlan,
 )
 from src.resolver import AgentContext

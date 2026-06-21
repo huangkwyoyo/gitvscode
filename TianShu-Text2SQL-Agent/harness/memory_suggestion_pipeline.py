@@ -23,8 +23,6 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 # ── 内部依赖（纯函数，无副作用） ──────────────────────────────
 from harness.memory_suggestions import (  # noqa: E402
-    build_memory_suggestions_from_e2e_report,
-    build_memory_suggestions_from_prompt_regression,
     build_memory_suggestions_report,
     normalize_failure_type,
     write_memory_suggestions_snapshot,
@@ -447,11 +445,11 @@ def _build_pipeline_summary(
     action_counts = r_sum.get("action_counts", {})
     lines = [
         "Memory Suggestions:",
-        f"- generated: yes",
+        "- generated: yes",
         f"- failed_cases: {s_sum.get('total_failed_cases', 0)}",
         f"- suggestions: {s_sum.get('suggestions', 0)}",
-        f"- suggestions_report: (已生成)",
-        f"- review_report: (已生成)",
+        "- suggestions_report: (已生成)",
+        "- review_report: (已生成)",
         f"- regression_candidates: {s_sum.get('regression_candidates', 0)}",
         f"- asset_dependencies: {s_sum.get('asset_dependencies', 0)}",
         f"- manual_review_required: {r_sum.get('manual_review_required_count', 0)}",
@@ -488,7 +486,7 @@ def render_pipeline_summary_for_baseline(pipeline_result: dict[str, Any]) -> str
         "",
         "## Memory Suggestion Pipeline (Step 13)",
         "",
-        f"- 状态: generated",
+        "- 状态: generated",
         f"- failed_cases: {pipeline_result.get('failed_cases', 0)}",
         f"- suggestions JSON: `{sr.get('json', 'N/A')}`",
         f"- suggestions Markdown: `{sr.get('markdown', 'N/A')}`",

@@ -34,12 +34,10 @@ from .ir import (
     AgentResponse,
     Aggregation,
     Domain,
-    ExecutionTrace,
     IntentType,
     JoinPlan,
     QuestionIntent,
     SQLPlan,
-    SQLResult,
     Strategy,
     SubIntent,
     TimeRange,
@@ -57,20 +55,19 @@ from .execution_strategy import (
     ThreadPoolExecutionStrategy,
 )
 from .result_merge import merge_results_on_date
-from .explainer import explain_result, fuse_results
+from .explainer import explain_result
 from .result_fusion import (
     fuse_results_with_llm,
-    validate_fusion_output,
     fallback_to_template,
-    build_result_fusion_payload,
 )
 from .result_summary import summarize_sql_result
-from .cross_domain_policy import CrossDomainPolicy, CrossDomainDecision
+from .cross_domain_policy import CrossDomainPolicy
 from .chart_spec import build_chart_spec_from_summary, build_chart_spec_from_merged_result
 from .llm import LLMClient, LLMRequest, PromptLoader
 from .llm_adapter import RefusalDetected
 from .llm_pipeline import extract_json_object, question_intent_from_dict, sql_plan_from_dict
 from .utils import setup_console_encoding
+from .version import get_version
 
 
 class Text2SQLAgent:
@@ -143,7 +140,7 @@ class Text2SQLAgent:
                 self._clarification_rules = load_clarification_rules(question_policy)
         except Exception as exc:
             print(f"[WARN] TianShu 连接初始化失败: {exc}")
-            print(f"       Agent 将在离线模式下运行（无数据库连接，禁止执行 SQL）")
+            print("       Agent 将在离线模式下运行（无数据库连接，禁止执行 SQL）")
             # C-1 修复：显式标记离线模式 + 清空 resolver 防止部分初始化绕过
             self._context = AgentContext(offline=True)
             self._resolver = None  # 确保无残留连接引用
@@ -615,7 +612,7 @@ class Text2SQLAgent:
                 response.trace.append(
                     f"[STEP 5b] date merge 跳过（跨域策略禁止）: {policy_decision.reason}"
                 )
-                from .ir import MergeStatus, MergedResult, ResultSummary as _RS
+                from .ir import MergeStatus, MergedResult
                 # 构造一个 skipped 的 MergedResult，原因来自策略
                 merged = MergedResult(
                     merge_status=MergeStatus.SKIPPED,
@@ -821,7 +818,6 @@ class Text2SQLAgent:
         # ── JSON 提取 ──
         try:
             parsed_output = extract_json_object(raw_output)
-            parse_success = True
         except Exception as exc:
             self._save_raw_output_on_failure(
                 question=question,
@@ -1244,7 +1240,6 @@ class Text2SQLAgent:
         # ── JSON 提取 ──
         try:
             parsed_output = extract_json_object(raw_output)
-            parse_success = True
         except Exception as exc:
             self._save_raw_output_on_failure(
                 question=question,
@@ -1930,38 +1925,76 @@ class Text2SQLAgent:
         error_message: str | None,
     ) -> str | None:
         """
-        LLM 输出失败时保存原始输出，用于诊断根因。
+        LLM 输出失败时保存诊断信息（已脱敏）。
+
+        安全边界：
+        - 默认不保存问题原文，仅保存哈希/长度/结构特征
+        - 显式 opt-in（include_question: "redacted"）仅保存 PII 脱敏后的问题
+        - 对所有输出字段递归脱敏：手机号、邮箱、身份证、车牌、API Key
+        - 文件名仅使用哈希，不含问题文本片段
+        - 写入失败不抛出异常，不影响主查询流程
+        - 日志消息不含原始异常内容
 
         Returns:
-            保存的文件路径，如果未启用则返回 None。
+            保存的文件路径，未启用或写入失败返回 None。
         """
         if not self._raw_output_enabled:
             return None
 
-        run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-        raw_dir = self._raw_output_dir / "llm_raw_outputs" / run_id
-        raw_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            import os
 
-        # 文件名只使用净化后的短标识，避免问题文本中的路径字符影响落盘。
-        case_id = self._safe_question_id(question)
-        path = raw_dir / f"{case_id}_{stage}_{uuid4().hex[:8]}.json"
-        model_name = self._model_name_for_prompt(prompt_name)
+            run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+            raw_dir = self._raw_output_dir / "llm_raw_outputs" / run_id
+            raw_dir.mkdir(parents=True, exist_ok=True)
 
-        payload = {
-            "question_id": case_id,
-            "question": question,
-            "stage": stage,
-            "prompt_name": prompt_name,
-            "model_name": model_name,
-            "raw_output": self._redact_sensitive_text(raw_output),
-            "parsed_output": self._redact_sensitive_data(parsed_output),
-            "parse_success": parse_success,
-            "validation_success": validation_success,
-            "error_message": self._redact_sensitive_text(error_message or ""),
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        }
-        path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-        return str(path)
+            # 文件名仅使用哈希，不含问题文本片段
+            case_id = self._safe_question_id(question)
+            path = raw_dir / f"{case_id}_{stage}_{uuid4().hex[:8]}.json"
+            model_name = self._model_name_for_prompt(prompt_name)
+
+            # 问题信息：默认仅保存元数据，config 显式 opt-in 才保存脱敏文本
+            raw_cfg = self._agent_config.get("raw_output", {}) if self._agent_config else {}
+            include_mode = raw_cfg.get("include_question", "never")  # never | redacted
+            if include_mode == "redacted":
+                question_entry = self._redact_pii(question)
+            else:
+                # 默认：仅保存结构特征，不保存问题原文
+                question_entry = {
+                    "length": len(question),
+                    "has_digits": bool(re.search(r'\d', question)),
+                    "char_categories": list(set(
+                        "CJK" if "\u4e00" <= c <= "\u9fff" else
+                        "ASCII" if c.isascii() else "OTHER"
+                        for c in question[:100]
+                    ))[:5],
+                }
+
+            payload = {
+                "question_id": case_id,
+                "question": question_entry,
+                "stage": stage,
+                "prompt_name": prompt_name,
+                "model_name": model_name,
+                "raw_output": self._redact_sensitive_data(raw_output),
+                "parsed_output": self._redact_sensitive_data(parsed_output),
+                "parse_success": parse_success,
+                "validation_success": validation_success,
+                "error_message": self._redact_sensitive_text(error_message or ""),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+            path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+            # 设置文件仅当前用户可读写
+            try:
+                os.chmod(str(path), 0o600)
+            except Exception:
+                pass  # 权限设置失败不影响诊断数据保存
+
+            return str(path)
+        except Exception:
+            # 写入失败不得影响主查询，静默返回 None
+            return None
 
     def _model_name_for_prompt(self, prompt_name: str) -> str:
         """按 prompt 阶段读取模型名，缺失时返回 unknown。"""
@@ -1971,15 +2004,13 @@ class Text2SQLAgent:
 
     @staticmethod
     def _safe_question_id(question: str) -> str:
-        """把问题文本转换为可跨平台使用的短文件名前缀。"""
-        compact = re.sub(r"\s+", "_", question.strip())[:30]
-        safe = re.sub(r"[^0-9A-Za-z\u4e00-\u9fff_-]+", "_", compact).strip("_")
-        digest = hashlib.sha1(question.encode("utf-8")).hexdigest()[:8]
-        return f"{safe or 'question'}_{digest}"
+        """将问题文本转换为文件名安全标识（仅使用哈希，不含原文片段）。"""
+        digest = hashlib.sha256(question.encode("utf-8")).hexdigest()[:16]
+        return f"q_{digest}"
 
     @classmethod
     def _redact_sensitive_data(cls, value: Any) -> Any:
-        """递归脱敏结构化数据中的密钥文本。"""
+        """递归脱敏结构化数据中的敏感信息（PII + 密钥）。"""
         if isinstance(value, dict):
             return {key: cls._redact_sensitive_data(item) for key, item in value.items()}
         if isinstance(value, list):
@@ -1989,20 +2020,54 @@ class Text2SQLAgent:
         return value
 
     @staticmethod
-    def _redact_sensitive_text(text: str) -> str:
-        """脱敏常见 API Key、token 与 Authorization 片段。"""
+    def _redact_pii(text: str) -> str:
+        """
+        脱敏个人身份信息（PII）。
+
+        覆盖：
+        - 中国大陆手机号（1[3-9]XXXXXXXXX）
+        - 邮箱地址
+        - 中国大陆身份证号（18 位）
+        - 中国大陆车牌（含新能源）
+        - API Key / Token / Authorization
+        """
         if not text:
             return ""
         patterns = [
-            r"(?i)(OPENAI_API_KEY|DEEPSEEK_API_KEY|API_KEY|TOKEN|AUTHORIZATION)\s*=\s*[^\s]+",
-            r"(?i)(Authorization:\s*Bearer\s+)[^\s]+",
-            r"(?i)(token\s*=\s*)[^\s]+",
-            r"sk-[A-Za-z0-9_\-]{8,}",
+            # 手机号（中国大陆）
+            (r'\b1[3-9]\d{9}\b', '[手机号]'),
+            # 邮箱
+            (r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', '[邮箱]'),
+            # 身份证号（18 位，含末位 X）
+            (r'\d{6}(?:19|20)\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])\d{3}[\dXx]', '[身份证号]'),
+            # 车牌号（含新能源）
+            (r'[京津沪渝冀豫云辽黑湘皖鲁新苏浙赣鄂桂甘晋蒙陕吉闽贵粤青藏川宁琼][A-Z][A-HJ-NP-Z0-9]{4,5}[A-HJ-NP-Z0-9挂学警港澳]', '[车牌号]'),
+            # API Key 等密钥
+            (r'sk-[A-Za-z0-9_-]{8,}', '[API_KEY]'),
+            (r'(?i)(api_key|apikey|secret|token|password)\s*[:=]\s*[^\s,}]+', r'\1=[已脱敏]'),
         ]
         redacted = text
-        for pattern in patterns:
-            redacted = re.sub(pattern, lambda match: f"{match.group(1)}[REDACTED]" if match.lastindex else "[REDACTED]", redacted)
+        for pattern, replacement in patterns:
+            redacted = re.sub(pattern, replacement, redacted)
         return redacted
+
+    @staticmethod
+    def _redact_sensitive_text(text: str) -> str:
+        """脱敏常见敏感信息：PII + API Key + token + Authorization 片段。"""
+        if not text:
+            return ""
+        # 先脱敏 PII
+        text = Text2SQLAgent._redact_pii(text)
+        # 再脱敏 Authorization header 等
+        patterns = [
+            (r'(?i)(Authorization:\s*Bearer\s+)[^\s]+', r'\1[已脱敏]'),
+            (r'(?i)(token\s*=\s*)[^\s]+', r'\1[已脱敏]'),
+        ]
+        redacted = text
+        for pattern, replacement in patterns:
+            redacted = re.sub(pattern, replacement, redacted)
+        return redacted
+
 
     def _has_ambiguous_amount(self, question: str) -> bool:
         """金额词未落到具体指标时必须反问"""
@@ -2257,8 +2322,8 @@ class Text2SQLAgent:
 def main():
     """CLI 入口 — 输出当前版本和已验证功能清单"""
     setup_console_encoding()
-    print("TianShu Text2SQL Agent v0.3.0")
-    print("规则模式 (rule) 定位为 PoC / 离线 fallback；LLM 模式需传入 llm_client 启用。")
+    print(f"TianShu Text2SQL Agent v{get_version()}")
+    print("规则模式 (rule) 用于离线测试/验证；LLM 模式需传入 llm_client 启用。")
     print("指标映射从 agent_config.yml 加载（rule_mode 段），新增指标无需改代码。")
     print()
     print("已验证：")

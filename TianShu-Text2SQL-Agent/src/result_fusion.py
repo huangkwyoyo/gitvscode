@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any, Optional
+from typing import Any
 
 from .explainer import fuse_results as _template_fuse_results
 from .ir import (
@@ -152,7 +152,7 @@ def fuse_results_with_llm(
         raw_output = response.content
     except Exception as exc:
         return (
-            f"[LLM 调用失败，回退模板解释]",
+            "[LLM 调用失败，回退模板解释]",
             False,
             f"LLM 调用异常: {exc}",
         )
@@ -163,13 +163,13 @@ def fuse_results_with_llm(
         explanation = parsed.get("explanation_text", "")
         if not explanation or not isinstance(explanation, str):
             return (
-                f"[LLM 输出缺少 explanation_text，回退模板解释]",
+                "[LLM 输出缺少 explanation_text，回退模板解释]",
                 False,
                 "LLM 输出中未找到 explanation_text 字段",
             )
     except Exception as exc:
         return (
-            f"[LLM 输出 JSON 解析失败，回退模板解释]",
+            "[LLM 输出 JSON 解析失败，回退模板解释]",
             False,
             f"JSON 解析异常: {exc}",
         )
@@ -183,7 +183,7 @@ def fuse_results_with_llm(
     )
     if violations:
         return (
-            f"[LLM 解释校验未通过，回退模板解释]",
+            "[LLM 解释校验未通过，回退模板解释]",
             False,
             f"校验违规: {'; '.join(violations)}",
         )

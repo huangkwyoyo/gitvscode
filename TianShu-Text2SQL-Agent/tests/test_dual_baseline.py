@@ -105,16 +105,15 @@ def test_build_source_commands_do_not_include_real_llm_runners():
     assert "run_harness.py" in flattened
 
 
-def test_build_source_commands_use_project_local_pytest_basetemp():
-    """Source baseline 的 pytest 临时目录必须落在项目内，避免系统 Temp 路径问题"""
+def test_build_source_commands_use_shared_pytest_entry():
+    """Source baseline 必须复用统一 pytest 临时目录插件。"""
     commands = build_source_commands()
     pytest_commands = [item.command for item in commands if item.name == "pytest"]
 
     assert pytest_commands
     pytest_command = pytest_commands[0]
-    assert "--basetemp" in pytest_command
-    basetemp_index = pytest_command.index("--basetemp") + 1
-    assert pytest_command[basetemp_index] == "harness/reports/test_tmp/pytest_source_baseline"
+    assert pytest_command[:3] == [sys.executable, "-m", "pytest"]
+    assert "--basetemp" not in pytest_command
 
 
 def test_build_runtime_commands_include_only_llm_runners():

@@ -16,10 +16,8 @@ C-2 安全回归测试：禁止关键字硬编码绕过契约权威源。
     = 21 个（含 extras）
 """
 
-import os
 import tempfile
 from pathlib import Path
-from unittest import mock
 
 import pytest
 import yaml

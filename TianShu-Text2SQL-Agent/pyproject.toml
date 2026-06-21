@@ -33,6 +33,7 @@ tianshu-ask = "src.agent:main"
 tianshu-api = "src.api.app:main"
 
 [tool.pytest.ini_options]
+addopts = "-p harness.pytest_runtime"
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 asyncio_mode = "auto"
@@ -43,3 +44,23 @@ markers = [
 [tool.ruff]
 line-length = 100
 target-version = "py310"
+
+[tool.ruff.lint]
+# 使用 ruff 默认规则集（pyflakes + pycodestyle），不额外启用严格规则
+# per-file-ignores 仅豁免标准模式：测试 sys.path 插入、既存 shadow 变量
+
+[tool.ruff.lint.per-file-ignores]
+# 测试文件：sys.path.insert 必须在导入之前
+"tests/**/*.py" = ["E402"]
+# 脚本文件：需要 sys.path 设置来导入项目模块
+"scripts/**/*.py" = ["E402"]
+# Harness 入口脚本：需要项目路径设置
+"harness/run_*.py" = ["E402"]
+# 既存问题：field 变量遮蔽 dataclasses.field 导入（非本次引入，不修改循环变量）
+"src/llm_pipeline.py" = ["F402"]
+
+[tool.ruff.format]
+# 与 line-length 保持一致
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false

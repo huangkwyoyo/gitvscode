@@ -262,7 +262,7 @@ def check_fallback_to_template() -> dict[str, Any]:
         }
 
     # 构建最小可用的 UnifiedResponse
-    summary = ResultSummary(
+    _summary = ResultSummary(
         source_plan_index=1,
         metrics=["trip_count"],
         primary_table="gold.dws_daily_trip_summary",
@@ -378,7 +378,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="LLM 结果融合安全门禁")
     parser.add_argument("--config", default=None,
                         help="Harness 配置文件路径（本检查不使用，仅为兼容接口保留）")
-    args = parser.parse_args()
+    _args = parser.parse_args()
 
     sql_result = check_sql_keyword_detection()
     causal_result = check_causal_language_detection()

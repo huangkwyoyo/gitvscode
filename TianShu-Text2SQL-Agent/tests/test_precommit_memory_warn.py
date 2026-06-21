@@ -41,8 +41,6 @@ from harness.run_precommit_memory_warn import (
     _find_matching_brace,
     _get_git_info,
     _get_worktree_dirty,
-    _record_observation,
-    _run_fast_gate_step3,
     render_blocking_output,
     render_warn_output,
     run_precommit_warn,
@@ -488,7 +486,6 @@ def test_uses_temporary_report_dir(monkeypatch):
 
 def test_temp_dir_is_cleaned_up(monkeypatch):
     """临时目录应在脚本结束后被清理。"""
-    import tempfile as tf
     # 使用项目内的临时目录避免 Windows tmp_path 权限问题
     temp_subdir = str(PROJECT_ROOT / "harness" / "reports" / "precommit_test_tmp")
 

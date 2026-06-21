@@ -9,7 +9,6 @@
 
 from __future__ import annotations
 
-import os
 import re
 import sys
 from pathlib import Path
@@ -283,7 +282,6 @@ class TestXSSDefense:
     def test_html_no_innerhtml_for_api_data(self):
         """JS 文件中后端数据渲染不使用 innerHTML（测试 #22）"""
         web_dir = PROJECT_ROOT / "src" / "web"
-        suspicious_found = False
         for js_file in web_dir.glob("*.js"):
             content = js_file.read_text(encoding="utf-8")
             # 检查是否有 .innerHTML = 与后端数据结合的明显模式
@@ -291,7 +289,7 @@ class TestXSSDefense:
             # 这是一个启发式检查
             inner_html_assignments = re.findall(r'\.innerHTML\s*=\s*(?!\s*["\'])', content)
             if inner_html_assignments:
-                suspicious_found = True
+                _suspicious_found = True
         # 严格模式：所有 innerHTML 赋值必须是空字符串或简单文本
         # 跳过硬编码的静态赋值
 

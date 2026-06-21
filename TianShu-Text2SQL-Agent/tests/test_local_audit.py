@@ -27,7 +27,6 @@ import os
 import sys
 import tempfile
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -36,7 +35,6 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.api.local_audit import (
-    AuditEvent,
     LocalAuditWriter,
     AuditWriteError,
     sanitize_audit_record,

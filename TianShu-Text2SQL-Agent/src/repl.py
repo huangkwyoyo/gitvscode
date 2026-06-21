@@ -9,6 +9,7 @@ TianShu Text2SQL Agent 交互式 REPL。
 
 from __future__ import annotations
 
+import sys
 from datetime import datetime
 
 from .agent import Text2SQLAgent
@@ -22,9 +23,9 @@ def _print_banner(agent: Text2SQLAgent):
     print("  TianShu 中文问数 Agent — 交互式 REPL")
     print(f"  启动时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     if agent.is_ready:
-        print(f"  DuckDB: ✅ 已连接")
+        print("  DuckDB: ✅ 已连接")
     else:
-        print(f"  DuckDB: ⚠️ 离线模式（契约文件可用）")
+        print("  DuckDB: ⚠️ 离线模式（契约文件可用）")
     print()
     print("  输入问题开始查询，输入 'quit' 或 'exit' 退出")
     print("=" * 60)

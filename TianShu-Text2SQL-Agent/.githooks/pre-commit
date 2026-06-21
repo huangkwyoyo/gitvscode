@@ -35,8 +35,27 @@ echo -e "${CYAN}  TianShu Text2SQL Agent — 快速门禁 (pre-commit)${NC}"
 echo -e "${CYAN}═══════════════════════════════════════════════════════${NC}"
 echo ""
 
-# ── 第一步：代码编译检查 ──────────────────────────────
-echo -e "${YELLOW}[1/5] 代码编译检查 (compileall)...${NC}"
+# ── 第一步：Ruff 代码检查 ──────────────────────────────
+echo -e "${YELLOW}[1/6] Ruff 代码检查...${NC}"
+if python -m ruff check . 2>&1; then
+    echo -e "  ${GREEN}✅ PASS${NC} — Ruff 代码检查通过"
+else
+    echo -e "  ${RED}❌ FAIL${NC} — 存在 Ruff 违规"
+    echo ""
+    echo -e "  ${YELLOW}修复建议：${NC}"
+    echo "    运行 python -m ruff check . 查看具体违规"
+    echo "    运行 python -m ruff check . --fix 自动修复安全项"
+    echo ""
+    echo -e "${RED}═══════════════════════════════════════════════════════${NC}"
+    echo -e "${RED}  快速门禁未通过 — commit 已阻断${NC}"
+    echo -e "${RED}═══════════════════════════════════════════════════════${NC}"
+    echo ""
+    echo "  跳过方式（不推荐）：git commit --no-verify"
+    exit 1
+fi
+
+# ── 第二步：代码编译检查 ──────────────────────────────
+echo -e "${YELLOW}[2/6] 代码编译检查 (compileall)...${NC}"
 if python -m compileall -q src harness tests 2>/dev/null; then
     echo -e "  ${GREEN}✅ PASS${NC} — 所有 Python 文件编译通过"
 else
@@ -54,8 +73,8 @@ else
 fi
 
 # ── 第二步：单元测试 ──────────────────────────────────
-echo -e "${YELLOW}[2/5] 单元测试 (pytest)...${NC}"
-if python -m pytest -q --basetemp harness/reports/test_tmp/pytest_precommit_hook 2>&1; then
+echo -e "${YELLOW}[3/6] 单元测试 (pytest)...${NC}"
+if python -m pytest -q 2>&1; then
     echo -e "  ${GREEN}✅ PASS${NC} — 所有测试用例通过"
 else
     echo ""
@@ -71,7 +90,7 @@ else
 fi
 
 # ── 第三步：Harness 五项安全检查 ──────────────────────────
-echo -e "${YELLOW}[3/5] Harness 五项安全检查...${NC}"
+echo -e "${YELLOW}[4/6] Harness 五项安全检查...${NC}"
 if python harness/run_harness.py --step 1 2>&1 && \
    python harness/run_harness.py --step 2 2>&1 && \
    python harness/run_harness.py --step 3 2>&1 && \
@@ -97,7 +116,7 @@ else
 fi
 
 # ── 第四步：Memory Gate 记忆更新检查 ────────────────────
-echo -e "${YELLOW}[4/5] Memory Gate 记忆更新检查...${NC}"
+echo -e "${YELLOW}[5/6] Memory Gate 记忆更新检查...${NC}"
 MEMORY_OUTPUT=$(python harness/checks/check_memory_update.py 2>&1)
 MEMORY_EXIT=$?
 if [ $MEMORY_EXIT -eq 0 ]; then
@@ -120,7 +139,7 @@ else
 fi
 
 # ── 第五步：Memory Harness pre-commit blocking（Step 23）──
-echo -e "${YELLOW}[5/5] Memory Harness pre-commit blocking...${NC}"
+echo -e "${YELLOW}[6/6] Memory Harness pre-commit blocking...${NC}"
 MEMORY_HARNESS_OUTPUT=$(python harness/run_precommit_memory_warn.py --mode blocking --record-observation 2>&1)
 MEMORY_HARNESS_EXIT=$?
 echo "$MEMORY_HARNESS_OUTPUT"

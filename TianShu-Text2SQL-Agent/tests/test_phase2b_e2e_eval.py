@@ -20,10 +20,8 @@ from __future__ import annotations
 import json
 import sys
 import tempfile
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-from unittest.mock import patch, MagicMock
 
 import pytest
 import yaml

@@ -26,7 +26,6 @@
 from __future__ import annotations
 
 import datetime as _dt
-from collections import OrderedDict
 from typing import Any, Optional
 
 from .ir import (
@@ -235,7 +234,6 @@ def _do_merge(
 
     for i, ur in enumerate(responses):
         result = ur.result
-        summary = summaries[i]
         if result is None or not result.rows:
             sources.append({})
             source_metric_names.append([])
@@ -274,7 +272,7 @@ def _do_merge(
     ranges = _check_range_consistency(sources, summaries)
     if ranges["has_mismatch"]:
         merge_warnings.append(
-            f"date 范围不一致: "
+            "date 范围不一致: "
             + "; ".join(
                 f"计划{idx}={rng}"
                 for idx, rng in ranges["per_source"].items()
@@ -333,7 +331,7 @@ def _do_merge(
         if ranges["has_mismatch"]:
             merge_warnings.insert(
                 0,
-                f"date 范围不一致: "
+                "date 范围不一致: "
                 + "; ".join(
                     f"计划{idx}={rng}"
                     for idx, rng in ranges["per_source"].items()

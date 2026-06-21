@@ -17,10 +17,7 @@
 from __future__ import annotations
 
 import ast
-import textwrap
-from unittest.mock import MagicMock, patch
 
-import pytest
 
 from src.cross_domain_policy import (
     CrossDomainDecision,
@@ -249,7 +246,7 @@ class TestUnknownDomain:
         # 使用 SPATIAL 但加上一个超出范围的值来测试
         # 实际上所有 Domain 值都是标准枚举值，我们需要模拟未知域
         # 通过直接传入一个不在 Domain 枚举中的对象来模拟
-        decision = policy.evaluate(
+        _decision = policy.evaluate(
             domains=[Domain.TRAFFIC, Domain.SPATIAL],
             metrics=["trip_count"],
         )
@@ -570,7 +567,7 @@ class TestPolicyWarningInTrace:
         from src.agent import Text2SQLAgent
 
         # Mock resolver 和 LLM pipeline，聚焦 policy 集成
-        agent = Text2SQLAgent()
+        _agent = Text2SQLAgent()
 
         # 模拟生成一条含 multi_plan 策略的 AgentResponse
         from src.ir import (
@@ -579,10 +576,6 @@ class TestPolicyWarningInTrace:
             IntentType,
             TimeRange,
             TimeRangeType,
-            SQLResult,
-            UnifiedResponse,
-            SubIntent,
-            ExecutionTrace,
         )
 
         # 构造 traffic + safety 的假响应（模拟 policy 被调用后的状态）
@@ -865,17 +858,6 @@ class TestBackwardCompatibility:
     def test_policy_does_not_break_existing_imports(self):
         """cross_domain_policy 导入不影响现有模块"""
         # 所有核心模块应仍可正常导入
-        from src.ir import (
-            Domain, SQLPlan, SQLResult, ResultSummary,
-            MergedResult, MergeStatus, UnifiedResponse, AgentResponse,
-        )
-        from src.result_merge import merge_results_on_date
-        from src.result_fusion import (
-            fuse_results_with_llm,
-            validate_fusion_output,
-            fallback_to_template,
-        )
-        from src.cross_domain_policy import CrossDomainPolicy, CrossDomainDecision
         assert True  # 导入成功
 
 

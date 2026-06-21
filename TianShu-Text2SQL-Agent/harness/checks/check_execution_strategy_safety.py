@@ -237,7 +237,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="执行策略安全门禁")
     parser.add_argument("--config", default=None,
                         help="Harness 配置文件路径（本检查不使用，仅为兼容接口保留）")
-    args = parser.parse_args()
+    _args = parser.parse_args()
 
     default_result = check_default_strategy_is_serial()
     safety_result = check_plan_executor_safety_link()

@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import json
 import sys
-import tempfile
 from pathlib import Path
 from unittest import mock
 
@@ -34,7 +33,6 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from harness.memory_rule_enforcement import (  # noqa: E402
-    ENFORCEMENT_BLOCKING_DRY_RUN,
     ENFORCEMENT_BLOCKING_ERROR,
     ENFORCEMENT_IGNORED,
     ENFORCEMENT_VISIBILITY,
@@ -848,7 +846,7 @@ class TestSnapshotWriter:
         rules_path = _write_rules_yml(rules, tmp_path)
         report = build_enforcement_report(rules_path)
         output_dir = tmp_path / "enforcements"
-        paths = write_enforcement_snapshot(report, output_dir)
+        _paths = write_enforcement_snapshot(report, output_dir)
 
         # 检查没有 latest 文件
         all_files = list(output_dir.glob("*"))
@@ -1075,7 +1073,7 @@ class TestSafetyBoundaries:
         rules_path = _write_rules_yml(rules, tmp_path)
         original_content = rules_path.read_text(encoding="utf-8")
 
-        report = build_enforcement_report(rules_path)
+        _report = build_enforcement_report(rules_path)
 
         # 验证文件未被修改
         current_content = rules_path.read_text(encoding="utf-8")
@@ -1094,7 +1092,7 @@ class TestSafetyBoundaries:
         )
         original = rules_path.read_text(encoding="utf-8")
 
-        report = build_enforcement_report(rules_path)
+        _report = build_enforcement_report(rules_path)
         assert rules_path.read_text(encoding="utf-8") == original
 
     def test_no_llm_calls(self):

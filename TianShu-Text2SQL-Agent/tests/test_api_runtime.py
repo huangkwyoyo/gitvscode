@@ -36,7 +36,6 @@ class TestRuntimeLifecycle:
     async def test_start_creates_agent(self):
         """startup 应创建 Agent 实例"""
         from src.api.runtime import AgentRuntime
-        from unittest.mock import patch, MagicMock
 
         runtime = AgentRuntime(
             agent_config_path="config/agent_config.yml",
@@ -58,7 +57,6 @@ class TestRuntimeLifecycle:
     async def test_shutdown_closes_agent(self):
         """shutdown 应调用 Agent.close()"""
         from src.api.runtime import AgentRuntime
-        from unittest.mock import patch, MagicMock
 
         runtime = AgentRuntime(
             agent_config_path="config/agent_config.yml",
@@ -81,7 +79,6 @@ class TestRuntimeLifecycle:
     async def test_shutdown_clears_agent(self):
         """shutdown 后 agent 应置为 None"""
         from src.api.runtime import AgentRuntime
-        from unittest.mock import patch, MagicMock
 
         runtime = AgentRuntime(
             agent_config_path="config/agent_config.yml",
@@ -112,7 +109,6 @@ class TestReadiness:
     async def test_ready_when_online(self):
         """Agent 在线时 readiness 返回 ready"""
         from src.api.runtime import AgentRuntime
-        from unittest.mock import patch, MagicMock
 
         runtime = AgentRuntime(
             agent_config_path="config/agent_config.yml",
@@ -187,7 +183,6 @@ class TestAskPreconditions:
     async def test_ask_agent_not_online_raises(self):
         """Agent 存在但不在线时 ask 应抛出 ServiceNotReadyError"""
         from src.api.runtime import AgentRuntime, ServiceNotReadyError
-        from unittest.mock import MagicMock
 
         runtime = AgentRuntime(
             agent_config_path="config/agent_config.yml",
@@ -215,7 +210,6 @@ class TestAskNormal:
         """ask 应返回公开响应 dict"""
         from src.api.runtime import AgentRuntime
         from src.ir import AgentResponse
-        from unittest.mock import MagicMock, patch
 
         runtime = AgentRuntime(
             agent_config_path="config/agent_config.yml",
@@ -261,7 +255,6 @@ class TestConcurrencyLock:
     async def test_lock_released_on_exception(self):
         """ask 异常后 lock 应被释放"""
         from src.api.runtime import AgentRuntime
-        from unittest.mock import MagicMock
 
         runtime = AgentRuntime(
             agent_config_path="config/agent_config.yml",
@@ -276,7 +269,7 @@ class TestConcurrencyLock:
 
         # 请求 agent.ask 会在 executor 中抛异常
         # 但锁应被释放
-        initial_locked = runtime._lock.locked()
+        _initial_locked = runtime._lock.locked()
 
         try:
             await runtime.ask("test")
@@ -290,7 +283,6 @@ class TestConcurrencyLock:
     async def test_lock_serializes_access(self):
         """lock 应串行化 ask 调用 —— 同时只有一个 ask 在执行"""
         from src.api.runtime import AgentRuntime
-        from unittest.mock import MagicMock
         import threading
 
         runtime = AgentRuntime(

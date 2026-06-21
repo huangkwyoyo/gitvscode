@@ -2,13 +2,14 @@
 # 在 Git Bash (Windows) 或 Linux/macOS 终端中使用
 # 所有目标均可从项目根目录执行
 
-.PHONY: install test harness api closure baseline verify clean env help web-smoke
+.PHONY: install test lint harness api closure baseline verify clean env help web-smoke
 
 # ── 默认目标 ──
 help:
 	@echo "TianShu Text2SQL Agent — 可用目标:"
 	@echo ""
 	@echo "  make install   安装全部依赖（含 API 和开发工具）"
+	@echo "  make lint      运行 Ruff 代码检查"
 	@echo "  make test      运行全部单元测试"
 	@echo "  make harness   运行 12 项 Harness 安全检查"
 	@echo "  make api       启动 REST API 服务（需设置 TIANSHU_LOCAL_API_TOKEN）"
@@ -24,9 +25,13 @@ help:
 install:
 	pip install -e ".[api,dev]"
 
+# ── 运行 Ruff 代码检查 ──
+lint:
+	python -m ruff check .
+
 # ── 运行全部单元测试 ──
 test:
-	python -m pytest -q --tb=short
+	python -m pytest -q
 
 # ── 运行 12 项 Harness 安全检查 ──
 harness:
@@ -49,25 +54,28 @@ baseline:
 # ── 一键验收：编译 → 测试 → 安全 → 闭环 ──
 verify:
 	@echo "═══════════════════════════════════════════════════════"
-	@echo "  TianShu Text2SQL Agent v1.0.0 — 完整验收流水线"
+	@echo "  TianShu Text2SQL Agent v$$(python -c \"from src.version import VERSION; print(VERSION)\") — 完整验收流水线"
 	@echo "═══════════════════════════════════════════════════════"
 	@echo ""
-	@echo "[1/4] 代码编译检查..."
+	@echo "[1/5] Ruff 代码检查..."
+	@python -m ruff check . && echo "  ✅ Ruff 通过" || (echo "  ❌ Ruff 失败" && exit 1)
+	@echo ""
+	@echo "[2/5] 代码编译检查..."
 	@python -m compileall -q src harness tests && echo "  ✅ 编译通过" || (echo "  ❌ 编译失败" && exit 1)
 	@echo ""
-	@echo "[2/4] 全部单元测试..."
-	@python -m pytest -q --tb=short && echo "  ✅ 测试通过" || (echo "  ❌ 测试失败" && exit 1)
+	@echo "[3/5] 全部单元测试..."
+	@python -m pytest -q && echo "  ✅ 测试通过" || (echo "  ❌ 测试失败" && exit 1)
 	@echo ""
-	@echo "[3/4] 12 项 Harness 安全检查..."
+	@echo "[4/5] 12 项 Harness 安全检查..."
 	@python harness/run_harness.py && echo "  ✅ Harness 通过" || (echo "  ❌ Harness 失败" && exit 1)
 	@echo ""
-	@echo "[4/4] 本地 API 安全闭环..."
+	@echo "[5/5] 本地 API 安全闭环..."
 	@python scripts/run_local_api_closure.py \
 		--api-config config/api_config.yml \
 		--tianshu-config config/tianshu_target.yml && echo "  ✅ 闭环通过" || (echo "  ❌ 闭环失败" && exit 1)
 	@echo ""
 	@echo "═══════════════════════════════════════════════════════"
-	@echo "  ✅ Phase 6D v1.0.0 验收完成"
+	@echo "  ✅ 验收完成"
 	@echo "═══════════════════════════════════════════════════════"
 
 # ── 清理临时文件 ──

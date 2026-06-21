@@ -584,7 +584,7 @@ def _evaluate_active_to_blocking(
     val_item = _find_rule_in_validation(rule_id, validation_report)
     validation_status = val_item["status"] if val_item else "not_found"
     if validation_status == "failed":
-        reasons.append(f"validation report 中存在 failed")
+        reasons.append("validation report 中存在 failed")
         missing_reqs.append("validation report 有 failed 项")
 
     # 综合判定
@@ -629,7 +629,7 @@ def _evaluate_rule(
     """
     status = rule.get("status", "")
     blocking = rule.get("blocking", None)
-    rule_id = str(rule.get("rule_id", ""))
+    _rule_id = str(rule.get("rule_id", ""))
     coverage = _build_coverage_status_map(rule, project_root)
     fg_default = _check_fast_gate_stability(fast_gate_history, 0)
 

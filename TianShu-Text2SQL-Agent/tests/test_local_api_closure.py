@@ -18,23 +18,20 @@ import os
 import sys
 import tempfile
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
-import pytest
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from scripts.run_local_api_closure import (
-    RUN_ID,
     check_audit_file,
     check_preconditions,
     check_response_security,
     generate_run_id,
     render_json_report,
     render_markdown_report,
-    run_smoke_case,
     wait_for_server,
 )
 

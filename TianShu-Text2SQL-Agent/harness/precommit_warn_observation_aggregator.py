@@ -377,14 +377,14 @@ def render_aggregation_markdown(agg: AggregationResult) -> str:
     lines.append("")
     lines.append(f"**Run ID:** `{agg.run_id}`")
     lines.append(f"**时间:** {agg.timestamp}")
-    lines.append(f"**Step:** 21c — Observation Aggregator")
+    lines.append("**Step:** 21c — Observation Aggregator")
     lines.append("")
 
     # 汇总
     lines.append("## Summary")
     lines.append("")
-    lines.append(f"| 指标 | 值 |")
-    lines.append(f"|------|-----|")
+    lines.append("| 指标 | 值 |")
+    lines.append("|------|-----|")
     lines.append(f"| observation_count | {agg.observation_count} |")
     lines.append(f"| observation_span_days | {agg.observation_span_days} |")
     lines.append(f"| meets_20_commits | {agg.meets_20_commits} |")
@@ -404,8 +404,8 @@ def render_aggregation_markdown(agg: AggregationResult) -> str:
     ds = agg.duration_stats
     lines.append("## Duration Stats")
     lines.append("")
-    lines.append(f"| 指标 | 值 |")
-    lines.append(f"|------|-----|")
+    lines.append("| 指标 | 值 |")
+    lines.append("|------|-----|")
     lines.append(f"| 平均耗时 | {ds.average_ms:.1f} ms |")
     lines.append(f"| 最小耗时 | {ds.min_ms:.1f} ms |")
     lines.append(f"| 最大耗时 | {ds.max_ms:.1f} ms |")
@@ -415,8 +415,8 @@ def render_aggregation_markdown(agg: AggregationResult) -> str:
     # Warning 统计
     lines.append("## Warning Stats")
     lines.append("")
-    lines.append(f"| 指标 | 值 |")
-    lines.append(f"|------|-----|")
+    lines.append("| 指标 | 值 |")
+    lines.append("|------|-----|")
     lines.append(f"| warning_total | {agg.warning_total} |")
     lines.append(f"| worktree_pollution_count | {agg.worktree_pollution_count} |")
     lines.append(f"| latest_generation_count | {agg.latest_generation_count} |")
@@ -426,8 +426,8 @@ def render_aggregation_markdown(agg: AggregationResult) -> str:
     ta = agg.ta_r018_stats
     lines.append("## TA-R018 Stats")
     lines.append("")
-    lines.append(f"| 结果 | 次数 | 占比 |")
-    lines.append(f"|------|------|------|")
+    lines.append("| 结果 | 次数 | 占比 |")
+    lines.append("|------|------|------|")
     lines.append(
         f"| passed | {ta.passed} | "
         f"{ta.passed / max(ta.total, 1) * 100:.1f}% |"
@@ -450,8 +450,8 @@ def render_aggregation_markdown(agg: AggregationResult) -> str:
     # Readiness 口径
     lines.append("## Readiness Criteria (事实统计)")
     lines.append("")
-    lines.append(f"| 条件 | 当前值 | 阈值 | 满足 |")
-    lines.append(f"|------|--------|------|:--:|")
+    lines.append("| 条件 | 当前值 | 阈值 | 满足 |")
+    lines.append("|------|--------|------|:--:|")
     lines.append(
         f"| ≥{MIN_OBSERVATION_RUNS} 次 commit | {agg.observation_count} | "
         f"{MIN_OBSERVATION_RUNS} | {'✅' if agg.meets_20_commits else '❌'} |"
@@ -490,7 +490,7 @@ def render_aggregation_markdown(agg: AggregationResult) -> str:
     lines.append("---")
     lines.append("")
     lines.append(f"*聚合生成: {agg.timestamp}*")
-    lines.append(f"*聚合器: Claude Code Agent (Step 21c)*")
+    lines.append("*聚合器: Claude Code Agent (Step 21c)*")
     lines.append("")
     lines.append(
         "> ⚠️ 本报告仅提供事实统计。Readiness 判定须由 Step 22 在人工审查后做出。"
@@ -583,7 +583,7 @@ def main(argv: list[str] | None = None) -> int:
 
     # 写入报告
     paths = write_aggregation_snapshot(agg, args.output_dir, errors)
-    print(f"\n聚合报告已生成:")
+    print("\n聚合报告已生成:")
     print(f"  JSON: {paths['json']}")
     print(f"  MD:   {paths['markdown']}")
 

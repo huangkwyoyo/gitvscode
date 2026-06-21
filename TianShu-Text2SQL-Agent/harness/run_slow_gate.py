@@ -259,8 +259,8 @@ def render_markdown(report: SlowGateReport) -> str:
     lines.append("## 汇总")
     lines.append("")
     overall_icon = "✅" if report.overall == "PASS" else ("⚠️" if report.overall == "PARTIAL" else "❌")
-    lines.append(f"| 状态 | 总数 | 通过 | 失败 | 阻塞 | 总耗时 |")
-    lines.append(f"|------|------|------|------|------|--------|")
+    lines.append("| 状态 | 总数 | 通过 | 失败 | 阻塞 | 总耗时 |")
+    lines.append("|------|------|------|------|------|--------|")
     lines.append(
         f"| {overall_icon} **{report.overall}** "
         f"| {report.total_steps} "
@@ -451,7 +451,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Provider: {args.provider}")
     if args.model:
         print(f"Model: {args.model}")
-    print(f"约束: 真实 LLM 调用，仅观测不阻断")
+    print("约束: 真实 LLM 调用，仅观测不阻断")
     print("=" * 60)
     print()
 
@@ -474,7 +474,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"{overall_icon} 慢速门禁观测: {report.overall}")
     print(f"   {report.passed} 通过 / {report.failed} 失败 / {report.blocked} 阻塞")
     print(f"   总耗时: {report.duration_total_seconds:.1f}s")
-    print(f"   ⚠️ 此为观测报告，不作为门禁阻断信号")
+    print("   ⚠️ 此为观测报告，不作为门禁阻断信号")
     print(f"{'=' * 60}")
 
     if args.json:

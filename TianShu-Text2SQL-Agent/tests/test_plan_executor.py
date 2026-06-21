@@ -9,31 +9,23 @@ Phase A：PlanExecutor 单元测试和回归测试。
     - 端到端回归（单指标、同表多指标、跨表多计划）
 """
 
-import pytest
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock
 
 from src.ir import (
-    AgentResponse,
     Aggregation,
     Domain,
     ExecutionTrace,
-    IntentType,
     JoinPlan,
-    QuestionIntent,
     SQLPlan,
     SQLResult,
     Strategy,
     SubIntent,
-    TimeRange,
-    TimeRangeType,
     UnifiedResponse,
 )
 from src.plan_executor import PlanExecutor
 from src.execution_strategy import (
     SerialExecutionStrategy,
-    ThreadPoolExecutionStrategy,
 )
-from src.sql_gen import sql_plan_to_sql, validate_sql_safety
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -180,7 +172,7 @@ class TestSinglePlanExecution:
             primary_table="fact_trips",  # 无 schema 前缀
             aggregations=[Aggregation(expr="COUNT(*)", alias="cnt")],
         )
-        result = executor.execute_one(unsafe_plan)
+        _result = executor.execute_one(unsafe_plan)
 
         trace = executor.last_trace
         assert trace is not None
@@ -196,7 +188,7 @@ class TestSinglePlanExecution:
         executor = PlanExecutor(resolver, context)
 
         plan = _make_g3_trip_plan()
-        result = executor.execute_one(plan)
+        _result = executor.execute_one(plan)
 
         trace = executor.last_trace
         assert trace is not None
@@ -211,7 +203,7 @@ class TestSinglePlanExecution:
         executor = PlanExecutor(None, context)
 
         plan = _make_g3_trip_plan()
-        result = executor.execute_one(plan)
+        _result = executor.execute_one(plan)
 
         trace = executor.last_trace
         assert trace is not None

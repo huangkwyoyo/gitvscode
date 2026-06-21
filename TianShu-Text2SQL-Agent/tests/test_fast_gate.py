@@ -19,13 +19,12 @@ from harness.run_fast_gate import (
 )
 
 
-def test_pytest_step_uses_project_local_basetemp():
-    """pytest 步骤必须使用项目内临时目录，避免系统 Temp 权限导致误失败。"""
+def test_pytest_step_uses_shared_pytest_entry():
+    """pytest 步骤必须复用统一临时目录插件。"""
     pytest_step = next(step for step in STEPS if step["name"] == "pytest")
-    command_text = " ".join(pytest_step["command"])
 
-    assert "--basetemp" in pytest_step["command"]
-    assert "harness/reports/test_tmp/pytest_fast_gate" in command_text
+    assert pytest_step["command"][:3] == [sys.executable, "-m", "pytest"]
+    assert "--basetemp" not in pytest_step["command"]
 
 
 def test_fast_gate_total_steps_matches_executed_and_skipped(monkeypatch, tmp_path):

@@ -25,7 +25,6 @@ import argparse
 import json
 import os
 import secrets
-import signal
 import subprocess
 import sys
 import time
@@ -343,8 +342,8 @@ def render_markdown_report(json_report: dict) -> str:
         "",
         "## 概要",
         "",
-        f"| 指标 | 值 |",
-        f"|------|----|",
+        "| 指标 | 值 |",
+        "|------|----|",
         f"| 总计 | {json_report['summary']['total']} |",
         f"| 通过 | {json_report['summary']['passed']} |",
         f"| 失败 | {json_report['summary']['failed']} |",
@@ -394,7 +393,7 @@ def main():
     args = parser.parse_args()
 
     run_id = generate_run_id()
-    print(f"=== TianShu 本地 API 安全闭环 ===")
+    print("=== TianShu 本地 API 安全闭环 ===")
     print(f"Run ID: {run_id}")
     print()
 

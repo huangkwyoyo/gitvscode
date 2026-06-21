@@ -14,7 +14,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.llm import LLMClient, MockLLMClient, OpenAIChatLLMClient
-from src.llm_pipeline import PromptFixtureResult, PromptFixtureRunner, PromptRegressionReport
+from src.llm_pipeline import PromptFixtureRunner, PromptRegressionReport
 
 
 def build_fixture_mock_client(fixture_dir: Path | str = "tests/fixtures/prompts") -> MockLLMClient:

@@ -4,6 +4,18 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/)，版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased]
+
+### 治理
+
+- **Ruff 代码检查门禁**：零违规（433→0），安全修复 + per-file-ignores 配置，集成 CI/pre-commit/Makefile
+- **版本号统一**：建立 `src/version.py`（pyproject.toml 优先 + importlib.metadata 回退），移除所有硬编码版本号
+- **项目状态文档**：新建 `PROJECT_STATUS.md`，记录版本、流水线状态、已知阻塞、质量门禁覆盖
+- **README 清理**：移除易漂移的测试数量、VERSION 文件引用、过期步骤计数
+- **CI 工作流修复**：`.github/workflows/` 迁至仓库根目录，GitHub 可正确识别
+- **JOIN 白名单安全修复**：移除 resolver.py 和 llm_pipeline.py 的两处硬编码，100% 从权威契约加载
+- **CROSS JOIN 检测**：无论表对是否在白名单，CROSS JOIN 一律拒绝
+
 ## [1.0.0] - 2026-06-20
 
 ### 新增

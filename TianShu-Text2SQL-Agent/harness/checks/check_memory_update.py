@@ -272,7 +272,7 @@ def check_memory_coverage(classified_changes: dict[str, list[str]]) -> dict[str,
         checks.append({
             "name": "经验复盘覆盖——文件存在",
             "status": "FAIL",
-            "detail": f"检测到关键路径变更，但经验复盘文件不存在",
+            "detail": "检测到关键路径变更，但经验复盘文件不存在",
         })
         return {"checks": checks, "pass_count": 0, "fail_count": 1}
 
@@ -485,7 +485,7 @@ def load_memory_rules_registry() -> dict[str, Any]:
         return {
             "rules": [],
             "path": registry_path,
-            "load_error": f"文件不存在: docs/memory/memory_rules.yml",
+            "load_error": "文件不存在: docs/memory/memory_rules.yml",
         }
 
     try:
@@ -569,7 +569,7 @@ def check_registry_infrastructure(
         }
 
     rules: list[dict[str, Any]] = registry["rules"]
-    registry_path: Path = registry["path"]
+    _registry_path: Path = registry["path"]
 
     # ── Infra-3: duplicate rule_id ──
     rule_ids = [r.get("rule_id", "?") for r in rules]
@@ -617,7 +617,7 @@ def check_registry_infrastructure(
         checks.append({
             "name": "索引生成脚本存在",
             "status": "FAIL",
-            "detail": f"脚本不存在: scripts/generate_rule_index.py",
+            "detail": "脚本不存在: scripts/generate_rule_index.py",
         })
         infra_failures += 1
     else:
@@ -661,7 +661,7 @@ def check_registry_infrastructure(
         checks.append({
             "name": "索引 Markdown 存在",
             "status": "FAIL",
-            "detail": f"文件不存在: docs/memory/规则来源索引.md（请运行 generate_rule_index.py）",
+            "detail": "文件不存在: docs/memory/规则来源索引.md（请运行 generate_rule_index.py）",
         })
         infra_failures += 1
     else:
@@ -1254,7 +1254,7 @@ def print_report(
         else:
             registry_status = "PASS"
 
-        print(f"\n── Registry 状态汇总 ──")
+        print("\n── Registry 状态汇总 ──")
         # 判断 registry 是否成功加载：load_error 为空且无 FAIL 状态的基础设施检查指向加载失败
         load_failed = any(
             '文件不存在' in c.get('detail', '')

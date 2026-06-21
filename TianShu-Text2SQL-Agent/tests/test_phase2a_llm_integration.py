@@ -14,7 +14,6 @@ from __future__ import annotations
 import ast
 import json
 from pathlib import Path
-from textwrap import dedent
 
 import pytest
 import yaml
@@ -29,13 +28,9 @@ from src.ir import (
     TimeRange,
     TimeRangeType,
 )
-from src.llm import FakeLLMClient, LLMClient, LLMRequest, PromptLoader
+from src.llm import FakeLLMClient
 from src.llm_adapter import LLMAdapter, RefusalDetected
 from src.schema_validators import (
-    EXPLAIN_OUTPUT_SCHEMA,
-    INTENT_OUTPUT_SCHEMA,
-    PLAN_OUTPUT_SCHEMA,
-    SQL_OUTPUT_SCHEMA,
     validate_explain_output,
     validate_intent_output,
     validate_plan_output,
@@ -228,7 +223,7 @@ def test_adapter_classify_intent_handles_clarification():
 
 def test_adapter_plan_sql_returns_valid_sql_plan():
     """LLMAdapter.plan_sql 应返回合法的 SQLPlan。"""
-    intent_case = _load_fixture_cases("intent_classifier_cases.yml")[0]
+    _intent_case = _load_fixture_cases("intent_classifier_cases.yml")[0]
     plan_case = _load_fixture_cases("sql_planner_cases.yml")[0]
 
     fake_client = FakeLLMClient({
@@ -262,7 +257,7 @@ def test_adapter_plan_sql_returns_valid_sql_plan():
 
 def test_adapter_generate_sql_returns_safe_sql_string():
     """LLMAdapter.generate_sql 应返回通过安全校验的 SQL 字符串。"""
-    plan_case = _load_fixture_cases("sql_planner_cases.yml")[0]
+    _plan_case = _load_fixture_cases("sql_planner_cases.yml")[0]
 
     fake_client = FakeLLMClient({
         "sql_generator": json.dumps({
@@ -485,8 +480,6 @@ def test_phase2a_modules_importable():
     from src.schema_validators import (
         validate_intent_output,
         validate_plan_output,
-        validate_sql_output,
-        validate_explain_output,
     )
     from src.llm_adapter import LLMAdapter
     assert callable(validate_intent_output)
@@ -498,22 +491,6 @@ def test_phase2a_modules_importable():
 
 def test_phase2a_changes_dont_break_existing_imports():
     """现有所有模块必须在 Phase 2A 变更后仍然可正常导入。"""
-    from src.ir import (
-        AgentResponse, Domain, IntentType, QuestionIntent,
-        SQLPlan, SQLResult, Strategy, TimeRange, TimeRangeType,
-    )
-    from src.llm import (
-        FakeLLMClient, LLMClient, LLMRequest, LLMResponse,
-        MockLLMClient, PromptLoader,
-    )
-    from src.llm_pipeline import (
-        PromptFixtureRunner,
-        extract_json_object,
-        question_intent_from_dict,
-        sql_plan_from_dict,
-    )
-    from src.sql_gen import sql_plan_to_sql, validate_sql_safety
-    from src.agent import Text2SQLAgent
 
     assert True  # 所有导入成功
 

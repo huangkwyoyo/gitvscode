@@ -198,7 +198,7 @@ class TestRateLimitBeforeAgent:
     def test_rate_limit_check_called_before_agent_ask(self):
         """限流检查在 agent.ask() 之前被调用"""
         limiter = FixedWindowRateLimiter(requests_per_minute=30, burst=3)
-        mock_agent = MagicMock()
+        _mock_agent = MagicMock()
 
         # 模拟中间件顺序：先限流，后调用 agent
         call_order = []

@@ -228,7 +228,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="PlanExecutor 执行层安全门禁")
     parser.add_argument("--config", default=None,
                         help="Harness 配置文件路径（本检查不使用，仅为兼容接口保留）")
-    args = parser.parse_args()
+    _args = parser.parse_args()
 
     safety_result = check_safety_chain_in_source()
     trace_result = check_execution_trace_safety_fields()

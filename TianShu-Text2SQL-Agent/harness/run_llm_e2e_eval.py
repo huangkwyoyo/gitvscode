@@ -24,7 +24,6 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-import time
 import traceback
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -39,7 +38,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.agent import Text2SQLAgent
-from src.ir import AgentResponse, QuestionIntent, SQLPlan
+from src.ir import AgentResponse
 from src.llm import LLMClient, MockLLMClient, OpenAIChatLLMClient, PromptLoader
 from src.llm_adapter import RefusalDetected
 from src.safety_policy_loader import load_forbidden_keywords

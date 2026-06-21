@@ -20,7 +20,6 @@ import pytest
 
 from src.ir import (
     Aggregation,
-    ExecutionTrace,
     JoinPlan,
     SQLPlan,
     SQLResult,
@@ -30,7 +29,6 @@ from src.ir import (
 )
 from src.plan_executor import PlanExecutor
 from src.execution_strategy import (
-    ExecutionStrategy,
     SerialExecutionStrategy,
     ThreadPoolExecutionStrategy,
 )
@@ -539,9 +537,9 @@ class TestThreadPoolIsolation:
         context = _make_mock_context()
 
         # 使用 thread-local 存储来区分 worker，确保只有一个 worker 失败
-        thread_local = threading.local()
+        _thread_local = threading.local()
         # 使用 plan_index 作为 key 来区分
-        fail_plan_index = [1]  # 让 plan_index=1 的 worker 失败
+        _fail_plan_index = [1]  # 让 plan_index=1 的 worker 失败
 
         def _factory():
             return PlanExecutor(

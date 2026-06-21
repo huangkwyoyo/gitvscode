@@ -24,11 +24,9 @@
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 import sys
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
@@ -45,7 +43,6 @@ from harness.memory_rule_enforcement_review import (
     _reject_latest,
     build_review_report,
     cli_main,
-    load_enforcement_snapshot,
     load_rules,
     render_review_json,
     render_review_markdown,
@@ -296,7 +293,7 @@ class TestReviewRuleReadinessNeedsMoreObservation:
         result = review_rule_readiness(rule, enforcement_results, snapshot_count=2)
 
         assert result["upgrade_recommendation"] == "needs_more_observation", (
-            f"2 次 snapshot 仍应 needs_more_observation"
+            "2 次 snapshot 仍应 needs_more_observation"
         )
 
     def test_three_snapshots_but_would_fail_returns_needs_more_observation(self, monkeypatch):
@@ -712,7 +709,6 @@ class TestCLITimestampSnapshot:
     def test_cli_generates_timestamp_not_latest(self, monkeypatch, tmp_path):
         """CLI 正常运行后，输出目录中无 latest 文件。"""
         # Mock 所有底层操作用真实 CLI 路径
-        import harness.memory_rule_enforcement_review as review_mod
 
         # 构建一个完整的最小化 enforcement snapshot 作为输入
         snapshot_data = _make_enforcement_snapshot([
@@ -745,7 +741,7 @@ class TestCLITimestampSnapshot:
         # 应有 timestamp snapshot
         timestamp_files = [f for f in files if "MRE-REVIEW-" in f.name]
         assert len(timestamp_files) > 0, (
-            f"应生成至少一个 timestamp snapshot"
+            "应生成至少一个 timestamp snapshot"
         )
 
     def test_write_review_snapshot_no_latest(self, tmp_path):
@@ -880,7 +876,7 @@ class TestCLINoModifyRunFastGate:
         fast_gate_path = PROJECT_ROOT / "harness" / "run_fast_gate.py"
         original_content = fast_gate_path.read_bytes()
 
-        report = build_review_report(
+        _report = build_review_report(
             enforcement_snapshots=[
                 _make_enforcement_snapshot([
                     _make_enforcement_result(rule_id="TA-R018", result="passed"),

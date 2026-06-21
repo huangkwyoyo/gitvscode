@@ -9,19 +9,13 @@ B-3 回归测试：SQLPlan 校验失败语义修复。
     2. 反问消息包含具体校验错误信息
     3. 用户看到的是"需要确认"而非"被拒绝"
 """
-import pytest
 
 from src.agent import Text2SQLAgent
 from src.ir import (
     AgentResponse,
     Aggregation,
-    Domain,
-    IntentType,
-    QuestionIntent,
     SQLPlan,
     Strategy,
-    TimeRange,
-    TimeRangeType,
 )
 
 
@@ -30,7 +24,7 @@ class TestPlanValidationClarificationNotRefusal:
 
     def test_unknown_table_triggers_clarification_not_refusal(self):
         """plan 引用不在白名单的表时，应反问而非拒绝"""
-        agent = Text2SQLAgent()
+        _agent = Text2SQLAgent()
         # 构造一个已知 metric 但 plan 会被校验拦截的场景
         # 需要绕过 rule mode 的 plan 生成，直接测试 Agent.ask() 的 Step 3.5
         # 使用 LLM mode 不方便，这里通过构造 AgentResponse 模式验证核心逻辑

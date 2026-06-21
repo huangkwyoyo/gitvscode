@@ -41,7 +41,6 @@ from src.api.local_auth import (
     LocalTokenAuth,
     LocalAuthError,
     _extract_token_from_request,
-    _is_secure_mode,
     _validate_token,
     parse_local_security_config,
 )

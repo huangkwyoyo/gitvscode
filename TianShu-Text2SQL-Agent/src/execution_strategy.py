@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import concurrent.futures
 from abc import ABC, abstractmethod
-from typing import Any, Callable, Optional
+from typing import Any, Callable
 
 from .ir import (
     ExecutionTrace,

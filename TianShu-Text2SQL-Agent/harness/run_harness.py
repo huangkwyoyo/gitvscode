@@ -136,8 +136,8 @@ def write_report(results: list[dict[str, Any]], report_path: Path) -> None:
     fail_count = sum(1 for r in results if r["status"] == "FAIL")
     lines.append("## 汇总")
     lines.append("")
-    lines.append(f"| 状态 | 数量 |")
-    lines.append(f"|------|------|")
+    lines.append("| 状态 | 数量 |")
+    lines.append("|------|------|")
     lines.append(f"| PASS | {pass_count} |")
     if warn_count:
         lines.append(f"| WARN | {warn_count} |")
@@ -161,7 +161,7 @@ def write_report(results: list[dict[str, Any]], report_path: Path) -> None:
         lines.append(f"- 耗时: {r['elapsed']}s")
         lines.append(f"- 退出码: {r['exit_code']}")
         if r.get("warn_mode"):
-            lines.append(f"- 模式: 观察期（warn-only），不阻断")
+            lines.append("- 模式: 观察期（warn-only），不阻断")
         lines.append("")
         lines.append("```")
         stdout_text = r.get("stdout") or "(无输出)"
@@ -265,7 +265,7 @@ def main() -> int:
             print(f"PASS ({result['elapsed']}s)")
         elif status == "WARN":
             print(f"⚠️ WARN ({result['elapsed']}s)")
-            print(f"     检查发现规则问题，但处于观察期不阻断。")
+            print("     检查发现规则问题，但处于观察期不阻断。")
         elif status == "FAIL":
             print(f"❌ FAIL ({result['elapsed']}s)")
 

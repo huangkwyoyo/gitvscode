@@ -378,7 +378,7 @@ def generate_markdown(rules: list[dict[str, Any]]) -> str:
     lines.append("---")
     lines.append("")
     lines.append(
-        f"*索引生成时间: 请查看 git 提交记录或文件修改时间*"
+        "*索引生成时间: 请查看 git 提交记录或文件修改时间*"
     )
     lines.append("")
 

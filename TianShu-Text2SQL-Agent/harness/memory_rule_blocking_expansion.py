@@ -123,7 +123,7 @@ def _count_pytest_tests(test_path: str) -> int | None:
                 except (ValueError, IndexError):
                     continue
         # fallback: count lines with "::"
-        count = sum(1 for l in output.splitlines() if "::" in l and "test" in l.lower())
+        count = sum(1 for line in output.splitlines() if "::" in line and "test" in line.lower())
         return count if count > 0 else None
     except (subprocess.TimeoutExpired, OSError, FileNotFoundError):
         return None
@@ -181,7 +181,7 @@ def _assess_false_positive_risk(rule: dict) -> str:
     title = (rule.get("title") or "").lower()
     notes = (rule.get("notes") or "").lower()
     rule_id = rule.get("rule_id", "")
-    risk_ids = [str(r).upper() for r in (rule.get("risk_ids") or [])]
+    _risk_ids = [str(r).upper() for r in (rule.get("risk_ids") or [])]
 
     # Meta 规则（依赖文档/注册表变更检测）→ 高误报风险
     meta_keywords = ["meta", "注册表", "registry", "索引", "生成", "同步"]
@@ -400,7 +400,7 @@ def review_rules(rules_path: str | Path | None = None) -> ExpansionReview:
             reviews.append(RuleReview(
                 rule_id=rid, title=title, status=status, blocking=blocking,
                 recommendation="keep_non_blocking",
-                reason=f"误报风险为 high（规则依赖文档/注释/注册表变更检测），不适合进入 blocking",
+                reason="误报风险为 high（规则依赖文档/注释/注册表变更检测），不适合进入 blocking",
                 checks_exist=bool(checks_exist), tests_exist=bool(tests_exist),
                 evals_exist=bool(evals_exist),
                 false_positive_risk=fp_risk, rollback_plan_clear=rollback_clear,
@@ -559,8 +559,8 @@ def render_review_markdown(review: ExpansionReview) -> str:
     # Summary
     lines.append("## Summary")
     lines.append("")
-    lines.append(f"| 指标 | 值 |")
-    lines.append(f"|------|-----|")
+    lines.append("| 指标 | 值 |")
+    lines.append("|------|-----|")
     lines.append(f"| 总规则数 | {review.total_rules} |")
     lines.append(f"| 当前 active+blocking | {len(review.active_blocking_rules)} ({', '.join(review.active_blocking_rules)}) |")
     lines.append(f"| TA-R018 稳定 | {'✅' if review.ta_r018_stable else '❌'} |")
@@ -576,8 +576,8 @@ def render_review_markdown(review: ExpansionReview) -> str:
     lines.append("## Current Blocking Baseline")
     lines.append("")
     lines.append(f"- **active+blocking 规则:** {', '.join(review.active_blocking_rules) if review.active_blocking_rules else '（无）'}")
-    lines.append(f"- **TA-R018 稳定性:** Step 24 验证 — 11 次 blocking 模式观察，全部 exit 0，误报 0")
-    lines.append(f"- **pre-commit blocking 状态:** Step 23 已启用，Step 24 稳定运行")
+    lines.append("- **TA-R018 稳定性:** Step 24 验证 — 11 次 blocking 模式观察，全部 exit 0，误报 0")
+    lines.append("- **pre-commit blocking 状态:** Step 23 已启用，Step 24 稳定运行")
     lines.append("")
 
     # All candidates reviewed

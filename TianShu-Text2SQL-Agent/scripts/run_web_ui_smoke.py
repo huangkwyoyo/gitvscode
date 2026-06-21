@@ -32,7 +32,8 @@ import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+
+from src.version import VERSION
 
 # 确保项目根目录在 sys.path
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -336,7 +337,7 @@ def main():
         "failed": failed,
         "total": total,
         "results": results,
-        "version": "1.0.0",
+        "version": VERSION,
     }
     with open(json_path, "w", encoding="utf-8") as f:
         json.dump(report, f, ensure_ascii=False, indent=2)
@@ -345,17 +346,17 @@ def main():
     # ── 生成 Markdown 报告 ──
     md_path = report_dir / f"web_ui_smoke_{RUN_ID}.md"
     md_lines = [
-        f"# Web UI Smoke Report",
-        f"",
+        "# Web UI Smoke Report",
+        "",
         f"**Run ID:** {RUN_ID}",
         f"**时间:** {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}",
         f"**耗时:** {duration_s}s",
         f"**结果:** {passed}/{total} PASS, {failed} FAIL",
-        f"",
-        f"## 检查明细",
-        f"",
-        f"| # | 检查项 | 状态 | 详情 |",
-        f"|---|--------|------|------|",
+        "",
+        "## 检查明细",
+        "",
+        "| # | 检查项 | 状态 | 详情 |",
+        "|---|--------|------|------|",
     ]
     for i, r in enumerate(results, 1):
         status_icon = "✅" if r["status"] == "PASS" else "❌"
@@ -363,7 +364,7 @@ def main():
         md_lines.append(f"| {i} | {r['label']} | {status_icon} {r['status']} | {detail} |")
 
     md_lines.append("")
-    md_lines.append(f"## 摘要")
+    md_lines.append("## 摘要")
     md_lines.append(f"- 总计: {total}")
     md_lines.append(f"- 通过: {passed}")
     md_lines.append(f"- 失败: {failed}")

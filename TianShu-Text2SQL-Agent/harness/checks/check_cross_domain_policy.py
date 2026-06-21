@@ -312,7 +312,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="跨域策略安全门禁")
     parser.add_argument("--config", default=None,
                         help="Harness 配置文件路径（本检查不使用，仅为兼容接口保留）")
-    args = parser.parse_args()
+    _args = parser.parse_args()
 
     privacy_result = check_person_fields_privacy()
     unknown_result = check_unknown_domain_clarification()

@@ -249,7 +249,7 @@ def main() -> int:
     """运行所有 ResultSummary 安全检查"""
     parser = argparse.ArgumentParser(description="ResultSummary 安全门禁")
     parser.add_argument("--config", default="config/tianshu_target.yml", help="配置文件路径（保留兼容，未使用）")
-    args = parser.parse_args()
+    _args = parser.parse_args()
 
     all_checks: list[dict[str, Any]] = []
     total_pass = 0

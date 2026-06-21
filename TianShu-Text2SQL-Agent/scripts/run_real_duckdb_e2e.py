@@ -284,7 +284,7 @@ def _execute_check(check_desc: str, response, public: dict) -> dict:
                 "detail": f"确认 '{substr}' 不在 '{_truncate(str(actual))}'",
             }
 
-        return {"check": check_desc, "passed": False, "detail": f"不支持的检查格式"}
+        return {"check": check_desc, "passed": False, "detail": "不支持的检查格式"}
     except Exception as exc:
         return {"check": check_desc, "passed": False, "detail": f"检查执行异常: {exc}"}
 

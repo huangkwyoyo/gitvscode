@@ -34,9 +34,6 @@ if str(PROJECT_ROOT) not in sys.path:
 from harness.precommit_warn_observation_aggregator import (
     MIN_OBSERVATION_DAYS,
     MIN_OBSERVATION_RUNS,
-    AggregationResult,
-    DurationStats,
-    TaR018Stats,
     _parse_ts,
     aggregate,
     load_observations,

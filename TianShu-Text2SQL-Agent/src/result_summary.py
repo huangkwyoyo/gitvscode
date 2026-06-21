@@ -21,8 +21,6 @@ from .ir import (
     MergeStatus,
     MergedResult,
     ResultSummary,
-    SQLResult,
-    Strategy,
     UnifiedResponse,
 )
 

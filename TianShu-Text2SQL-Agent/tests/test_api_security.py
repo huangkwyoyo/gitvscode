@@ -377,7 +377,7 @@ class TestRuntimeNoPersistence:
         import inspect
         from src.api.runtime import AgentRuntime
 
-        src = inspect.getsource(AgentRuntime)
+        _src = inspect.getsource(AgentRuntime)
         # 只在 ask 方法中检查（其他方法中有配置注释是正常的）
         ask_src = inspect.getsource(AgentRuntime.ask)
         # ask 方法不应访问 api_key 或 token

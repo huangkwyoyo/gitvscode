@@ -886,7 +886,7 @@ class TestEdgeCases:
         original_read_text = Path.read_text
 
         def guarded_read_text(path, *args, **kwargs):
-            path_text = str(path).replace("\\", "/")
+            _path_text = str(path).replace("\\", "/")
             if "latest" in path.name.lower():
                 raise AssertionError(f"不应读取 latest 文件: {path}")
             return original_read_text(path, *args, **kwargs)

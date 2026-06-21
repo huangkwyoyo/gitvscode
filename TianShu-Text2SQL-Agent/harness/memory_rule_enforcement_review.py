@@ -224,7 +224,7 @@ def _assess_false_positive_risk(rule: dict[str, Any]) -> str:
         "low" | "medium" | "high" | "unknown"
     """
     severity = rule.get("severity", "medium")
-    applies_to = rule.get("applies_to", [])
+    _applies_to = rule.get("applies_to", [])
     required_checks = rule.get("required_checks", [])
 
     # 规则引擎类型（纯代码结构检查）→ 低风险
@@ -669,21 +669,21 @@ def render_review_markdown(report: dict[str, Any]) -> str:
     summary = report.get("summary", {})
     review_results = report.get("review_results", [])
     criteria_def = report.get("criteria_definition", [])
-    boundary = report.get("boundary_confirmation", {})
+    _boundary = report.get("boundary_confirmation", {})
 
     lines.append("# Memory Rule Enforcement Readiness Review")
     lines.append("")
     lines.append(f"**Run ID:** `{report.get('run_id', 'N/A')}`")
     lines.append(f"**时间:** {report.get('timestamp', 'N/A')}")
     lines.append(f"**审查类型:** {report.get('review_type', 'N/A')}")
-    lines.append(f"**模式:** 只读审查，不改变 fast gate exit code")
+    lines.append("**模式:** 只读审查，不改变 fast gate exit code")
     lines.append("")
 
     # ── Summary ──
     lines.append("## Summary")
     lines.append("")
-    lines.append(f"| 指标 | 数量 |")
-    lines.append(f"|------|------|")
+    lines.append("| 指标 | 数量 |")
+    lines.append("|------|------|")
     lines.append(f"| active+blocking=true 规则总数 | {summary.get('total_active_blocking_rules', 0)} |")
     lines.append(f"| History snapshot 数 | {summary.get('snapshot_count', 0)} |")
     lines.append(f"| ready_for_error | {summary.get('ready_for_error', 0)} |")
@@ -965,7 +965,6 @@ def cli_main(argv: list[str] | None = None) -> int:
         from harness.memory_rule_enforcement import (
             build_enforcement_report,
             parse_check_results_from_harness_stdout,
-            load_rules as enf_load_rules,
         )
 
         # 运行 fast gate harness 获取 check results
@@ -1021,7 +1020,7 @@ def cli_main(argv: list[str] | None = None) -> int:
 
     # 汇总
     summary = review_report.get("summary", {})
-    print(f"\n审查完成:", file=sys.stderr)
+    print("\n审查完成:", file=sys.stderr)
     print(f"  active+blocking=true 规则: {summary.get('total_active_blocking_rules', 0)}", file=sys.stderr)
     print(f"  ready_for_error: {summary.get('ready_for_error', 0)}", file=sys.stderr)
     print(f"  needs_more_observation: {summary.get('needs_more_observation', 0)}", file=sys.stderr)

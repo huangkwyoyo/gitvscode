@@ -7,11 +7,9 @@
 from __future__ import annotations
 
 import json
-import os
 import sys
 import tempfile
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
@@ -26,7 +24,6 @@ from harness.memory_patch_validation import (  # noqa: E402
     _check_recap_references,
     _check_risk_references,
     _check_rule_index,
-    _check_test_suggestions,
     _extract_rule_ids,
     _load_memory_rules,
     _validate_proposal_basics,
@@ -709,7 +706,7 @@ class TestCLIBehavior:
         out_dir = tmp_path / "validations"
         try:
             report = build_validation_report(tmp)
-            paths = write_validation_snapshot(report, out_dir)
+            _paths = write_validation_snapshot(report, out_dir)
             # 检查输出目录中没有 latest 文件
             all_files = list(out_dir.rglob("*"))
             latest_files = [f for f in all_files if "latest" in f.name.lower()]

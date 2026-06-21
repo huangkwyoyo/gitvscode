@@ -59,22 +59,25 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
 
-      - name: ① 代码编译检查
+      - name: ① Ruff 代码检查
+        run: python -m ruff check .
+
+      - name: ② 代码编译检查
         run: python -m compileall -q src harness tests
 
-      - name: ② 单元测试 (Mock 模式)
-        run: python -m pytest -q --tb=short --basetemp harness/reports/test_tmp/pytest_ci
+      - name: ③ 单元测试 (Mock 模式)
+        run: python -m pytest -q
 
-      - name: ③ Harness 安全检查
+      - name: ④ Harness 安全检查
         run: python harness/run_harness.py
 
-      - name: ④ Mock Prompt 回归
+      - name: ⑤ Mock Prompt 回归
         run: python harness/run_prompt_regression.py --provider mock
 
-      - name: ⑤ Mock E2E 端到端评测
+      - name: ⑥ Mock E2E 端到端评测
         run: python harness/run_llm_e2e_eval.py --provider mock
 
-      - name: ⑥ JOIN 白名单无硬编码检查
+      - name: ⑦ JOIN 白名单无硬编码检查
         run: python harness/checks/check_join_whitelist_no_hardcode.py
 
       - name: 📊 快速门禁汇总

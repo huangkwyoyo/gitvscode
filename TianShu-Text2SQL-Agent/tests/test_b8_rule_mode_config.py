@@ -8,13 +8,12 @@ B-8 规则模式指标映射数据驱动化测试。
     4. 新增指标只需修改配置文件
 """
 
-from unittest.mock import MagicMock
 
 import pytest
 import yaml
 
 from src.agent import Text2SQLAgent
-from src.ir import Domain, QuestionIntent, TimeRange, TimeRangeType
+from src.ir import Domain
 from src.resolver import AgentContext, MetricInfo
 
 

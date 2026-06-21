@@ -37,7 +37,8 @@ docs/
 
 | 日期 | 内容 |
 |------|------|
-| 2026-06-20 | Phase 7 完成：本地自然语言问数 Web UI——FastAPI 同源托管、原生 HTML/CSS/JS、原生 SVG 图表（line/bar/metric_card/table）、严格 CSP + textContent 防 XSS、Token 仅内存保存、68 新测试、Web UI Smoke Runner |
+| 2026-06-21 | 工程治理（任务一至六）：统一 pytest 临时目录、Ruff 门禁零违规、版本号统一至 src/version.py、PROJECT_STATUS.md 建立、README 清理过期描述、Harness 报告目录治理、失败记录隐私脱敏 |
+| 2026-06-20 | Phase 7 完成：本地自然语言问数 Web UI——FastAPI 同源托管、原生 HTML/CSS/JS、原生 SVG 图表（line/bar/metric_card/table）、严格 CSP + textContent 防 XSS、Token 仅内存保存、Web UI Smoke Runner |
 | 2026-06-20 | Phase 6D 完成：v1.0 发布冻结与使用体验收尾——版本号 1.0.0、CHANGELOG、Makefile 一键验收、README 快速开始、示例目录、故障排查文档、基线冻结、git tag v1.0.0 |
 | 2026-06-20 | Phase 6C 完成：本地 API 安全闭环——令牌认证（X-TianShu-Token + hmac.compare_digest）、固定窗口限流（429 + Retry-After）、Body 大小限制（413）、脱敏 JSONL 审计、安全响应头、local_secure_mode fail-closed、112 新测试 |
 | 2026-06-20 | Phase 6B 完成：只读 REST API 与服务运行时——FastAPI + uvicorn、3 个端点（/health/live, /health/ready, POST /v1/ask）、AgentRuntime 受控生命周期、公共响应契约 v1.0、38 测试 |

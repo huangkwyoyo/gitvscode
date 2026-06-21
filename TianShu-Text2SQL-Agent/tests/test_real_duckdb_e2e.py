@@ -641,7 +641,7 @@ def test_real_duckdb_timestamp_column_json_serialization():
 
     # 原生序列化（不带 default=str）
     try:
-        serialized = json.dumps(public, ensure_ascii=False)
+        _serialized = json.dumps(public, ensure_ascii=False)
     except TypeError as e:
         pytest.fail(f"真实 DuckDB TIMESTAMP 列序列化失败: {e}")
 

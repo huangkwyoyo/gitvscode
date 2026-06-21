@@ -12,11 +12,9 @@ Phase B2：严格 date merge 测试。
 
 import datetime as _dt
 
-import pytest
 
 from src.ir import (
     MergeStatus,
-    MergedResult,
     SQLResult,
     UnifiedResponse,
     SubIntent,
@@ -77,7 +75,7 @@ def _make_ur(metrics, planning_table, rows, columns=None, column_types=None, str
 def _daily_rows(start_day=1, end_day=31, value_func=None):
     """生成连续日期的数据行 [(datetime, val), ...]"""
     if value_func is None:
-        value_func = lambda d: d * 100
+        def value_func(d): return d * 100
     return [
         (_dt.datetime(2026, 1, d, 0, 0), value_func(d))
         for d in range(start_day, end_day + 1)

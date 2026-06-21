@@ -34,9 +34,6 @@ from src.ir import (
     TimeRangeType,
     Domain,
     IntentType,
-    UnifiedResponse,
-    SubIntent,
-    ExecutionTrace,
 )
 from src.response_contract import build_public_response
 

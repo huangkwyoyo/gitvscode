@@ -22,7 +22,6 @@ import sys
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -39,7 +38,6 @@ from harness.memory_suggestion_pipeline import (  # noqa: E402
     render_pipeline_summary_for_baseline,
     run_pipeline_on_failure_triage,
 )
-from harness.memory_suggestions import normalize_failure_type  # noqa: E402
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -673,8 +671,6 @@ class TestDualBaselineIntegration:
     def test_runtime_baseline_fail_triggers_pipeline(self, tmp_path):
         """Runtime baseline FAIL 时自动生成 memory suggestion summary。"""
         from harness.baselines.dual_baseline import (
-            BaselineCommand,
-            CommandResult,
             GitState,
             FileDiff,
             build_snapshot,

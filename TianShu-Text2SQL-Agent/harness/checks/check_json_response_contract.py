@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
 import sys
 from datetime import date, datetime
 from pathlib import Path
@@ -324,7 +323,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="公开响应 JSON 契约序列化严格性检查")
     parser.add_argument("--config", default=None,
                         help="Harness 配置文件路径（本检查不使用，仅为兼容接口保留）")
-    args = parser.parse_args()
+    _args = parser.parse_args()
 
     default_str_result = check_no_default_str_in_tests()
     json_native_result = check_build_public_response_json_native()

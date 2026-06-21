@@ -30,7 +30,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any
 
 from .ir import MergeStatus, MergedResult, ResultSummary
 
@@ -168,7 +168,6 @@ def build_chart_spec_from_summary(
 
     # ── 规则 1: metric_card — 单行单指标 ──
     if row_count == 1 and len(numeric_cols) == 1:
-        val = _extract_value(sample_rows, 0, columns.index(numeric_cols[0]))
         return ChartSpec(
             chart_type="metric_card",
             title=title,

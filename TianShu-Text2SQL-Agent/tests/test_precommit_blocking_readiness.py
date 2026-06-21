@@ -41,7 +41,6 @@ from harness.precommit_blocking_readiness import (
     NEEDS_MORE_OBSERVATION,
     READY_FOR_BLOCKING,
     VALID_READINESS_STATUSES,
-    ReadinessCheck,
     ReadinessReview,
     _build_rollback_plan,
     _compute_observation_span,
@@ -593,7 +592,8 @@ def test_markdown_renderer_contains_not_applied_section():
 
 def test_write_snapshot_no_latest_in_filename():
     """Snapshot 文件名不应包含 latest。使用项目内临时目录。"""
-    import tempfile, shutil
+    import tempfile
+    import shutil
     tmp_path = tempfile.mkdtemp(prefix="test_snapshot_", dir=PROJECT_ROOT / "harness" / "reports")
     try:
         review = ReadinessReview(
@@ -615,7 +615,8 @@ def test_write_snapshot_no_latest_in_filename():
 
 def test_write_snapshot_creates_both_formats():
     """Snapshot 应同时生成 JSON 和 Markdown。使用项目内临时目录。"""
-    import tempfile, shutil
+    import tempfile
+    import shutil
     tmp_path = tempfile.mkdtemp(prefix="test_snapshot_", dir=PROJECT_ROOT / "harness" / "reports")
     try:
         review = ReadinessReview(
@@ -723,7 +724,6 @@ def test_generate_recommendation_for_each_status():
     """每种 status 都应生成非空推荐。"""
     from harness.precommit_blocking_readiness import (
         FIX_PRECOMMIT_OUTPUT,
-        _generate_recommendation,
     )
     for status in [
         READY_FOR_BLOCKING,

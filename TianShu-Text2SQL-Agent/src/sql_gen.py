@@ -14,7 +14,7 @@ SQL 生成器：SQLPlan → SQL 字符串。
     6. 不包含禁止的 SQL 关键字（INSERT/UPDATE/DELETE/DDL/PRAGMA 等）
 
 注意：
-    当前为桩实现。实际应由 LLM 根据 SQLPlan + Prompt 模板生成 SQL。
+    SQL 由程序生成（非 LLM），确保安全性和确定性。这是核心安全边界的一部分。
 """
 
 from __future__ import annotations
@@ -68,7 +68,7 @@ def sql_plan_to_sql(plan: SQLPlan) -> str:
     """
     将 SQLPlan 转换为 SQL 字符串。
 
-    当前为桩实现，返回骨架 SQL。实际应由 LLM 根据 SQLPlan 生成。
+    程序生成 SQL（非 LLM），确保 SQL 安全性和确定性。这是核心安全边界。
 
     Args:
         plan: Layer 2 的执行计划

@@ -21,7 +21,7 @@ LLM 结果融合测试套件。
 from __future__ import annotations
 
 import json
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -29,16 +29,11 @@ from src.ir import (
     MergeStatus,
     MergedResult,
     ResultSummary,
-    SQLPlan,
     SQLResult,
-    Strategy,
     UnifiedResponse,
 )
 from src.llm import (
     FakeLLMClient,
-    LLMRequest,
-    LLMResponse,
-    MockLLMClient,
     PromptLoader,
 )
 from src.result_fusion import (
@@ -46,7 +41,6 @@ from src.result_fusion import (
     _check_fabricated_metrics,
     _check_sql_keywords,
     _extract_json_object,
-    _mentions_source_or_reason,
     build_result_fusion_payload,
     fallback_to_template,
     fuse_results_with_llm,
@@ -654,12 +648,12 @@ class TestLLMFusionNoSQLLeakage:
             if isinstance(node, ast.Import):
                 for alias in node.names:
                     assert "sql_plan_to_sql" not in alias.name, (
-                        f"不应导入 sql_plan_to_sql"
+                        "不应导入 sql_plan_to_sql"
                     )
             elif isinstance(node, ast.ImportFrom):
                 for alias in node.names:
                     assert "sql_plan_to_sql" not in alias.name, (
-                        f"不应导入 sql_plan_to_sql"
+                        "不应导入 sql_plan_to_sql"
                     )
 
         # 检查所有函数调用（排除注释和文档字符串）
@@ -683,12 +677,12 @@ class TestLLMFusionNoSQLLeakage:
             if isinstance(node, ast.Import):
                 for alias in node.names:
                     assert "duckdb" not in alias.name.lower(), (
-                        f"不应导入 duckdb"
+                        "不应导入 duckdb"
                     )
             elif isinstance(node, ast.ImportFrom):
                 if node.module:
                     assert "duckdb" not in node.module.lower(), (
-                        f"不应导入 duckdb"
+                        "不应导入 duckdb"
                     )
 
     def test_no_sql_execution(self):
@@ -1100,7 +1094,6 @@ class TestBackwardCompatibility:
     def test_llm_fusion_module_does_not_modify_ir(self):
         """LLM 融合模块不应修改 IR 数据结构"""
         from src import ir as ir_module
-        import src.result_fusion
 
         # ir 模块的核心类应保持不变
         assert hasattr(ir_module, "ResultSummary")

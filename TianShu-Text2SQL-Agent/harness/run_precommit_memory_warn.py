@@ -322,8 +322,8 @@ def _render_observation_markdown(obs: dict) -> str:
     # 汇总
     lines.append("## Summary")
     lines.append("")
-    lines.append(f"| 指标 | 值 |")
-    lines.append(f"|------|-----|")
+    lines.append("| 指标 | 值 |")
+    lines.append("|------|-----|")
     lines.append(f"| duration_ms | {obs.get('duration_ms', 0):.1f} |")
     lines.append(f"| exit_code | {obs.get('exit_code', 0)} |")
     lines.append(f"| warning_count | {obs.get('warning_count', 0)} |")
@@ -359,8 +359,8 @@ def _render_observation_markdown(obs: dict) -> str:
     boundary = obs.get("boundary_confirmations", {})
     lines.append("## Boundary Confirmations")
     lines.append("")
-    lines.append(f"| 边界 | 状态 |")
-    lines.append(f"|------|:--:|")
+    lines.append("| 边界 | 状态 |")
+    lines.append("|------|:--:|")
     lines.append(f"| no blocking | {'✅' if boundary.get('no_blocking') else '❌'} |")
     lines.append(f"| no latest | {'✅' if boundary.get('no_latest') else '❌'} |")
     lines.append(f"| no docs/memory modification | {'✅' if boundary.get('no_docs_memory_modification') else '❌'} |")
@@ -370,7 +370,7 @@ def _render_observation_markdown(obs: dict) -> str:
 
     lines.append("---")
     lines.append("")
-    lines.append(f"*Step 21b 自动记录 — 由 pre-commit warn 触发*")
+    lines.append("*Step 21b 自动记录 — 由 pre-commit warn 触发*")
     lines.append(f"*记录时间: {obs.get('timestamp', '?')}*")
 
     return "\n".join(lines)

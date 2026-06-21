@@ -19,9 +19,7 @@ from __future__ import annotations
 import ast
 import datetime as _dt
 import json
-from unittest.mock import MagicMock, patch
 
-import pytest
 
 from src.chart_spec import (
     ChartSpec,
@@ -710,7 +708,7 @@ class TestDataPreviews:
         )
         spec = build_chart_spec_from_merged_result(merged)
         json_str = spec.to_json()
-        parsed = json.loads(json_str)
+        _parsed = json.loads(json_str)
         # 检查 data_preview 中的日期值
         assert "2026-01-01" in json_str or "2026-01-02" in json_str
 

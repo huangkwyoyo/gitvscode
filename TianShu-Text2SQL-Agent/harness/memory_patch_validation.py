@@ -585,7 +585,7 @@ def _check_recap_references(
                 "patch_type": "memory_recap_patch",
                 "target_file": "docs/memory/经验复盘.md",
                 "status": "passed",
-                "message": f"经验复盘.md 中找到对应引用 ✓",
+                "message": "经验复盘.md 中找到对应引用 ✓",
                 "manual_action": None,
             })
         else:
@@ -644,7 +644,7 @@ def _check_risk_references(
                 "patch_type": "risk_item_patch",
                 "target_file": "docs/memory/风险清单.md",
                 "status": "passed",
-                "message": f"风险清单.md 中找到对应 risk_id 引用 ✓",
+                "message": "风险清单.md 中找到对应 risk_id 引用 ✓",
                 "manual_action": None,
             })
         else:
@@ -711,7 +711,7 @@ def _check_test_case_landing(patch: dict[str, Any]) -> list[dict[str, Any]]:
     """检查单个 test_case_patch 的落地状态。"""
     patch_id = patch.get("patch_id", "unknown")
     target_file = patch.get("target_file", patch.get("target", ""))
-    content = patch.get("content", "")
+    _content = patch.get("content", "")
 
     if not target_file or target_file == "tests/（待定）":
         return [{
@@ -961,7 +961,7 @@ def render_validation_markdown(report: dict[str, Any]) -> str:
     failed_items = [v for v in items if v["status"] == "failed"]
     warn_items = [v for v in items if v["status"] == "warning"]
     pending_items = [v for v in items if v["status"] == "pending"]
-    passed_items = [v for v in items if v["status"] == "passed"]
+    _passed_items = [v for v in items if v["status"] == "passed"]
 
     lines = [
         "# Memory Patch Validation Report",
@@ -974,8 +974,8 @@ def render_validation_markdown(report: dict[str, Any]) -> str:
         "",
         "## Summary",
         "",
-        f"| 指标 | 值 |",
-        f"|------|----|",
+        "| 指标 | 值 |",
+        "|------|----|",
         f"| Patches Checked | {summary['patches_checked']} |",
         f"| ✅ Passed | {summary['passed']} |",
         f"| ⚠️ Warnings | {summary['warnings']} |",

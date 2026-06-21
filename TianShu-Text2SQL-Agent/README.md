@@ -260,10 +260,10 @@ make api
 ├── LICENSE                      # MIT 许可证
 ├── Makefile                     # 一键脚本（install/test/harness/verify/clean）
 ├── README.md                    # 本文件
-├── VERSION                      # 版本标识（1.0.0）
+├── src/version.py               # 版本信息（单一权威源）
 ├── pyproject.toml               # 项目元数据 + 依赖 + 入口点
 ├── .env.example                 # 环境变量模板
-├── .githooks/                   # Git Hooks（pre-commit 5 步门禁）
+├── .githooks/                   # Git Hooks（pre-commit 6 步门禁）
 ├── config/
 │   ├── agent_config.yml         # Agent 运行时配置（模型/行为/安全/日志）
 │   ├── api_config.yml           # API 安全配置（令牌/限流/审计/响应头）
@@ -307,12 +307,12 @@ make api
 │   └── generate_rule_index.py   # 规则来源索引生成
 ├── harness/
 │   ├── run_harness.py           # 12 项 Harness 入口
-│   ├── run_fast_gate.py         # 快速门禁（5 步，Mock）
+│   ├── run_fast_gate.py         # 快速门禁（全部离线检查）
 │   ├── run_slow_gate.py         # 慢速门禁（真实 LLM，观察）
 │   ├── run_baseline_freeze.py   # 双基线快照
 │   ├── checks/                  # 12 个安全检查脚本
 │   └── reports/                 # 报告输出目录
-├── tests/                       # ~55 个测试文件（1709 用例）
+├── tests/                       # 单元测试和集成测试（通过 pytest discovery 运行）
 ├── evals/                       # 评测问题集（7 个 YAML 文件）
 ├── prompts/                     # LLM Prompt 模板（6 个文件）
 ├── docs/
@@ -342,7 +342,8 @@ make api
 ### 运行测试
 
 ```bash
-make test                             # 全部 1709 单元测试
+python -m pytest -q                   # 直接运行完整测试
+make test                             # 全部单元测试
 make harness                          # 12 项 Harness 安全检查
 python harness/run_fast_gate.py       # 5 步快速门禁
 ```
@@ -389,7 +390,7 @@ git config core.hooksPath .githooks
 - **编码**：Windows 控制台默认 GBK 编码可能导致乱码。Harness 和脚本已内置自动检测和 UTF-8 切换。建议在 `.env` 中设置 `PYTHONIOENCODING=utf-8`。
 - **终端**：推荐使用 **Git Bash**（`make` 命令可用）或 Windows Terminal。
 - **路径格式**：所有配置中的路径使用正斜杠（`/`），与 Unix 保持一致。
-- **tmp_path 权限**：部分测试在 Windows 上使用 `pytest tmp_path` 可能遇到权限问题。测试套件已使用 `tempfile.mkdtemp()` 规避，不影响正常使用。
+- **tmp_path 权限**：pytest 插件会为每个进程分配 `harness/reports/test_tmp/` 下的唯一目录，无需手工设置 `TEMP` 或 `TMP`。
 - **端口占用**：API 默认端口 8000。如被占用，修改 `config/api_config.yml` 中的 `server.port`。
 
 ## 常见问题

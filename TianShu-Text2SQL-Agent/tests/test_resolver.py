@@ -3,7 +3,6 @@ TianShu Resolver 测试。
 
 覆盖：契约加载、DuckDB 连接、表/指标发现、SQL 执行封装。
 """
-import pytest
 
 from src.ir import SQLResult
 from src.resolver import TianShuResolver
@@ -146,7 +145,6 @@ class TestResolverExecuteSQL:
 
     def test_agent_no_longer_accesses_conn_directly(self):
         """agent.py 不再直接访问 _resolver._conn（封装验证）"""
-        import ast
         from pathlib import Path
 
         agent_path = Path(__file__).parent.parent / "src" / "agent.py"
@@ -203,7 +201,6 @@ class TestAgentUsesResolverExecuteSQL:
     def test_rule_mode_agent_executes_via_resolver(self):
         """规则模式下 Agent 应通过 resolver 层执行 SQL"""
         from src.agent import Text2SQLAgent
-        from src.ir import Domain, Strategy, TimeRangeType
 
         agent = Text2SQLAgent()
         response = agent.ask("2026年1月每天有多少行程？")

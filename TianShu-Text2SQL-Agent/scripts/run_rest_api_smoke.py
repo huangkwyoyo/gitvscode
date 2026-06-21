@@ -391,7 +391,7 @@ def render_markdown_report(
     failed = total - passed
 
     lines = [
-        f"# Phase 6B REST API Smoke Report",
+        "# Phase 6B REST API Smoke Report",
         "",
         f"**Run ID**: {run_id}",
         f"**Branch**: {branch}",
@@ -406,8 +406,8 @@ def render_markdown_report(
         "",
         "## Summary",
         "",
-        f"| 指标 | 值 |",
-        f"|------|-----|",
+        "| 指标 | 值 |",
+        "|------|-----|",
         f"| 总用例 | {total} |",
         f"| 通过 | {passed} |",
         f"| 失败 | {failed} |",
@@ -440,7 +440,7 @@ def render_markdown_report(
         "## Boundaries",
         "",
         f"- 不生成 latest: {run_id.lower().find('latest') < 0}",
-        f"- 不调用真实 LLM: True",
+        "- 不调用真实 LLM: True",
         f"- read_only: {preflight.get('read_only', False)}",
         "",
     ])

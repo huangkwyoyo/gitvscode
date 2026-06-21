@@ -12,7 +12,6 @@ Phase B1：ResultSummary / MergedResult 测试。
 
 import datetime as _dt
 
-import pytest
 
 from src.ir import (
     MergeStatus,
@@ -24,7 +23,6 @@ from src.ir import (
     SubIntent,
     Domain,
     Aggregation,
-    JoinPlan,
     UnifiedResponse,
 )
 from src.result_summary import (

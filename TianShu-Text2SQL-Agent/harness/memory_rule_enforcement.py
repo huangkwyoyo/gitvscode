@@ -445,7 +445,7 @@ def build_enforcement_report(
 
     # 基础设施错误检查
     infra_errors = validate_rules_basics(rules)
-    has_infra_error = len(infra_errors) > 0
+    _has_infra_error = len(infra_errors) > 0
 
     # 计算每条规则的 enforcement 结果
     rule_results: list[dict[str, Any]] = []
@@ -580,14 +580,14 @@ def render_enforcement_markdown(report: dict[str, Any]) -> str:
     lines.append("")
     lines.append(f"**Run ID:** `{report.get('run_id', 'N/A')}`")
     lines.append(f"**时间:** {report.get('timestamp', 'N/A')}")
-    lines.append(f"**模式:** blocking（active+blocking=true 规则 check 失败时阻断 fast gate）")
+    lines.append("**模式:** blocking（active+blocking=true 规则 check 失败时阻断 fast gate）")
     lines.append("")
 
     # 汇总
     lines.append("## 汇总")
     lines.append("")
-    lines.append(f"| 指标 | 数量 |")
-    lines.append(f"|------|------|")
+    lines.append("| 指标 | 数量 |")
+    lines.append("|------|------|")
     lines.append(f"| 总规则数 | {summary.get('total_rules', 0)} |")
     lines.append(f"| proposed（仅可见） | {summary.get('proposed', 0)} |")
     lines.append(f"| active + blocking=false（警告） | {summary.get('active_warning', 0)} |")
@@ -653,7 +653,7 @@ def render_enforcement_markdown(report: dict[str, Any]) -> str:
 
             matched = rr.get("matched_check_results", [])
             if matched:
-                lines.append(f"- **Check 匹配结果:**")
+                lines.append("- **Check 匹配结果:**")
                 for m in matched:
                     m_status = m.get("status", "?")
                     m_icon = _result_icon(m_status)
@@ -715,13 +715,13 @@ def render_enforcement_console_summary(report: dict[str, Any]) -> str:
     lines.append(f"  active blocking rules:        {summary.get('active_blocking', 0)}")
     lines.append(f"  deprecated:                   {summary.get('deprecated', 0)}")
     lines.append(f"  superseded:                   {summary.get('superseded', 0)}")
-    lines.append(f"  ---")
+    lines.append("  ---")
     lines.append(f"  passed:                       {summary.get('passed', 0)}")
     lines.append(f"  warnings:                     {summary.get('warnings', 0)}")
     lines.append(f"  blocking failures:            {summary.get('blocking_failures', 0)}")
     lines.append(f"  skipped:                      {summary.get('skipped', 0)}")
     lines.append(f"  infra errors:                 {summary.get('infra_errors', 0)}")
-    lines.append(f"  ---")
+    lines.append("  ---")
     lines.append(f"  exit code affected:           {'yes' if exit_code_affected else 'no'}")
     lines.append("=" * 60)
 

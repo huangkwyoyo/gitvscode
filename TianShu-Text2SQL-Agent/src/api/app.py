@@ -28,6 +28,8 @@ from typing import Any
 
 from pathlib import Path as _FilePath
 
+from src.version import VERSION
+
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -129,7 +131,7 @@ def create_app(
     app = FastAPI(
         title="TianShu Text2SQL Agent API",
         description="基于 Phase 6A 统一公开响应契约的只读中文问数服务（本地安全闭环）",
-        version="1.0.0",
+        version=VERSION,
         lifespan=lifespan,
         docs_url="/docs",
     )

@@ -8,7 +8,6 @@
     - 签名计算
 """
 
-import pytest
 
 
 class TestQuestionIntent:

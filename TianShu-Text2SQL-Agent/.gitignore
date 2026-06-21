@@ -22,8 +22,7 @@ logs/
 # 测试缓存
 .pytest_cache/
 
-# Harness runtime artifacts
-harness/reports/*_latest.*
-harness/reports/llm_raw_outputs/
-harness/reports/test_tmp/
-harness/reports/baselines/
+# Harness runtime artifacts（仅 .gitkeep 受版本控制）
+# 所有运行时生成的报告、快照、日志均不提交
+harness/reports/*
+!harness/reports/.gitkeep

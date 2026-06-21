@@ -286,7 +286,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="图表规格生成安全门禁")
     parser.add_argument("--config", default=None,
                         help="Harness 配置文件路径（本检查不使用，仅为兼容接口保留）")
-    args = parser.parse_args()
+    _args = parser.parse_args()
 
     html_result = check_no_html_js_output()
     imports_result = check_no_llm_no_duckdb_imports()

@@ -70,7 +70,7 @@ def check_question_policy(contracts_path: Path) -> dict[str, Any]:
 
     # 检查 must_clarify
     clarify_rules = policy.get("must_clarify", [])
-    expected_clarify_triggers = {"ambiguous_amount", "fuzzy_time", "ambiguous_region", "missing_dimension", "unregistered_metric"}
+    _expected_clarify_triggers = {"ambiguous_amount", "fuzzy_time", "ambiguous_region", "missing_dimension", "unregistered_metric"}
     actual_triggers = {r.get("trigger", "") for r in clarify_rules}
 
     checks.append({
@@ -92,7 +92,7 @@ def check_question_policy(contracts_path: Path) -> dict[str, Any]:
 
     # 检查 must_refuse
     refuse_rules = policy.get("must_refuse", [])
-    expected_refuse_triggers = {"write_operation", "bronze_direct", "metric_invention", "out_of_scope"}
+    _expected_refuse_triggers = {"write_operation", "bronze_direct", "metric_invention", "out_of_scope"}
     actual_refuse_triggers = {r.get("trigger", "") for r in refuse_rules}
 
     checks.append({

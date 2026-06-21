@@ -39,7 +39,7 @@ def check_ir_dataclasses() -> dict[str, Any]:
         from src.ir import (
             QuestionIntent, SQLPlan, SQLResult, AgentResponse,
             Domain, IntentType, TimeRangeType, Strategy,
-            TimeRange, Filter, JoinPlan, Aggregation,
+            TimeRange, Aggregation,
             # Phase 2B/3/3B/3C 新增结构
             SubIntent, ExecutionTrace, ResultSummary, MergedResult, UnifiedResponse,
         )

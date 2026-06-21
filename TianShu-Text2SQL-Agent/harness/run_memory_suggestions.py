@@ -28,7 +28,6 @@ from harness.memory_suggestions import (  # noqa: E402
     build_memory_suggestions_from_e2e_report,
     build_memory_suggestions_from_prompt_regression,
     build_memory_suggestions_report,
-    render_memory_suggestions_json,
     write_memory_suggestions_snapshot,
 )
 

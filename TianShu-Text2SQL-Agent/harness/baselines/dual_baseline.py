@@ -96,8 +96,6 @@ def build_source_commands() -> list[BaselineCommand]:
                 "-m",
                 "pytest",
                 "-q",
-                "--basetemp",
-                "harness/reports/test_tmp/pytest_source_baseline",
             ],
         ),
         BaselineCommand(

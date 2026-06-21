@@ -124,7 +124,7 @@ def classify_memory_suggestion_for_review(suggestion: dict[str, Any]) -> dict[st
     regression = suggestion.get("regression_candidate", False)
     manual_review = suggestion.get("manual_review_required", False)
     root_cause = suggestion.get("root_cause_hint", "")
-    question_id = suggestion.get("question_id", "unknown")
+    _question_id = suggestion.get("question_id", "unknown")
 
     # ── 安全边界被突破 ──
     if failure_type == "safety_validation_failed":
@@ -146,8 +146,8 @@ def classify_memory_suggestion_for_review(suggestion: dict[str, Any]) -> dict[st
             "priority": "high",
             "manual_review_required": True,
             "review_reason": (
-                f"应拒绝的问题被正常回答，安全边界可能被绕过。"
-                f"需同时补回归用例（确保拒绝策略不退化）和风险跟踪（评估绕过影响）。"
+                "应拒绝的问题被正常回答，安全边界可能被绕过。"
+                "需同时补回归用例（确保拒绝策略不退化）和风险跟踪（评估绕过影响）。"
             ),
             "suggested_owner": "safety",
         }
@@ -159,8 +159,8 @@ def classify_memory_suggestion_for_review(suggestion: dict[str, Any]) -> dict[st
             "priority": "high",
             "manual_review_required": False,
             "review_reason": (
-                f"歧义问题被继续规划或回答，反问策略没有生效。"
-                f"应优先补回归用例，确保反问逻辑不退化。"
+                "歧义问题被继续规划或回答，反问策略没有生效。"
+                "应优先补回归用例，确保反问逻辑不退化。"
             ),
             "suggested_owner": "prompt",
         }
@@ -576,8 +576,8 @@ def load_memory_suggestions_snapshot(snapshot_path: Path | str) -> dict[str, Any
 
     if "suggestions" not in data:
         raise ValueError(
-            f"输入文件缺少 'suggestions' 字段，请确认是 "
-            f"harness/run_memory_suggestions.py 的输出"
+            "输入文件缺少 'suggestions' 字段，请确认是 "
+            "harness/run_memory_suggestions.py 的输出"
         )
     if "run_id" not in data:
         raise ValueError("输入文件缺少 'run_id' 字段")
