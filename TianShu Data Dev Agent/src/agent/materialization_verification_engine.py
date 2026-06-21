@@ -15,6 +15,8 @@
 """
 from __future__ import annotations
 
+import hashlib
+import re
 import secrets
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -23,7 +25,11 @@ from typing import Any, Optional
 
 import yaml
 
-from src.ir.types import MaterializationCheckResult, MaterializationResult
+from src.ir.types import (
+    MaterializationCheckResult,
+    MaterializationResult,
+    SampleSourceRef,
+)
 from src.sandbox.duckdb_ctas_executor import (
     execute_ctas_in_sandbox,
     check_idempotency,
@@ -291,13 +297,53 @@ def verify_materialization(
         )
     deploy_sql = deploy_sql_path.read_text(encoding="utf-8")
 
-    # ── 步骤 3：加载 sample 数据 ──
+    # ── 步骤 3：解析 lineage 并加载 sample 数据 ──
+    # 先解析数据源——所有 sample 加载路径都需要知道 lineage 声明的来源
+    sample_sources = resolve_sample_sources(package_dir, manifest_dict)
+
+    # ── 多表检测（在数据路径分叉前执行）──
+    # M5b-1 仅支持单 source table CTAS——多表必须 FAIL，无论数据来源
+    if len(sample_sources) > 1:
+        result = MaterializationResult(
+            verification_id=verification_id,
+            request_id=manifest_dict.get("request_id", ""),
+            overall_status="FAIL",
+            checks=static_checks,
+            failures=[
+                f"lineage 声明了 {len(sample_sources)} 个来源表——"
+                f"M5b-1 仅支持单 source table CTAS，多表/JOIN 场景暂不支持。"
+                f"声明表: {[s.fully_qualified_table for s in sample_sources]}"
+            ],
+            human_review_required=True,
+        )
+        return _finalize_and_persist_materialization(
+            package_dir, result, manifest_dict,
+        )
+
     if sample_data_rows is None and sample_data_columns is None:
         # 尝试从 sample_db_path 加载
         if sample_db_path:
+            if not sample_sources:
+                # lineage 缺失或无法解析——不得回退扫描
+                result = MaterializationResult(
+                    verification_id=verification_id,
+                    request_id=manifest_dict.get("request_id", ""),
+                    overall_status="FAIL",
+                    checks=static_checks,
+                    failures=[
+                        "无法从 lineage/source_refs.yml 解析样本数据源——"
+                        "lineage 缺失、为空或未声明有效的 Gold 来源表。"
+                        "请确认 lineage/source_refs.yml 存在且包含 source_tables。"
+                    ],
+                    human_review_required=True,
+                )
+                return _finalize_and_persist_materialization(
+                    package_dir, result, manifest_dict,
+                )
+
             try:
-                rows, cols, types = _load_sample_from_db(
-                    sample_db_path, manifest_dict,
+                rows, cols, types, source_meta = _load_sample_from_db(
+                    sample_db_path, sample_sources, manifest_dict,
                 )
                 sample_data_rows = rows
                 sample_data_columns = cols
@@ -344,6 +390,14 @@ def verify_materialization(
         )
 
     # ── 步骤 4：执行一次性 Sandbox CTAS ──
+    # 先记录样本数据来源——保证报告中可追溯
+    _sample_source_hash = ""
+    lineage_path = package_dir / "lineage" / "source_refs.yml"
+    if lineage_path.is_file():
+        _sample_source_hash = hashlib.sha256(
+            lineage_path.read_bytes()
+        ).hexdigest()
+
     result = execute_ctas_in_sandbox(
         deploy_sql=deploy_sql,
         manifest=manifest_dict,
@@ -365,6 +419,10 @@ def verify_materialization(
             f"[静态校验] {c.name}: {c.detail}"
             for c in static_checks if c.status not in {"PASS", "PENDING"}
         ])
+
+    # ── 记录样本数据来源（M5b P1：lineage 精确绑定）──
+    result.sample_sources = sample_sources
+    result.sample_source_hash = _sample_source_hash
 
     # ── 同步 hash 状态字段到顶层（修复 M5b-1a #2）──
     for check in static_checks:
@@ -404,58 +462,202 @@ def verify_materialization(
 # 内部辅助函数
 # ═══════════════════════════════════════════════════════════════
 
+# ── 合法的标识符模式——禁止注入字符 ──
+_VALID_IDENTIFIER = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
+# ── 合法的完全限定表名模式：schema.table（仅字母/数字/下划线）──
+_VALID_FQN = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*\.[a-zA-Z_][a-zA-Z0-9_]*$")
+# ── 只允许的源 schema ──
+_ALLOWED_SOURCE_SCHEMAS = {"gold"}
+_FORBIDDEN_SOURCE_SCHEMAS = {"bronze", "silver"}
+# ── sample 加载行数上限 ──
+_MAX_SAMPLE_ROWS = 1000
 
-def _load_sample_from_db(
-    db_path: str,
+
+def resolve_sample_sources(
+    package_dir: Path,
     manifest: dict[str, Any],
-) -> tuple[list[tuple], list[str], list[str]]:
-    """从只读 sample 数据库加载输入数据。
+) -> list[SampleSourceRef]:
+    """从 lineage/source_refs.yml 确定性解析样本数据源引用。
 
-    使用 read_only=True 打开连接，只读取 Manifest/lineage 声明的表。
-    限制行数，避免加载全部数据。
+    严格规则：
+      1. 数据源只能来自 lineage/source_refs.yml。
+      2. 不允许扫描 information_schema 猜测数据源。
+      3. 不允许自动选择第一个 Gold 表。
+      4. lineage 缺失、为空、格式非法或声明不唯一时，不返回来源列表。
+      5. 所有声明表必须通过：完全限定名校验、Gold 层校验、标识符安全校验。
 
     Args:
-        db_path: sample DuckDB 数据库路径
+        package_dir: Review Package 目录路径
         manifest: deployment_manifest.yml 解析后的 dict
 
     Returns:
-        (rows, columns, types)——数据行、列名、列类型
+        已校验的 SampleSourceRef 列表——空列表表示无法安全确定数据源
+    """
+    lineage_path = package_dir / "lineage" / "source_refs.yml"
+
+    # ── 规则 4a：lineage 文件必须存在 ──
+    if not lineage_path.is_file():
+        return []
+
+    # ── 规则 4b：lineage 必须可解析 ──
+    try:
+        lineage = yaml.safe_load(lineage_path.read_text(encoding="utf-8")) or {}
+    except Exception:
+        return []
+
+    # ── 规则 4c：source_tables 必须存在且非空 ──
+    source_tables = lineage.get("source_tables")
+    if not isinstance(source_tables, list) or not source_tables:
+        return []
+
+    # ── 提取 source_fields 以获取每张表的必需列 ──
+    source_fields_list = lineage.get("source_fields")
+    if not isinstance(source_fields_list, list):
+        source_fields_list = []
+
+    sources: list[SampleSourceRef] = []
+    seen_tables: set[str] = set()
+
+    for entry in source_tables:
+        if not isinstance(entry, dict):
+            continue
+
+        raw_name = str(entry.get("name", "")).strip()
+        if not raw_name:
+            continue
+
+        # ── 规则 5a：完全限定名校验（必须为 schema.table 格式）──
+        if not _VALID_FQN.match(raw_name):
+            continue  # 非法格式——跳过，不猜测
+
+        parts = raw_name.split(".")
+        schema_name = parts[0].lower()
+        table_name = parts[1]
+
+        # ── 规则 5b：Gold 层访问校验 ──
+        if schema_name in _FORBIDDEN_SOURCE_SCHEMAS:
+            continue  # bronze/silver——拒绝
+
+        if schema_name not in _ALLOWED_SOURCE_SCHEMAS:
+            continue  # 非 gold schema——拒绝
+
+        # ── 规则 5c：表名标识符安全校验 ──
+        if not _VALID_IDENTIFIER.match(table_name):
+            continue  # 含注入字符——拒绝
+
+        # ── 去重：同一表名不重复 ──
+        fq_name = f"{schema_name}.{table_name}"
+        if fq_name in seen_tables:
+            continue
+        seen_tables.add(fq_name)
+
+        # ── 收集该表的必需列 ──
+        required_columns: list[str] = []
+        for sf in source_fields_list:
+            if isinstance(sf, dict) and sf.get("table") == raw_name:
+                col_name = str(sf.get("name", "")).strip()
+                if col_name and _VALID_IDENTIFIER.match(col_name):
+                    required_columns.append(col_name)
+
+        sources.append(SampleSourceRef(
+            fully_qualified_table=fq_name,
+            role=str(entry.get("role", "primary")),
+            source_reference=str(entry.get("source", "")),
+            required_columns=required_columns,
+            expected_schema=schema_name,
+        ))
+
+    return sources
+
+
+def _load_sample_from_db(
+    db_path: str,
+    sources: list[SampleSourceRef],
+    manifest: dict[str, Any],
+) -> tuple[list[tuple], list[str], list[str], dict[str, Any]]:
+    """从只读 sample 数据库精确读取 lineage 声明的源表数据。
+
+    严格规则：
+      - 仅访问 lineage/source_refs.yml 声明的 Gold 表。
+      - 禁止扫描 information_schema。
+      - 禁止 fallback 到任意表。
+      - 表名和字段名使用严格标识符校验。
+      - 禁止直接拼接未经验证的 YAML 字符串。
+      - 限制 sample 行数（MAX_SAMPLE_ROWS）。
+      - 不允许访问 bronze/silver。
+
+    Args:
+        db_path: sample DuckDB 数据库路径
+        sources: 已解析的 SampleSourceRef 列表
+        manifest: deployment_manifest.yml 解析后的 dict
+
+    Returns:
+        (rows, columns, types, source_meta)——数据行、列名、列类型、来源元信息
     """
     import duckdb as ddb
 
+    if not sources:
+        raise ValueError(
+            "无法确定样本数据源——lineage/source_refs.yml 未声明有效的 Gold 来源表。"
+            "请检查 lineage 配置或通过 --inline-sample 直接提供数据。"
+        )
+
     conn = ddb.connect(db_path, read_only=True)
     try:
-        # 查找数据源表——优先 gold schema 下的表
-        tables_result = conn.execute(
-            "SELECT table_name FROM information_schema.tables "
-            "WHERE table_schema='gold' ORDER BY table_name"
-        ).fetchall()
+        # ── 仅使用第一个声明的源表（M5b-1 单表支持）──
+        source = sources[0]
+        fq_name = source.fully_qualified_table
 
-        if not tables_result:
-            # 尝试任何 schema
-            tables_result = conn.execute(
-                "SELECT table_name FROM information_schema.tables "
-                "WHERE table_schema NOT IN ('information_schema', 'pg_catalog') "
-                "ORDER BY table_name"
-            ).fetchall()
+        # ── 校验表名标识符安全后再拼接 ──
+        parts = fq_name.split(".")
+        if len(parts) != 2:
+            raise ValueError(f"非法完全限定表名: {fq_name}")
+        schema_name, table_name = parts
+        if not _VALID_IDENTIFIER.match(schema_name) or not _VALID_IDENTIFIER.match(table_name):
+            raise ValueError(f"表名包含非法字符: {fq_name}")
 
-        if not tables_result:
-            return [], [], []
+        # ── 验证表存在于数据库 ──
+        table_check = conn.execute(
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema=? AND table_name=?",
+            [schema_name, table_name],
+        ).fetchone()
+        if not table_check or table_check[0] == 0:
+            raise ValueError(
+                f"lineage 声明的源表 {fq_name} 在 sample 数据库中不存在——"
+                f"请确认 sample 数据与 lineage 声明一致"
+            )
 
-        source_table = f"gold.{tables_result[0][0]}" if tables_result else ""
-
-        # 读取 schema
-        desc = conn.execute(f"DESCRIBE {source_table}").fetchall()
+        # ── 读取 schema ──
+        desc = conn.execute(f"DESCRIBE {fq_name}").fetchall()
         columns = [row[0] for row in desc]
         types = [row[1] for row in desc]
 
-        # 读取数据（限制 1000 行）
+        # ── 校验必需列存在 ──
+        column_set = set(columns)
+        for req_col in source.required_columns:
+            if req_col not in column_set:
+                raise ValueError(
+                    f"lineage 声明的必需列 {req_col} 在表 {fq_name} 中不存在——"
+                    f"实际列: {sorted(column_set)}"
+                )
+
+        # ── 读取数据（限制行数）──
         rows_result = conn.execute(
-            f"SELECT * FROM {source_table} LIMIT 1000"
+            f"SELECT * FROM {fq_name} LIMIT {_MAX_SAMPLE_ROWS}"
         ).fetchall()
         rows = [tuple(row) for row in rows_result]
 
-        return rows, columns, types
+        # ── 构建来源元信息 ──
+        source_meta = {
+            "actual_table_read": fq_name,
+            "actual_row_count": len(rows),
+            "actual_columns": columns,
+            "declared_sources": [s.to_dict() for s in sources],
+            "lineage_matched": True,
+        }
+
+        return rows, columns, types, source_meta
     finally:
         conn.close()
 

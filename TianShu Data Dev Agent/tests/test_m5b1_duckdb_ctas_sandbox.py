@@ -1906,7 +1906,7 @@ def _setup_package_for_verification(base_dir: Path, **overrides) -> Path:
     """构建可通过物化验证的完整 Review Package 结构。
 
     创建 sql/main.sql、deploy/main.sql、deployment_manifest.yml、
-    decision.yml，使 verify_materialization 可以成功执行。
+    decision.yml、lineage/source_refs.yml，使 verify_materialization 可以成功执行。
     """
     package_dir = base_dir / "test_pkg"
     (package_dir / "sql").mkdir(parents=True)
@@ -1948,6 +1948,32 @@ def _setup_package_for_verification(base_dir: Path, **overrides) -> Path:
     # 创建 spark/main.py——静态校验需要
     (package_dir / "spark").mkdir(parents=True, exist_ok=True)
     (package_dir / "spark" / "main.py").write_text("# Spark placeholder\n", encoding="utf-8")
+
+    # ── M5b P1：创建 lineage/source_refs.yml——样本来源绑定需要 ──
+    (package_dir / "lineage").mkdir(parents=True, exist_ok=True)
+    lineage_content = overrides.get("lineage", {
+        "request_id": "test_m5b1",
+        "source_tables": [
+            {
+                "name": "gold.dws_daily_trip_summary",
+                "role": "primary",
+                "source": "TianShu Gold 层 G3 每日出行汇总表",
+            },
+        ],
+        "source_fields": [
+            {"name": "trip_date", "table": "gold.dws_daily_trip_summary",
+             "source": "gold.dws_daily_trip_summary.trip_date"},
+        ],
+        "metric_sources": [
+            {"name": "trip_count", "field": "trip_count",
+             "definition_source": "meta.metric_definitions.trip_count"},
+        ],
+        "filters": {"date_range": ["2026-01-01", "2026-03-31"]},
+        "grain": ["trip_date"],
+    })
+    (package_dir / "lineage" / "source_refs.yml").write_text(
+        yaml.safe_dump(lineage_content, allow_unicode=True), encoding="utf-8",
+    )
 
     return package_dir
 
@@ -2815,6 +2841,461 @@ class TestDeploymentManifestSchemaValidation:
                     f"MaterializationStatus.{status.name}（{status.value}）"
                     f"应通过 Schema 校验，但被拒绝: {e.message}"
                 )
+
+
+# ═══════════════════════════════════════════════════════════════
+# §12 M5b P1：Lineage 精确绑定——sample 数据源必须来自 lineage/source_refs.yml
+# ═══════════════════════════════════════════════════════════════
+
+
+class TestResolveSampleSources:
+    """验证 resolve_sample_sources() 的 lineage 确定性解析。"""
+
+    def test_single_declared_gold_table_resolves(self):
+        """单一声明 Gold 表时精确解析该表。"""
+        tmp = _mkdtemp()
+        try:
+            package_dir = _setup_package_for_verification(tmp)
+            from src.agent.materialization_verification_engine import resolve_sample_sources
+
+            manifest = yaml.safe_load(
+                (package_dir / "deployment_manifest.yml").read_text(encoding="utf-8")
+            )
+            sources = resolve_sample_sources(package_dir, manifest)
+
+            assert len(sources) == 1, (
+                f"应解析出 1 个来源，实际: {len(sources)}"
+            )
+            assert sources[0].fully_qualified_table == "gold.dws_daily_trip_summary", (
+                f"应解析为 gold.dws_daily_trip_summary，实际: {sources[0].fully_qualified_table}"
+            )
+            assert sources[0].expected_schema == "gold"
+            assert sources[0].role == "primary"
+        finally:
+            _rmdtemp(tmp)
+
+    def test_multiple_gold_tables_only_reads_declared(self):
+        """数据库存在多个 Gold 表时仍只读取 lineage 声明的表。
+
+        通过构造包含多张表的 lineage 来验证：每张声明表都应被解析。
+        """
+        tmp = _mkdtemp()
+        try:
+            package_dir = _setup_package_for_verification(
+                tmp,
+                lineage={
+                    "request_id": "test_m5b1",
+                    "source_tables": [
+                        {"name": "gold.table_a", "role": "primary", "source": "表A"},
+                        {"name": "gold.table_b", "role": "join", "source": "表B"},
+                    ],
+                    "source_fields": [],
+                    "metric_sources": [],
+                    "filters": {},
+                    "grain": [],
+                },
+            )
+            from src.agent.materialization_verification_engine import resolve_sample_sources
+
+            manifest = yaml.safe_load(
+                (package_dir / "deployment_manifest.yml").read_text(encoding="utf-8")
+            )
+            sources = resolve_sample_sources(package_dir, manifest)
+
+            # 多表场景——返回所有声明表
+            assert len(sources) == 2, (
+                f"应解析出 2 个来源，实际: {len(sources)}"
+            )
+            table_names = {s.fully_qualified_table for s in sources}
+            assert table_names == {"gold.table_a", "gold.table_b"}, (
+                f"应包含声明的两张表，实际: {table_names}"
+            )
+        finally:
+            _rmdtemp(tmp)
+
+    def test_declared_table_not_first_alphabetically(self):
+        """声明表不是排序第一张时不得误选——必须精确匹配声明名。"""
+        tmp = _mkdtemp()
+        try:
+            # 声明表名为 gold.z_end_table（按字母排最后）
+            package_dir = _setup_package_for_verification(
+                tmp,
+                lineage={
+                    "request_id": "test_m5b1",
+                    "source_tables": [
+                        {"name": "gold.z_end_table", "role": "primary", "source": "末尾表"},
+                    ],
+                    "source_fields": [],
+                    "metric_sources": [],
+                    "filters": {},
+                    "grain": [],
+                },
+            )
+            from src.agent.materialization_verification_engine import resolve_sample_sources
+
+            manifest = yaml.safe_load(
+                (package_dir / "deployment_manifest.yml").read_text(encoding="utf-8")
+            )
+            sources = resolve_sample_sources(package_dir, manifest)
+
+            assert len(sources) == 1
+            assert sources[0].fully_qualified_table == "gold.z_end_table", (
+                f"声明表 gold.z_end_table 应被精确解析，"
+                f"实际: {sources[0].fully_qualified_table}"
+            )
+            # 不应因为字母序而选错
+            assert sources[0].fully_qualified_table != "gold.a_first_table", (
+                "不得按字母序猜测表——必须精确匹配声明名"
+            )
+        finally:
+            _rmdtemp(tmp)
+
+    def test_lineage_missing_fails(self):
+        """lineage/source_refs.yml 缺失时 resolve_sample_sources 返回空列表。"""
+        tmp = _mkdtemp()
+        try:
+            package_dir = _setup_package_for_verification(tmp)
+            # 删除 lineage 文件
+            (package_dir / "lineage" / "source_refs.yml").unlink()
+
+            from src.agent.materialization_verification_engine import resolve_sample_sources
+            manifest = yaml.safe_load(
+                (package_dir / "deployment_manifest.yml").read_text(encoding="utf-8")
+            )
+            sources = resolve_sample_sources(package_dir, manifest)
+
+            assert sources == [], (
+                f"lineage 缺失时应返回空列表，实际: {sources}"
+            )
+        finally:
+            _rmdtemp(tmp)
+
+    def test_lineage_no_source_tables_fails(self):
+        """lineage 无 source_tables 时返回空列表——不得猜测。"""
+        tmp = _mkdtemp()
+        try:
+            package_dir = _setup_package_for_verification(
+                tmp,
+                lineage={
+                    "request_id": "test_m5b1",
+                    "source_tables": [],  # 空列表
+                    "source_fields": [],
+                    "metric_sources": [],
+                    "filters": {},
+                    "grain": [],
+                },
+            )
+            from src.agent.materialization_verification_engine import resolve_sample_sources
+            manifest = yaml.safe_load(
+                (package_dir / "deployment_manifest.yml").read_text(encoding="utf-8")
+            )
+            sources = resolve_sample_sources(package_dir, manifest)
+
+            assert sources == [], (
+                f"source_tables 为空时应返回空列表，实际: {sources}"
+            )
+        finally:
+            _rmdtemp(tmp)
+
+    def test_bronze_schema_rejected(self):
+        """声明 bronze schema 的表必须被拒绝。"""
+        tmp = _mkdtemp()
+        try:
+            package_dir = _setup_package_for_verification(
+                tmp,
+                lineage={
+                    "request_id": "test_m5b1",
+                    "source_tables": [
+                        {"name": "bronze.raw_events", "role": "primary", "source": "原始事件"},
+                    ],
+                    "source_fields": [],
+                    "metric_sources": [],
+                    "filters": {},
+                    "grain": [],
+                },
+            )
+            from src.agent.materialization_verification_engine import resolve_sample_sources
+            manifest = yaml.safe_load(
+                (package_dir / "deployment_manifest.yml").read_text(encoding="utf-8")
+            )
+            sources = resolve_sample_sources(package_dir, manifest)
+
+            assert sources == [], (
+                f"bronze schema 表应被拒绝，实际: {sources}"
+            )
+        finally:
+            _rmdtemp(tmp)
+
+    def test_silver_schema_rejected(self):
+        """声明 silver schema 的表必须被拒绝。"""
+        tmp = _mkdtemp()
+        try:
+            package_dir = _setup_package_for_verification(
+                tmp,
+                lineage={
+                    "request_id": "test_m5b1",
+                    "source_tables": [
+                        {"name": "silver.cleaned_events", "role": "primary", "source": "清洗事件"},
+                    ],
+                    "source_fields": [],
+                    "metric_sources": [],
+                    "filters": {},
+                    "grain": [],
+                },
+            )
+            from src.agent.materialization_verification_engine import resolve_sample_sources
+            manifest = yaml.safe_load(
+                (package_dir / "deployment_manifest.yml").read_text(encoding="utf-8")
+            )
+            sources = resolve_sample_sources(package_dir, manifest)
+
+            assert sources == [], (
+                f"silver schema 表应被拒绝，实际: {sources}"
+            )
+        finally:
+            _rmdtemp(tmp)
+
+    def test_injection_characters_in_table_name_rejected(self):
+        """表名包含注入字符时必须被拒绝。"""
+        tmp = _mkdtemp()
+        try:
+            package_dir = _setup_package_for_verification(
+                tmp,
+                lineage={
+                    "request_id": "test_m5b1",
+                    "source_tables": [
+                        {"name": "gold.evil; DROP TABLE--", "role": "primary", "source": "注入尝试"},
+                    ],
+                    "source_fields": [],
+                    "metric_sources": [],
+                    "filters": {},
+                    "grain": [],
+                },
+            )
+            from src.agent.materialization_verification_engine import resolve_sample_sources
+            manifest = yaml.safe_load(
+                (package_dir / "deployment_manifest.yml").read_text(encoding="utf-8")
+            )
+            sources = resolve_sample_sources(package_dir, manifest)
+
+            assert sources == [], (
+                f"注入字符表名应被拒绝，实际: {sources}"
+            )
+        finally:
+            _rmdtemp(tmp)
+
+    def test_unqualified_table_name_rejected(self):
+        """非完全限定表名（无 schema 前缀）必须被拒绝。"""
+        tmp = _mkdtemp()
+        try:
+            package_dir = _setup_package_for_verification(
+                tmp,
+                lineage={
+                    "request_id": "test_m5b1",
+                    "source_tables": [
+                        {"name": "raw_table_without_schema", "role": "primary", "source": "无 schema"},
+                    ],
+                    "source_fields": [],
+                    "metric_sources": [],
+                    "filters": {},
+                    "grain": [],
+                },
+            )
+            from src.agent.materialization_verification_engine import resolve_sample_sources
+            manifest = yaml.safe_load(
+                (package_dir / "deployment_manifest.yml").read_text(encoding="utf-8")
+            )
+            sources = resolve_sample_sources(package_dir, manifest)
+
+            assert sources == [], (
+                f"非完全限定表名应被拒绝，实际: {sources}"
+            )
+        finally:
+            _rmdtemp(tmp)
+
+    def test_duplicate_tables_deduplicated(self):
+        """重复声明的同一张表应去重——不重复计入。"""
+        tmp = _mkdtemp()
+        try:
+            package_dir = _setup_package_for_verification(
+                tmp,
+                lineage={
+                    "request_id": "test_m5b1",
+                    "source_tables": [
+                        {"name": "gold.same_table", "role": "primary", "source": "第一次"},
+                        {"name": "gold.same_table", "role": "join", "source": "重复"},
+                    ],
+                    "source_fields": [],
+                    "metric_sources": [],
+                    "filters": {},
+                    "grain": [],
+                },
+            )
+            from src.agent.materialization_verification_engine import resolve_sample_sources
+            manifest = yaml.safe_load(
+                (package_dir / "deployment_manifest.yml").read_text(encoding="utf-8")
+            )
+            sources = resolve_sample_sources(package_dir, manifest)
+
+            assert len(sources) == 1, (
+                f"重复表应去重，实际: {len(sources)}"
+            )
+            assert sources[0].fully_qualified_table == "gold.same_table"
+        finally:
+            _rmdtemp(tmp)
+
+
+class TestLineageBindingInVerification:
+    """验证物化验证流程中的 lineage 精确绑定行为。"""
+
+    def test_multi_table_lineage_fails_verification(self):
+        """多表 lineage 声明时物化验证必须 FAIL——M5b-1 不支持多表。"""
+        tmp = _mkdtemp()
+        try:
+            package_dir = _setup_package_for_verification(
+                tmp,
+                lineage={
+                    "request_id": "test_m5b1",
+                    "source_tables": [
+                        {"name": "gold.table_a", "role": "primary", "source": "表A"},
+                        {"name": "gold.table_b", "role": "join", "source": "表B"},
+                    ],
+                    "source_fields": [],
+                    "metric_sources": [],
+                    "filters": {},
+                    "grain": [],
+                },
+            )
+            from src.agent.materialization_verification_engine import verify_materialization
+
+            rows, cols, types = _sample_data()
+            result = verify_materialization(
+                package_dir=package_dir,
+                sample_data_rows=rows,
+                sample_data_columns=cols,
+                sample_data_types=types,
+            )
+
+            assert result.overall_status == "FAIL", (
+                f"多表 lineage 应导致 FAIL，实际: {result.overall_status}"
+            )
+            assert any(
+                "多个来源表" in f or "多表" in f
+                for f in result.failures
+            ), f"失败原因应提及多表不支持，实际: {result.failures}"
+        finally:
+            _rmdtemp(tmp)
+
+    def test_lineage_missing_verification_fails(self):
+        """lineage 缺失时物化验证必须 FAIL——不得回退扫描。
+
+        提供 sample_db_path 触发 DB 加载路径——lineage 缺失时必须明确 FAIL。
+        """
+        tmp = _mkdtemp()
+        try:
+            package_dir = _setup_package_for_verification(tmp)
+            (package_dir / "lineage" / "source_refs.yml").unlink()
+
+            from src.agent.materialization_verification_engine import verify_materialization
+
+            # 提供 sample-db 以触发 lineage 检查路径
+            result = verify_materialization(
+                package_dir=package_dir,
+                sample_db_path="/nonexistent/test.duckdb",
+            )
+
+            assert result.overall_status == "FAIL", (
+                f"lineage 缺失时应 FAIL，实际: {result.overall_status}"
+            )
+            assert any(
+                "lineage" in f.lower()
+                for f in result.failures
+            ), f"失败原因应提及 lineage，实际: {result.failures}"
+        finally:
+            _rmdtemp(tmp)
+
+    def test_sample_sources_recorded_in_result(self):
+        """样本来源信息写入 MaterializationResult。"""
+        tmp = _mkdtemp()
+        try:
+            package_dir = _setup_package_for_verification(tmp)
+
+            rows, cols, types = _sample_data()
+            from src.agent.materialization_verification_engine import verify_materialization
+            result = verify_materialization(
+                package_dir=package_dir,
+                sample_data_rows=rows,
+                sample_data_columns=cols,
+                sample_data_types=types,
+            )
+
+            # 来源应记录在结果中
+            assert len(result.sample_sources) >= 1, (
+                f"结果应记录 sample_sources，实际: {result.sample_sources}"
+            )
+            assert result.sample_sources[0].fully_qualified_table == "gold.dws_daily_trip_summary", (
+                f"应记录正确来源表，实际: {result.sample_sources[0].fully_qualified_table}"
+            )
+            # sample_source_hash 应非空（lineage 文件存在）
+            assert result.sample_source_hash, (
+                "sample_source_hash 应非空——lineage 文件存在时必须记录哈希"
+            )
+        finally:
+            _rmdtemp(tmp)
+
+    def test_report_contains_sample_source_info(self):
+        """物化验证报告记录实际读取的表、字段、行数。"""
+        tmp = _mkdtemp()
+        try:
+            package_dir = _setup_package_for_verification(tmp)
+
+            rows, cols, types = _sample_data()
+            from src.agent.materialization_verification_engine import verify_materialization
+            result = verify_materialization(
+                package_dir=package_dir,
+                sample_data_rows=rows,
+                sample_data_columns=cols,
+                sample_data_types=types,
+            )
+
+            # 验证报告 YAML 包含来源信息
+            yml_path = package_dir / "reports" / "materialization_verification.yml"
+            assert yml_path.is_file()
+            report = yaml.safe_load(yml_path.read_text(encoding="utf-8"))
+            assert "sample_sources" in report, (
+                f"报告应包含 sample_sources 字段，实际字段: {sorted(report.keys())}"
+            )
+            assert len(report["sample_sources"]) >= 1
+            assert report["sample_sources"][0]["fully_qualified_table"] == "gold.dws_daily_trip_summary"
+
+            # MD 报告也应提及来源
+            md_path = package_dir / "reports" / "materialization_verification.md"
+            assert md_path.is_file()
+        finally:
+            _rmdtemp(tmp)
+
+    def test_no_lineage_fallback_to_scanning(self):
+        """不提供 sample_db 时不得回退扫描任意表——必须明确 FAIL。"""
+        tmp = _mkdtemp()
+        try:
+            package_dir = _setup_package_for_verification(tmp)
+            # 不传 sample 数据，也不提供 sample-db
+            from src.agent.materialization_verification_engine import verify_materialization
+
+            result = verify_materialization(package_dir=package_dir)
+
+            # 必须 FAIL（不是因为 lineage 缺失，而是没有提供数据）
+            assert result.overall_status == "FAIL"
+            # 失败信息不应包含任何表名猜测
+            for f in result.failures:
+                assert "information_schema" not in f.lower(), (
+                    f"不得出现 information_schema 扫描: {f}"
+                )
+                assert "tables_result[0]" not in f, (
+                    f"不得出现数组取首: {f}"
+                )
+        finally:
+            _rmdtemp(tmp)
 
 
 # 模块级 PROJECT_ROOT 定义（用于 CLI 测试）

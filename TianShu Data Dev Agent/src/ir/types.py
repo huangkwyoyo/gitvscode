@@ -372,6 +372,9 @@ class MaterializationResult:
     failures: list[str] = field(default_factory=list)
     human_review_required: bool = True
     generated_at: str = ""
+    # ── M5b P1：样本数据来源追踪 ──
+    sample_sources: list[SampleSourceRef] = field(default_factory=list)
+    sample_source_hash: str = ""                 # lineage/source_refs.yml 的 SHA-256（用于完整性校验）
 
     def to_dict(self) -> dict[str, Any]:
         """序列化为字典——供 materialization_verification.yml 使用"""
@@ -408,6 +411,32 @@ class MaterializationResult:
             "failures": self.failures,
             "human_review_required": self.human_review_required,
             "generated_at": self.generated_at,
+            "sample_sources": [s.to_dict() for s in self.sample_sources],
+            "sample_source_hash": self.sample_source_hash,
+        }
+
+
+@dataclass
+class SampleSourceRef:
+    """从 lineage/source_refs.yml 确定性解析的样本数据源引用——M5b P1 修复。
+
+    每个引用精确绑定 lineage 声明的单个来源表。
+    禁止从 information_schema 扫描或猜测——所有来源必须显式声明。
+    """
+    fully_qualified_table: str                   # 完全限定表名（如 gold.dws_daily_trip_summary）
+    role: str = "primary"                        # 表角色：primary / join
+    source_reference: str = ""                   # 来源说明（来自 lineage）
+    required_columns: list[str] = field(default_factory=list)  # 必须存在的列
+    expected_schema: str = "gold"                # 预期 schema——只能为 gold
+
+    def to_dict(self) -> dict[str, Any]:
+        """序列化为字典"""
+        return {
+            "fully_qualified_table": self.fully_qualified_table,
+            "role": self.role,
+            "source_reference": self.source_reference,
+            "required_columns": self.required_columns,
+            "expected_schema": self.expected_schema,
         }
 
 
