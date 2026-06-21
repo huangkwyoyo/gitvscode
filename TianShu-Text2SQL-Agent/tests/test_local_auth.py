@@ -56,9 +56,9 @@ class TestLocalSecurityConfig:
     """本地安全配置解析测试"""
 
     def test_secure_mode_enabled_default(self):
-        """local_secure_mode 默认为 false（缺失时）"""
+        """local_secure_mode 默认为 true（缺失时 fail-closed）"""
         cfg = parse_local_security_config({})
-        assert cfg["local_secure_mode"] is False
+        assert cfg["local_secure_mode"] is True
 
     def test_secure_mode_true(self):
         """local_secure_mode 可设置为 true"""

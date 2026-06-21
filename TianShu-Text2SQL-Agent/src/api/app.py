@@ -19,7 +19,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import time
 import uuid
@@ -114,15 +113,15 @@ def create_app(
 
     # ── 创建认证器 ──
     if local_auth is None:
-        # 从 runtime 配置创建（startup 后才可用，此处使用安全默认值）
+        # 安全默认：认证启用（fail-closed），startup 后由配置覆盖
         local_auth = LocalTokenAuth(
-            local_secure_mode=False,  # 默认关闭，startup 后由配置覆盖
+            local_secure_mode=True,
         )
 
     # ── 创建限流器 ──
     if rate_limiter is None:
         from .local_rate_limit import create_rate_limiter
-        rate_limiter = create_rate_limiter(enabled=False)  # 默认关闭
+        rate_limiter = create_rate_limiter(enabled=True)  # 安全默认：启用限流
 
     # ── 创建 body 限制中间件 ──
     body_limit = BodyLimitMiddleware(max_body_bytes=8192)
@@ -220,35 +219,9 @@ def create_app(
 
         return await call_next(request)
 
-    @app.middleware("http")
-    async def auth_middleware(request: Request, call_next):
-        """本地令牌认证中间件。
-
-        只保护 POST /v1/ask 端点。
-        /health/live、/health/ready、/ 和 /assets/* 保持无认证。
-        """
-        # 健康检查和 UI 页面无需认证
-        _path = request.url.path
-        if _path in ("/health/live", "/health/ready", "/") or _path.startswith("/assets"):
-            return await call_next(request)
-
-        # 只保护 /v1/ask
-        if request.url.path == "/v1/ask" and request.method == "POST":
-            auth: LocalTokenAuth = request.app.state.local_auth
-            try:
-                auth.authenticate(request)
-            except LocalAuthError as exc:
-                rid = getattr(request.state, "request_id", "")
-                # 记录审计：rejected
-                await _audit_event(request, AuditEvent.REJECTED, 401, error_code="AUTH_FAILED")
-                return build_error_response(
-                    status_code=401,
-                    code=ERROR_CODE_AUTH_FAILED,
-                    message=exc.message,
-                    request_id=rid,
-                )
-
-        return await call_next(request)
+    # 注意：Starlette 中间件按注册顺序的逆序执行（后注册 → 外层 → 请求先到达）。
+    # 为让认证在限流之前执行，先注册限流中间件，再注册认证中间件。
+    # 请求路径：auth_middleware → rate_limit_middleware → 内部处理
 
     @app.middleware("http")
     async def rate_limit_middleware(request: Request, call_next):
@@ -276,6 +249,39 @@ def create_app(
                         },
                         headers={"Retry-After": str(exc.retry_after)},
                     )
+
+        return await call_next(request)
+
+    @app.middleware("http")
+    async def auth_middleware(request: Request, call_next):
+        """本地令牌认证中间件。
+
+        只保护 POST /v1/ask 端点。
+        /health/live、/health/ready、/ 和 /assets/* 保持无认证。
+
+        注：此中间件后于 rate_limit_middleware 注册，因此在请求路径上先执行，
+        确保认证失败不消耗限流额度。
+        """
+        # 健康检查和 UI 页面无需认证
+        _path = request.url.path
+        if _path in ("/health/live", "/health/ready", "/") or _path.startswith("/assets"):
+            return await call_next(request)
+
+        # 只保护 /v1/ask
+        if request.url.path == "/v1/ask" and request.method == "POST":
+            auth: LocalTokenAuth = request.app.state.local_auth
+            try:
+                auth.authenticate(request)
+            except LocalAuthError as exc:
+                rid = getattr(request.state, "request_id", "")
+                # 记录审计：rejected
+                await _audit_event(request, AuditEvent.REJECTED, 401, error_code="AUTH_FAILED")
+                return build_error_response(
+                    status_code=401,
+                    code=ERROR_CODE_AUTH_FAILED,
+                    message=exc.message,
+                    request_id=rid,
+                )
 
         return await call_next(request)
 

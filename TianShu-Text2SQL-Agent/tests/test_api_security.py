@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
@@ -24,6 +25,13 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+# ── 测试专用 token ──
+_TEST_TOKEN = "test-api-security-token32chars!!"
+
+
+def _auth_headers():
+    return {"X-TianShu-Token": _TEST_TOKEN}
+
 
 # ═══════════════════════════════════════════════════════════════
 # Fixtures
@@ -33,6 +41,8 @@ if str(PROJECT_ROOT) not in sys.path:
 @pytest.fixture
 def mock_runtime():
     """创建在线状态 mock runtime"""
+    os.environ["TIANSHU_LOCAL_API_TOKEN"] = _TEST_TOKEN
+
     runtime = MagicMock()
     runtime.agent = MagicMock()
     runtime.agent.is_online = True
@@ -42,7 +52,11 @@ def mock_runtime():
     runtime.api_config = {
         "server": {"host": "127.0.0.1", "port": 8000},
         "request": {"max_question_length": 2000},
-        "security": {"cors_enabled": False, "expose_internal_errors": False},
+        "security": {"cors_enabled": False, "expose_internal_errors": False, "local_secure_mode": True},
+        "local_security": {
+            "rate_limit": {"enabled": False, "requests_per_minute": 30, "burst": 3},
+            "audit": {"enabled": False},
+        },
     }
     runtime.start = AsyncMock()
     runtime.close = AsyncMock()
@@ -88,8 +102,10 @@ def security_client(mock_runtime):
     """创建带 mock runtime 的测试客户端"""
     from fastapi.testclient import TestClient
     from src.api.app import create_app
+    from src.api.local_auth import LocalTokenAuth
 
-    app = create_app(runtime=mock_runtime)
+    auth = LocalTokenAuth(local_secure_mode=True)
+    app = create_app(runtime=mock_runtime, local_auth=auth)
     with TestClient(app) as c:
         yield c
 
@@ -104,14 +120,14 @@ class TestNoSQLLeak:
 
     def test_answer_no_select(self, security_client):
         """answer 响应不应包含 SELECT 语句"""
-        resp = security_client.post("/v1/ask", json={"question": "test"})
+        resp = security_client.post("/v1/ask", json={"question": "test"}, headers=_auth_headers())
         data = resp.json()
         response_text = json.dumps(data, ensure_ascii=False)
         assert "SELECT" not in response_text
 
     def test_answer_no_sql_keywords(self, security_client):
         """answer 响应不应包含 SQL 关键字"""
-        resp = security_client.post("/v1/ask", json={"question": "test"})
+        resp = security_client.post("/v1/ask", json={"question": "test"}, headers=_auth_headers())
         data = resp.json()
         response_text = json.dumps(data, ensure_ascii=False)
         sql_keywords = ["INSERT", "DELETE", "UPDATE", "DROP", "CREATE"]
@@ -120,7 +136,7 @@ class TestNoSQLLeak:
 
     def test_error_no_sql(self, security_client):
         """错误响应也不应包含 SQL"""
-        resp = security_client.post("/v1/ask", json={})  # 触发 422
+        resp = security_client.post("/v1/ask", json={}, headers=_auth_headers())  # 触发 422
         data = resp.json()
         response_text = json.dumps(data, ensure_ascii=False)
         assert "SELECT" not in response_text
@@ -131,7 +147,7 @@ class TestNoGeneratedSqlLeak:
 
     def test_answer_no_generated_sql_field(self, security_client):
         """answer 响应不应有 generated_sql 字段"""
-        resp = security_client.post("/v1/ask", json={"question": "test"})
+        resp = security_client.post("/v1/ask", json={"question": "test"}, headers=_auth_headers())
         data = resp.json()
         assert "generated_sql" not in data
         # 深度搜索
@@ -144,13 +160,13 @@ class TestNoTraceLeak:
 
     def test_answer_no_trace_field(self, security_client):
         """answer 响应不应有 trace 字段"""
-        resp = security_client.post("/v1/ask", json={"question": "test"})
+        resp = security_client.post("/v1/ask", json={"question": "test"}, headers=_auth_headers())
         data = resp.json()
         assert "trace" not in data
 
     def test_answer_no_execution_trace(self, security_client):
         """answer 响应不应有 execution_trace 字段"""
-        resp = security_client.post("/v1/ask", json={"question": "test"})
+        resp = security_client.post("/v1/ask", json={"question": "test"}, headers=_auth_headers())
         data = resp.json()
         assert "execution_trace" not in data
 
@@ -160,7 +176,7 @@ class TestNoApiKeyLeak:
 
     def test_answer_no_api_key(self, security_client):
         """answer 响应不应包含 API Key 模式"""
-        resp = security_client.post("/v1/ask", json={"question": "test"})
+        resp = security_client.post("/v1/ask", json={"question": "test"}, headers=_auth_headers())
         data = resp.json()
         response_text = json.dumps(data, ensure_ascii=False)
         # 不应包含 sk- 开头的 key
@@ -171,7 +187,7 @@ class TestNoApiKeyLeak:
 
     def test_error_no_api_key(self, security_client):
         """错误响应也不应包含 API Key"""
-        resp = security_client.post("/v1/ask", json={})
+        resp = security_client.post("/v1/ask", json={}, headers=_auth_headers())
         data = resp.json()
         response_text = json.dumps(data, ensure_ascii=False)
         assert "sk-" not in response_text
@@ -182,7 +198,7 @@ class TestNoDbPathLeak:
 
     def test_answer_no_duckdb_path(self, security_client):
         """answer 响应不应包含 DuckDB 文件路径"""
-        resp = security_client.post("/v1/ask", json={"question": "test"})
+        resp = security_client.post("/v1/ask", json={"question": "test"}, headers=_auth_headers())
         data = resp.json()
         response_text = json.dumps(data, ensure_ascii=False)
         # 检测 Windows 路径模式
@@ -207,7 +223,7 @@ class TestNoTracebackLeak:
             raise RuntimeError("内部错误")
         security_client.app.state.runtime.ask = AsyncMock(side_effect=raise_exc)
 
-        resp = security_client.post("/v1/ask", json={"question": "test"})
+        resp = security_client.post("/v1/ask", json={"question": "test"}, headers=_auth_headers())
         data = resp.json()
         response_text = json.dumps(data, ensure_ascii=False)
         assert "Traceback" not in response_text
@@ -219,7 +235,7 @@ class TestNoTracebackLeak:
             raise RuntimeError("模拟内部异常")
         security_client.app.state.runtime.ask = AsyncMock(side_effect=raise_exc)
 
-        resp = security_client.post("/v1/ask", json={"question": "test"})
+        resp = security_client.post("/v1/ask", json={"question": "test"}, headers=_auth_headers())
         data = resp.json()
         assert "RuntimeError" not in data.get("error", {}).get("message", "")
 
@@ -229,7 +245,7 @@ class TestResponseBoundary:
 
     def test_only_public_contract_returned(self, security_client):
         """只能通过 build_public_response 返回数据"""
-        resp = security_client.post("/v1/ask", json={"question": "test"})
+        resp = security_client.post("/v1/ask", json={"question": "test"}, headers=_auth_headers())
         data = resp.json()
 
         # 公开契约必须有的字段
@@ -382,7 +398,7 @@ class TestNoClientControlParams:
         resp = security_client.post("/v1/ask", json={
             "question": "test",
             "mode": "llm",
-        })
+        }, headers=_auth_headers())
         assert resp.status_code == 422
 
     def test_sql_param_rejected(self, security_client):
@@ -390,7 +406,7 @@ class TestNoClientControlParams:
         resp = security_client.post("/v1/ask", json={
             "question": "test",
             "sql": "SELECT 1",
-        })
+        }, headers=_auth_headers())
         assert resp.status_code == 422
 
     def test_config_param_rejected(self, security_client):
@@ -398,7 +414,7 @@ class TestNoClientControlParams:
         resp = security_client.post("/v1/ask", json={
             "question": "test",
             "provider": "other",
-        })
+        }, headers=_auth_headers())
         assert resp.status_code == 422
 
     def test_api_key_param_rejected(self, security_client):
@@ -406,5 +422,5 @@ class TestNoClientControlParams:
         resp = security_client.post("/v1/ask", json={
             "question": "test",
             "api_key": "sk-test",
-        })
+        }, headers=_auth_headers())
         assert resp.status_code == 422

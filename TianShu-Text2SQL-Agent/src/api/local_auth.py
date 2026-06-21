@@ -68,7 +68,7 @@ class LocalTokenAuth:
 
     def __init__(
         self,
-        local_secure_mode: bool = False,
+        local_secure_mode: bool = True,  # 安全默认：必须 fail-closed
         token_env: str = "TIANSHU_LOCAL_API_TOKEN",
     ):
         self._secure_mode = local_secure_mode
@@ -215,6 +215,8 @@ def _validate_token(stored: str | None, provided: str | None) -> bool:
 def _is_secure_mode(api_config: dict[str, Any]) -> bool:
     """从 API 配置中读取 secure_mode 设置。
 
+    安全默认：缺失或非法时返回 True（fail-closed）。
+
     Args:
         api_config: 完整的 API 配置字典
 
@@ -222,7 +224,14 @@ def _is_secure_mode(api_config: dict[str, Any]) -> bool:
         True 表示启用了本地安全模式
     """
     security = api_config.get("security", {})
-    return security.get("local_secure_mode", False)
+    raw = security.get("local_secure_mode", True)
+    # 类型校验：非 bool 类型视为非法，强制返回 True
+    if not isinstance(raw, bool):
+        return True
+    # 显式 False 也强制返回 True（安全闭环不允许关闭认证）
+    if raw is False:
+        return True
+    return True
 
 
 def parse_local_security_config(api_config: dict[str, Any]) -> dict[str, Any]:
@@ -254,15 +263,29 @@ def parse_local_security_config(api_config: dict[str, Any]) -> dict[str, Any]:
             "请使用环境变量提供令牌。"
         )
 
+    # ── 安全强制：local_secure_mode 类型校验 ──
+    raw_secure_mode = security.get("local_secure_mode", True)
+    if not isinstance(raw_secure_mode, bool):
+        # 非 bool 类型（字符串/数字/None）→ 强制 True
+        logger.warning(
+            "API 配置 local_secure_mode 类型非法（%s），已强制为 True",
+            type(raw_secure_mode).__name__,
+        )
+        raw_secure_mode = True
+    elif raw_secure_mode is False:
+        # 显式关闭 → 强制 True（安全闭环不允许关闭认证）
+        logger.warning("API 配置 local_secure_mode=false，已强制为 True")
+        raw_secure_mode = True
+
     rate_cfg = local_sec.get("rate_limit", {})
     audit_cfg = local_sec.get("audit", {})
 
     return {
-        "local_secure_mode": security.get("local_secure_mode", False),
+        "local_secure_mode": raw_secure_mode,  # 经过类型校验的安全值
         "token_env": security.get("token_env", "TIANSHU_LOCAL_API_TOKEN"),
-        "rate_limit_enabled": rate_cfg.get("enabled", False),
+        "rate_limit_enabled": rate_cfg.get("enabled", True),  # 安全默认：启用限流
         "requests_per_minute": rate_cfg.get("requests_per_minute", 30),
         "burst": rate_cfg.get("burst", 3),
-        "audit_enabled": audit_cfg.get("enabled", False),
+        "audit_enabled": audit_cfg.get("enabled", True),  # 安全默认：启用审计
         "audit_directory": audit_cfg.get("directory", "harness/reports/local_api_audit"),
     }

@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
@@ -253,6 +252,26 @@ class AgentRuntime:
             logger.warning("API 配置 cors_enabled=true，已重置为 false")
             security_cfg["cors_enabled"] = False
 
+        # ── 安全强制：local_secure_mode 必须为 True（fail-closed）──
+        # 类型校验：非 bool 类型（字符串/数字/None）视为非法配置
+        raw_secure_mode = security_cfg.get("local_secure_mode")
+        if raw_secure_mode is not True:
+            if not isinstance(raw_secure_mode, bool):
+                logger.warning(
+                    "API 配置 local_secure_mode 类型非法（%s），已强制为 True",
+                    type(raw_secure_mode).__name__,
+                )
+            elif raw_secure_mode is False:
+                logger.warning("API 配置 local_secure_mode=false，已强制为 True（安全闭环不允许关闭认证）")
+            security_cfg["local_secure_mode"] = True
+
+        # ── 安全强制：限流默认启用 ──
+        local_sec_cfg = loaded.get("local_security", {})
+        rate_cfg = local_sec_cfg.get("rate_limit", {})
+        if not rate_cfg.get("enabled", True):
+            logger.warning("API 配置 rate_limit.enabled=false，已强制启用限流")
+            rate_cfg["enabled"] = True
+
         self.api_config = loaded
 
 
@@ -268,7 +287,7 @@ _DEFAULT_API_CONFIG: dict[str, Any] = {
         "max_body_bytes": 8192,
     },
     "security": {
-        "local_secure_mode": False,
+        "local_secure_mode": True,   # 安全默认：配置缺失时必须 fail-closed
         "token_env": "TIANSHU_LOCAL_API_TOKEN",
         "cors_enabled": False,
         "expose_internal_errors": False,
@@ -276,12 +295,12 @@ _DEFAULT_API_CONFIG: dict[str, Any] = {
     },
     "local_security": {
         "rate_limit": {
-            "enabled": False,
+            "enabled": True,          # 安全默认：配置缺失时默认启用限流
             "requests_per_minute": 30,
             "burst": 3,
         },
         "audit": {
-            "enabled": False,
+            "enabled": True,          # 安全默认：配置缺失时默认启用审计
             "directory": "harness/reports/local_api_audit",
         },
     },

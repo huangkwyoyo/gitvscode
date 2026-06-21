@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -23,6 +24,14 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from fastapi.testclient import TestClient
 
+# ── 测试专用 token（fail-closed 修复后必须提供有效 token）──
+_TEST_TOKEN = "test-api-app-token-32chars-long!"
+
+
+def _setup_token_env():
+    """设置测试用 token 环境变量（确保认证器就绪，强制覆盖防止污染）"""
+    os.environ["TIANSHU_LOCAL_API_TOKEN"] = _TEST_TOKEN
+
 
 # ═══════════════════════════════════════════════════════════════
 # Fixtures：使用 mock AgentRuntime 构建测试客户端
@@ -32,6 +41,8 @@ from fastapi.testclient import TestClient
 @pytest.fixture
 def mock_runtime():
     """创建一个完全 mock 的 AgentRuntime，不连接任何真实数据库"""
+    _setup_token_env()
+
     runtime = MagicMock()
     runtime.agent = MagicMock()
     runtime.agent.is_online = True
@@ -42,7 +53,11 @@ def mock_runtime():
     runtime.api_config = {
         "server": {"host": "127.0.0.1", "port": 8000},
         "request": {"max_question_length": 2000},
-        "security": {"cors_enabled": False, "expose_internal_errors": False},
+        "security": {"cors_enabled": False, "expose_internal_errors": False, "local_secure_mode": True},
+        "local_security": {
+            "rate_limit": {"enabled": False, "requests_per_minute": 30, "burst": 3},
+            "audit": {"enabled": False},
+        },
     }
 
     # mock start/close 为异步空操作（FastAPI lifespan 需要 await）
@@ -82,6 +97,7 @@ def mock_runtime():
 def mock_offline_runtime():
     """创建一个离线状态的 mock AgentRuntime"""
     from src.api.runtime import ServiceNotReadyError
+    _setup_token_env()
 
     runtime = MagicMock()
     runtime.agent = MagicMock()
@@ -92,7 +108,11 @@ def mock_offline_runtime():
     runtime.api_config = {
         "server": {"host": "127.0.0.1", "port": 8000},
         "request": {"max_question_length": 2000},
-        "security": {"cors_enabled": False, "expose_internal_errors": False},
+        "security": {"cors_enabled": False, "expose_internal_errors": False, "local_secure_mode": True},
+        "local_security": {
+            "rate_limit": {"enabled": False, "requests_per_minute": 30, "burst": 3},
+            "audit": {"enabled": False},
+        },
     }
 
     # mock start/close 为异步空操作
@@ -114,20 +134,32 @@ def mock_offline_runtime():
 
 @pytest.fixture
 def client(mock_runtime):
-    """创建带 mock runtime 的测试客户端"""
+    """创建带 mock runtime 的测试客户端（含有效 token）"""
     from src.api.app import create_app
-    app = create_app(runtime=mock_runtime)
+    from src.api.local_auth import LocalTokenAuth
+
+    auth = LocalTokenAuth(local_secure_mode=True)
+    app = create_app(runtime=mock_runtime, local_auth=auth)
     with TestClient(app) as c:
         yield c
 
 
 @pytest.fixture
 def offline_client(mock_offline_runtime):
-    """创建带离线 runtime 的测试客户端"""
+    """创建带离线 runtime 的测试客户端（含有效 token）"""
     from src.api.app import create_app
-    app = create_app(runtime=mock_offline_runtime)
+    from src.api.local_auth import LocalTokenAuth
+
+    auth = LocalTokenAuth(local_secure_mode=True)
+    app = create_app(runtime=mock_offline_runtime, local_auth=auth)
     with TestClient(app) as c:
         yield c
+
+
+# ── 便捷方法：为需要认证的请求添加 token header ──
+def _auth_headers():
+    """返回包含正确 token 的请求头"""
+    return {"X-TianShu-Token": _TEST_TOKEN}
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -140,27 +172,27 @@ class TestAskRequestSchema:
 
     def test_question_required(self, client):
         """question 必填，缺失时返回 422"""
-        resp = client.post("/v1/ask", json={})
+        resp = client.post("/v1/ask", json={}, headers=_auth_headers())
         assert resp.status_code == 422
 
     def test_question_empty_string(self, client):
         """空字符串 question 返回 422"""
-        resp = client.post("/v1/ask", json={"question": ""})
+        resp = client.post("/v1/ask", json={"question": ""}, headers=_auth_headers())
         assert resp.status_code == 422
 
     def test_question_whitespace_only(self, client):
         """全空格 question 返回 422"""
-        resp = client.post("/v1/ask", json={"question": "   "})
+        resp = client.post("/v1/ask", json={"question": "   "}, headers=_auth_headers())
         assert resp.status_code == 422
 
     def test_question_too_long(self, client):
         """超长 question 返回 422"""
-        resp = client.post("/v1/ask", json={"question": "x" * 2001})
+        resp = client.post("/v1/ask", json={"question": "x" * 2001}, headers=_auth_headers())
         assert resp.status_code == 422
 
     def test_question_max_length_ok(self, client):
         """刚好达到最大长度的 question 应被接受"""
-        resp = client.post("/v1/ask", json={"question": "x" * 2000})
+        resp = client.post("/v1/ask", json={"question": "x" * 2000}, headers=_auth_headers())
         # 不检查 status_code 具体值（mock 可能返回 200 或 422），
         # 但至少不是 422（如果能通过 Schema）——对于 mock 应是 200
         assert resp.status_code in (200, 422)
@@ -171,12 +203,12 @@ class TestAskRequestSchema:
             "question": "test",
             "mode": "llm",
             "sql": "SELECT 1",
-        })
+        }, headers=_auth_headers())
         assert resp.status_code == 422
 
     def test_valid_question_accepted(self, client):
         """正常 question 应被接受（200）"""
-        resp = client.post("/v1/ask", json={"question": "2026年1月每天有多少行程？"})
+        resp = client.post("/v1/ask", json={"question": "2026年1月每天有多少行程？"}, headers=_auth_headers())
         assert resp.status_code == 200
 
 
@@ -191,7 +223,7 @@ class TestErrorSchema:
     def test_error_response_structure(self, client):
         """错误响应应包含 error.code, error.message, error.request_id"""
         # 发送一个空请求来触发 422
-        resp = client.post("/v1/ask", json={})
+        resp = client.post("/v1/ask", json={}, headers=_auth_headers())
         assert resp.status_code == 422
         data = resp.json()
         assert "error" in data
@@ -200,13 +232,13 @@ class TestErrorSchema:
 
     def test_error_code_not_empty(self, client):
         """错误 code 不应为空"""
-        resp = client.post("/v1/ask", json={})
+        resp = client.post("/v1/ask", json={}, headers=_auth_headers())
         data = resp.json()
         assert data["error"]["code"]
 
     def test_error_message_not_empty(self, client):
         """错误 message 不应为空"""
-        resp = client.post("/v1/ask", json={})
+        resp = client.post("/v1/ask", json={}, headers=_auth_headers())
         data = resp.json()
         assert data["error"]["message"]
 
@@ -360,18 +392,18 @@ class TestAskResponse:
 
     def test_answer_response_200(self, client):
         """answer 类型响应返回 200"""
-        resp = client.post("/v1/ask", json={"question": "2026年1月每天有多少行程？"})
+        resp = client.post("/v1/ask", json={"question": "2026年1月每天有多少行程？"}, headers=_auth_headers())
         assert resp.status_code == 200
 
     def test_answer_contains_contract_version(self, client):
         """answer 响应包含 contract_version"""
-        resp = client.post("/v1/ask", json={"question": "test"})
+        resp = client.post("/v1/ask", json={"question": "test"}, headers=_auth_headers())
         data = resp.json()
         assert data.get("contract_version") == "1.0"
 
     def test_answer_contains_response_type(self, client):
         """answer 响应包含 response_type"""
-        resp = client.post("/v1/ask", json={"question": "test"})
+        resp = client.post("/v1/ask", json={"question": "test"}, headers=_auth_headers())
         data = resp.json()
         assert data["response_type"] in ("answer", "clarification", "refusal", "error")
 
@@ -389,7 +421,7 @@ class TestAskResponse:
             "warnings": [],
             "meta": {"execution_mode": "single"},
         })
-        resp = client.post("/v1/ask", json={"question": "test"})
+        resp = client.post("/v1/ask", json={"question": "test"}, headers=_auth_headers())
         assert resp.status_code == 200
 
     def test_refusal_returns_200(self, client):
@@ -405,12 +437,12 @@ class TestAskResponse:
             "warnings": [],
             "meta": {"execution_mode": "single"},
         })
-        resp = client.post("/v1/ask", json={"question": "test"})
+        resp = client.post("/v1/ask", json={"question": "test"}, headers=_auth_headers())
         assert resp.status_code == 200
 
     def test_offline_ask_returns_503(self, offline_client):
         """离线 Agent 的 ask 返回 503"""
-        resp = offline_client.post("/v1/ask", json={"question": "test"})
+        resp = offline_client.post("/v1/ask", json={"question": "test"}, headers=_auth_headers())
         assert resp.status_code == 503
 
 
@@ -424,7 +456,7 @@ class TestHttpStatusMapping:
 
     def test_422_on_schema_error(self, client):
         """请求 Schema 错误 → 422"""
-        resp = client.post("/v1/ask", json={"bad_field": "value"})
+        resp = client.post("/v1/ask", json={"bad_field": "value"}, headers=_auth_headers())
         assert resp.status_code == 422
 
     def test_503_when_offline(self, offline_client):
@@ -438,7 +470,7 @@ class TestHttpStatusMapping:
         async def raise_error(question):
             raise RuntimeError("模拟内部异常")
         client.app.state.runtime.ask = AsyncMock(side_effect=raise_error)
-        resp = client.post("/v1/ask", json={"question": "test"})
+        resp = client.post("/v1/ask", json={"question": "test"}, headers=_auth_headers())
         assert resp.status_code == 500
 
     def test_500_response_not_contain_traceback(self, client):
@@ -446,7 +478,7 @@ class TestHttpStatusMapping:
         async def raise_error(question):
             raise RuntimeError("模拟内部异常")
         client.app.state.runtime.ask = AsyncMock(side_effect=raise_error)
-        resp = client.post("/v1/ask", json={"question": "test"})
+        resp = client.post("/v1/ask", json={"question": "test"}, headers=_auth_headers())
         data = resp.json()
         # 响应中不应出现 Python traceback 关键词
         response_text = json.dumps(data, ensure_ascii=False)
