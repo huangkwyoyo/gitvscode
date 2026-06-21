@@ -535,11 +535,11 @@ class TestHarnessWarnModeStep3:
         for key in required_keys:
             assert key in summary, f"JSON 摘要缺少字段: {key}"
 
-        # 验证数值合理性
-        assert summary["total_steps"] == 11
-        assert summary["blocking_pass"] + summary["blocking_fail"] == 6  # 前6步是阻断
-        assert summary["warn_pass"] + summary["warn_warn"] + summary["warn_infra_fail"] == 5  # 后5步是warn
-        assert summary["total_pass"] + summary["total_warn"] + summary["total_fail"] == 11
+        # 验证数值合理性（含第12步 JSON 响应契约序列化门禁）
+        assert summary["total_steps"] == 12
+        assert summary["blocking_pass"] + summary["blocking_fail"] == 7  # 步骤1-6 + 12 是阻断
+        assert summary["warn_pass"] + summary["warn_warn"] + summary["warn_infra_fail"] == 5  # 步骤7-11 是 warn
+        assert summary["total_pass"] + summary["total_warn"] + summary["total_fail"] == 12
 
     def test_blocking_checks_still_block(self):
         """验证原有阻断检查不受 warn 模式影响"""
@@ -657,8 +657,8 @@ class TestRegistryClosureFunctions:
         registry = load_memory_rules_registry()
         assert registry is not None, "registry 应能成功加载"
         assert "rules" in registry, "registry 应包含 rules 键"
-        assert len(registry["rules"]) == 21, (
-            f"期望 21 条规则（9 条迁移 + 12 条补齐），实际: {len(registry['rules'])}"
+        assert len(registry["rules"]) == 22, (
+            f"期望 22 条规则（9 条迁移 + 12 条补齐 + 1 条 JSON-P0），实际: {len(registry['rules'])}"
         )
 
     def test_build_registry_reverse_index_structure(self):
@@ -1017,8 +1017,8 @@ class TestStep7FullCoverage:
         from harness.checks.check_memory_update import load_memory_rules_registry
 
         registry = load_memory_rules_registry()
-        assert len(registry["rules"]) == 21, (
-            f"期望 21 条规则，实际: {len(registry['rules'])}"
+        assert len(registry["rules"]) == 22, (
+            f"期望 22 条规则，实际: {len(registry['rules'])}"
         )
 
     def test_all_new_rules_are_proposed_not_blocking(self):
@@ -1044,14 +1044,14 @@ class TestStep7FullCoverage:
                     f"{rid}: 本轮所有规则 blocking 必须为 false，实际: {rule['blocking']}"
                 )
 
-    def test_generated_md_contains_21_rules(self):
-        """生成的 Markdown 应包含 21 条规则——统计详情章节标题"""
+    def test_generated_md_contains_22_rules(self):
+        """生成的 Markdown 应包含 22 条规则——统计详情章节标题"""
         output_path = Path(__file__).resolve().parents[1] / "docs" / "memory" / "规则来源索引.md"
         content = output_path.read_text(encoding="utf-8")
         # 统计详情章节标题（### TA-Rxxx），每个规则仅出现一次
         ta_r_count = content.count("### TA-R")
-        assert ta_r_count == 21, (
-            f"Markdown 应包含 21 条 TA-R 规则详情，实际: {ta_r_count}"
+        assert ta_r_count == 22, (
+            f"Markdown 应包含 22 条 TA-R 规则详情，实际: {ta_r_count}"
         )
 
 
@@ -1525,7 +1525,7 @@ class TestStep8aBackwardCompatibility:
         assert registry.get("load_error") is None, (
             f"真实 registry 加载失败: {registry.get('load_error')}"
         )
-        assert len(registry["rules"]) == 21
+        assert len(registry["rules"]) == 22
 
         # 反向索引正常工作
         ri = build_registry_reverse_index(registry["rules"])

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import sys
+from datetime import date, datetime
 from pathlib import Path
 
 import pytest
@@ -289,7 +290,7 @@ def test_new_fields_json_serializable():
     response = _make_answer_response()
     d = response.to_dict()
     try:
-        json.dumps(d, ensure_ascii=False, default=str)
+        json.dumps(d, ensure_ascii=False)
     except Exception as e:
         pytest.fail(f"to_dict() 无法 JSON 序列化: {e}")
 
@@ -499,7 +500,7 @@ def test_public_response_fully_json_serializable():
     ]:
         public = build_public_response(make_fn())
         try:
-            json.dumps(public, ensure_ascii=False, default=str)
+            json.dumps(public, ensure_ascii=False)
         except Exception as e:
             pytest.fail(f"{make_fn.__name__}: 公开响应无法 JSON 序列化: {e}")
 
@@ -540,3 +541,263 @@ def test_agent_response_default_new_fields():
     assert response.chart_spec is None
     assert response.warnings == []
     assert response.execution_mode == ""
+
+
+# ═══════════════════════════════════════════════════════════════
+# JSON-P0 真实类型测试：验证 build_public_response() 输出是 JSON-native
+# ═══════════════════════════════════════════════════════════════
+
+
+def _make_response_with_date_in_rows() -> AgentResponse:
+    """构造 answer 响应：rows 中包含真实的 datetime.date 对象（模拟 DuckDB DATE 列）"""
+    response = AgentResponse(
+        question="2026年1月每天有多少行程？",
+        chinese_answer="2026年1月共有3100万行程。",
+    )
+    response.result = SQLResult(
+        sql="SELECT dim_date, trip_count FROM gold.dws_daily_trip_summary",
+        columns=["dim_date", "trip_count"],
+        column_types=["DATE", "BIGINT"],
+        rows=[
+            (date(2026, 1, 1), 1000000),
+            (date(2026, 1, 2), 1050000),
+            (date(2026, 1, 3), 980000),
+        ],
+        row_count=31,
+        source_table="gold.dws_daily_trip_summary",
+    )
+    response.result_summaries = [
+        ResultSummary(
+            source_plan_index=1,
+            metrics=["trip_count"],
+            primary_table="gold.dws_daily_trip_summary",
+            strategy="g3_direct",
+            columns=["dim_date", "trip_count"],
+            column_types=["DATE", "BIGINT"],
+            row_count=31,
+            sample_rows=[
+                [date(2026, 1, 1), 1000000],
+                [date(2026, 1, 2), 1050000],
+            ],
+            has_date_column=True,
+            grain="daily",
+            date_min="2026-01-01",
+            date_max="2026-01-31",
+        ).to_dict()
+    ]
+    response.execution_mode = "single"
+    return response
+
+
+def _make_response_with_datetime_in_rows() -> AgentResponse:
+    """构造 answer 响应：rows 中包含真实的 datetime.datetime 对象"""
+    response = AgentResponse(
+        question="2026年1月每天最后一条记录是什么时间？",
+        chinese_answer="1月1日最后记录在 23:59。",
+    )
+    response.result = SQLResult(
+        sql="SELECT event_time FROM gold.event_log",
+        columns=["event_time"],
+        column_types=["TIMESTAMP"],
+        rows=[
+            (datetime(2026, 1, 1, 23, 59, 0),),
+            (datetime(2026, 1, 2, 23, 58, 30),),
+        ],
+        row_count=2,
+        source_table="gold.event_log",
+    )
+    response.result_summaries = [
+        ResultSummary(
+            source_plan_index=1,
+            metrics=[],
+            primary_table="gold.event_log",
+            strategy="g3_direct",
+            columns=["event_time"],
+            column_types=["TIMESTAMP"],
+            row_count=2,
+            sample_rows=[
+                [datetime(2026, 1, 1, 23, 59, 0)],
+            ],
+            has_date_column=False,
+            grain="unknown",
+        ).to_dict()
+    ]
+    response.execution_mode = "single"
+    return response
+
+
+def _make_response_with_tuple_in_rows() -> AgentResponse:
+    """构造 answer 响应：rows 中包含 tuple（模拟 DuckDB 返回格式）"""
+    response = AgentResponse(
+        question="查询城市排行",
+        chinese_answer="排名：北京第一。",
+    )
+    response.result = SQLResult(
+        sql="SELECT city, trip_count FROM gold.city_stats",
+        columns=["city", "trip_count"],
+        column_types=["VARCHAR", "BIGINT"],
+        rows=[
+            ("北京", 500000),
+            ("上海", 480000),
+        ],
+        row_count=2,
+        source_table="gold.city_stats",
+    )
+    response.result_summaries = [
+        ResultSummary(
+            source_plan_index=1,
+            metrics=["trip_count"],
+            primary_table="gold.city_stats",
+            strategy="g3_direct",
+            columns=["city", "trip_count"],
+            column_types=["VARCHAR", "BIGINT"],
+            row_count=2,
+            sample_rows=[("北京", 500000)],
+            has_date_column=False,
+            grain="unknown",
+        ).to_dict()
+    ]
+    response.execution_mode = "single"
+    return response
+
+
+def _make_response_with_nested_date() -> AgentResponse:
+    """构造 answer 响应：嵌套 dict/list 中包含 date 对象"""
+    response = AgentResponse(
+        question="多计划跨域查询",
+        chinese_answer="查询结果已合并。",
+        is_multi_plan=True,
+    )
+    response.result = SQLResult(
+        sql="SELECT dim_date, trip_count FROM gold.dws_daily_trip_summary",
+        columns=["dim_date", "trip_count"],
+        column_types=["DATE", "BIGINT"],
+        rows=[(date(2026, 1, 15), 1000000)],
+        row_count=1,
+        source_table="gold.dws_daily_trip_summary",
+    )
+    response.result_summaries = [
+        ResultSummary(
+            source_plan_index=1,
+            metrics=["trip_count"],
+            primary_table="gold.dws_daily_trip_summary",
+            strategy="g3_direct",
+            columns=["dim_date", "trip_count"],
+            column_types=["DATE", "BIGINT"],
+            row_count=1,
+            sample_rows=[[date(2026, 1, 15), 1000000]],
+            has_date_column=True,
+            grain="daily",
+            date_min="2026-01-15",
+            date_max="2026-01-15",
+        ).to_dict()
+    ]
+    # merged_result 也包含嵌套 dict
+    response.merged_result = {
+        "merge_status": "merged",
+        "merge_key": "dim_date",
+        "row_count": 1,
+        "source_plan_indexes": [1],
+        "reason": "按日期对齐合并",
+        # 嵌套在 merged_result 中的日期不一定存在，但测试防御性覆盖
+        "sample_dates": [date(2026, 1, 15)],
+    }
+    response.execution_mode = "serial"
+    return response
+
+
+# ── 测试：date 在 rows 中可原生序列化 ──
+
+
+def test_build_public_response_with_date_in_rows():
+    """rows 中包含 datetime.date 时，build_public_response 输出应可被 json.dumps 原生序列化（无 default=str）"""
+    public = build_public_response(_make_response_with_date_in_rows())
+    # 核心断言：不带 default=str 的 json.dumps 必须成功
+    serialized = json.dumps(public, ensure_ascii=False)
+    parsed = json.loads(serialized)
+    # 验证 date 被转为 ISO 字符串
+    assert public["data"]["summaries"][0]["sample_rows"][0][0] == "2026-01-01"
+    assert parsed["data"]["summaries"][0]["sample_rows"][0][0] == "2026-01-01"
+
+
+def test_build_public_response_with_datetime_in_rows():
+    """rows 中包含 datetime.datetime 时，应转为 ISO 字符串"""
+    public = build_public_response(_make_response_with_datetime_in_rows())
+    serialized = json.dumps(public, ensure_ascii=False)
+    parsed = json.loads(serialized)
+    # datetime 应转为 ISO 格式字符串
+    sample_value = public["data"]["summaries"][0]["sample_rows"][0][0]
+    assert isinstance(sample_value, str)
+    assert "T" in sample_value  # ISO datetime 包含 T 分隔符
+    assert parsed["data"]["summaries"][0]["sample_rows"][0][0] == sample_value
+
+
+def test_build_public_response_with_tuple_in_rows():
+    """rows 中包含 tuple 时，应转为 list（JSON 不支持 tuple）"""
+    public = build_public_response(_make_response_with_tuple_in_rows())
+    serialized = json.dumps(public, ensure_ascii=False)
+    parsed = json.loads(serialized)
+    # 序列化后再反序列化，tuple 变成 list
+    sample_value = public["data"]["summaries"][0]["sample_rows"][0]
+    assert isinstance(sample_value, list)  # 已从 tuple 转为 list
+    assert sample_value == ["北京", 500000]
+    assert parsed["data"]["summaries"][0]["sample_rows"][0] == ["北京", 500000]
+
+
+def test_build_public_response_with_nested_date():
+    """嵌套 dict/list 中的 date 对象应被递归转换"""
+    public = build_public_response(_make_response_with_nested_date())
+    serialized = json.dumps(public, ensure_ascii=False)
+    parsed = json.loads(serialized)
+    # merged_result 中嵌套的 sample_dates 中的 date 应被转换
+    assert public["data"]["merged_result"]["sample_dates"][0] == "2026-01-15"
+    assert parsed["data"]["merged_result"]["sample_dates"][0] == "2026-01-15"
+    # sample_rows 中的 date 也应被转换
+    assert public["data"]["summaries"][0]["sample_rows"][0][0] == "2026-01-15"
+
+
+def test_build_public_response_fully_json_native():
+    """所有五类响应的 build_public_response() 输出必须可被 json.dumps 原生序列化（不带 default=str）"""
+    for make_fn in [
+        _make_answer_response,
+        _make_clarification_response,
+        _make_refusal_response,
+        _make_error_response,
+        _make_multi_plan_response,
+        _make_response_with_date_in_rows,
+        _make_response_with_datetime_in_rows,
+        _make_response_with_tuple_in_rows,
+        _make_response_with_nested_date,
+    ]:
+        public = build_public_response(make_fn())
+        try:
+            json.dumps(public, ensure_ascii=False)
+        except Exception as e:
+            pytest.fail(f"{make_fn.__name__}: 公开响应无法原生 JSON 序列化（无 default=str）: {e}")
+
+
+# ── 测试：Starlette JSONResponse 渲染路径 ──
+
+
+def test_build_public_response_via_starlette_json_response():
+    """build_public_response 输出必须能直接通过 Starlette JSONResponse 渲染（模拟生产路径）"""
+    from starlette.responses import JSONResponse
+
+    for make_fn in [
+        _make_response_with_date_in_rows,
+        _make_response_with_datetime_in_rows,
+        _make_response_with_tuple_in_rows,
+        _make_response_with_nested_date,
+    ]:
+        public = build_public_response(make_fn())
+        try:
+            resp = JSONResponse(content=public, status_code=200)
+            # 调用 render 模拟实际渲染——这正是生产路径中会触发 TypeError 的地方
+            body = resp.render(public)
+            # 验证渲染出的 body 可被 json.loads 解析
+            parsed = json.loads(body)
+            assert parsed["contract_version"] == "1.0"
+        except TypeError as e:
+            pytest.fail(
+                f"{make_fn.__name__}: JSONResponse 渲染失败（date/datetime 未规范化）: {e}"
+            )

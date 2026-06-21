@@ -104,10 +104,10 @@ def test_valid_recommendations_contains_all_expected():
 
 
 def test_all_rules_reviewed():
-    """审查结果应覆盖 memory_rules.yml 中所有规则（21 条）。"""
+    """审查结果应覆盖 memory_rules.yml 中所有规则（22 条）。"""
     review = review_rules()
-    assert review.total_rules == 21
-    assert len(review.reviews) == 21
+    assert review.total_rules == 22
+    assert len(review.reviews) == 22
 
     # 所有规则的 recommendation 必须合法
     for rv in review.reviews:
@@ -123,7 +123,7 @@ def test_all_rules_reviewed():
         + len(review.kept_non_blocking)
         + len(review.rejected)
     )
-    assert total_classified == 21, f"分类总数应为 21，实际 {total_classified}"
+    assert total_classified == 22, f"分类总数应为 22，实际 {total_classified}"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

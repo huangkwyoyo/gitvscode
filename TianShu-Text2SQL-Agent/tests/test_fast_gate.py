@@ -118,10 +118,10 @@ def test_active_blocking_failure_makes_fast_gate_exit_nonzero(monkeypatch, tmp_p
 class TestFastGateWarnModeStep3:
     """Step 9：观察期已结束，5 个安全检查已升级为阻断"""
 
-    def test_warn_only_check_indices_is_empty(self):
-        """观察期已结束，WARN_ONLY_CHECK_INDICES 应为空列表"""
-        assert len(WARN_ONLY_CHECK_INDICES) == 0, (
-            f"观察期结束后 WARN_ONLY_CHECK_INDICES 应为空，实际: {WARN_ONLY_CHECK_INDICES}"
+    def test_warn_only_check_indices_has_step_12(self):
+        """JSON-P1: 第 12 步 (JSON 响应契约序列化门禁) 处于观察期"""
+        assert WARN_ONLY_CHECK_INDICES == [12], (
+            f"当前 WARN_ONLY_CHECK_INDICES 应为 [12]（JSON 响应契约序列化门禁），实际: {WARN_ONLY_CHECK_INDICES}"
         )
 
     def test_warn_only_checks_list_is_empty(self):
@@ -130,35 +130,35 @@ class TestFastGateWarnModeStep3:
             f"观察期结束后 WARN_ONLY_CHECKS 应为空，实际: {WARN_ONLY_CHECKS}"
         )
 
-    def test_harness_step_no_warn_steps_flag(self):
-        """观察期结束后，harness 命令不应包含 --warn-steps"""
+    def test_harness_step_has_warn_steps_12(self):
+        """JSON-P1: 观察期内 harness 命令应包含 --warn-steps 12"""
         harness_step = next(step for step in STEPS if step["name"] == "harness")
         command_text = " ".join(harness_step["command"])
 
-        assert "--warn-steps" not in command_text, (
-            f"观察期结束后 harness 命令不应包含 --warn-steps:\n{command_text}"
+        assert "--warn-steps 12" in command_text, (
+            f"观察期内 harness 命令应包含 --warn-steps 12:\n{command_text}"
         )
         assert "--json-summary" in command_text, (
             f"harness 步骤应包含 --json-summary:\n{command_text}"
         )
 
     def test_parse_harness_json_summary_all_blocking(self):
-        """验证 _parse_harness_json_summary 正确解析全阻断模式 JSON（11 项阻断）"""
+        """验证 _parse_harness_json_summary 正确解析全阻断模式 JSON（12 项阻断）"""
         stdout = (
             "一些输出...\n"
-            '__HARNESS_JSON_SUMMARY__ {"blocking_pass": 11, "blocking_fail": 0, '
+            '__HARNESS_JSON_SUMMARY__ {"blocking_pass": 12, "blocking_fail": 0, '
             '"warn_pass": 0, "warn_warn": 0, "warn_infra_fail": 0, '
-            '"total_pass": 11, "total_warn": 0, "total_fail": 0, "total_steps": 11}\n'
+            '"total_pass": 12, "total_warn": 0, "total_fail": 0, "total_steps": 12}\n'
             "更多输出..."
         )
         summary = _parse_harness_json_summary(stdout)
         assert summary is not None, "应成功解析 JSON 摘要"
-        assert summary["blocking_pass"] == 11
+        assert summary["blocking_pass"] == 12
         assert summary["blocking_fail"] == 0
         assert summary["warn_pass"] == 0
         assert summary["warn_warn"] == 0
         assert summary["warn_infra_fail"] == 0
-        assert summary["total_steps"] == 11
+        assert summary["total_steps"] == 12
 
     def test_parse_harness_json_summary_missing_line(self):
         """验证 _parse_harness_json_summary 在无 JSON 行时返回 None"""
@@ -172,8 +172,8 @@ class TestFastGateWarnModeStep3:
         summary = _parse_harness_json_summary(stdout)
         assert summary is None, "JSON 格式错误时应返回 None"
 
-    def test_all_11_checks_are_blocking(self):
-        """观察期结束后，所有 11 项检查均为阻断模式，无 warn-only"""
+    def test_all_12_checks_are_blocking(self):
+        """JSON-P1: 不含 --warn-steps 时，所有 12 项检查均为阻断模式"""
         import subprocess
         import sys
         import os
@@ -200,11 +200,11 @@ class TestFastGateWarnModeStep3:
             f"全阻断模式 + 全部通过 → exit 0:\nstderr:\n{result.stderr}"
         )
 
-        # JSON 摘要应包含正确的统计：11 项阻断，0 项观察期
+        # JSON 摘要应包含正确的统计：12 项阻断，0 项观察期
         summary = _parse_harness_json_summary(result.stdout)
         assert summary is not None, f"应输出 JSON 摘要:\n{result.stdout}"
-        assert summary["blocking_pass"] == 11, f"全部检查应为阻断且通过: {summary}"
-        assert summary["warn_pass"] == 0, f"观察期已结束，warn_pass 应为 0: {summary}"
+        assert summary["blocking_pass"] == 12, f"全部检查应为阻断且通过: {summary}"
+        assert summary["warn_pass"] == 0, f"warn_pass 应为 0: {summary}"
         assert summary["warn_warn"] == 0
         assert summary["warn_infra_fail"] == 0
         assert summary["blocking_fail"] == 0
@@ -258,20 +258,20 @@ class TestFastGateWarnModeStep3:
         assert report.warn_checks_warned == 0
         assert report.warn_checks_infra_fail == 0
 
-    def test_fast_gate_report_markdown_no_observation_section(self, monkeypatch, tmp_path):
-        """观察期结束后，生成的 Markdown 报告不应包含「观察期检查」章节"""
+    def test_fast_gate_report_markdown_has_observation_section(self, monkeypatch, tmp_path):
+        """JSON-P1 观察期内，生成的 Markdown 报告应包含「观察期检查」章节"""
         from harness.run_fast_gate import render_markdown
 
         harness_summary = {
             "blocking_pass": 11,
             "blocking_fail": 0,
-            "warn_pass": 0,
+            "warn_pass": 1,
             "warn_warn": 0,
             "warn_infra_fail": 0,
-            "total_pass": 11,
+            "total_pass": 12,
             "total_warn": 0,
             "total_fail": 0,
-            "total_steps": 11,
+            "total_steps": 12,
         }
 
         report = FastGateReport(
@@ -287,7 +287,7 @@ class TestFastGateWarnModeStep3:
             overall="PASS",
             steps=[{
                 "name": "harness",
-                "display": "Harness 安全检查（11 项阻断）",
+                "display": "Harness 安全检查（11 项阻断 + 1 项观察）",
                 "status": "PASS",
                 "exit_code": 0,
                 "stdout": "",
@@ -302,15 +302,15 @@ class TestFastGateWarnModeStep3:
         )
 
         md = render_markdown(report)
-        assert "观察期检查（warn-only）" not in md, (
-            f"观察期结束后 Markdown 不应出现观察期检查章节:\n{md[:500]}"
+        assert "观察期检查（warn-only）" in md, (
+            f"JSON-P1 观察期内 Markdown 应出现观察期检查章节:\n{md[:500]}"
         )
-        assert "观察期" not in md, (
-            f"Markdown 不应包含「观察期」字样:\n{md[:500]}"
+        assert "观察期" in md, (
+            f"Markdown 应包含「观察期」字样:\n{md[:500]}"
         )
 
-    def test_fast_gate_stdout_no_observation_notice(self, tmp_path):
-        """观察期结束后，fast gate 输出不应再提示「观察期」"""
+    def test_fast_gate_stdout_has_observation_notice(self, tmp_path):
+        """JSON-P1 观察期内，fast gate 输出应提示「观察期」"""
         import subprocess
         import sys
         import os
@@ -330,8 +330,8 @@ class TestFastGateWarnModeStep3:
 
         # 不应崩溃，应有正常输出
         assert "快速门禁" in result.stdout, f"应包含 '快速门禁':\n{result.stdout[:500]}"
-        assert "观察期" not in result.stdout, (
-            f"观察期结束后输出不应包含「观察期」:\n{result.stdout[:500]}"
+        assert "观察期" in result.stdout, (
+            f"JSON-P1 观察期内输出应包含「观察期」:\n{result.stdout[:500]}"
         )
         assert "11 项阻断" in result.stdout, (
             f"输出应显示 11 项阻断:\n{result.stdout[:500]}"

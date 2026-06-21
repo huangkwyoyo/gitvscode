@@ -158,7 +158,7 @@ class TestRootEndpoint:
     def test_root_contains_title(self, client):
         """GET / 返回的 HTML 包含页面标题"""
         resp = client.get("/")
-        assert "TianShu" in resp.text
+        assert "天枢" in resp.text
 
 
 class TestStaticAssets:

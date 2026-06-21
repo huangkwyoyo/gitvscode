@@ -15,6 +15,7 @@ TianShu Text2SQL Agent 质量门禁入口。
     9. 跨域策略安全门禁  —— 验证隐私保护、因果禁止、罚款警告
    10. 图表规格安全门禁  —— 验证 HTML/JS/LLM/DuckDB 禁止 + 跨域降级
    11. PlanExecutor 安全门禁 —— 验证安全链路引用、离线阻断、read_only
+   12. JSON 响应契约序列化门禁 —— 验证 build_public_response() 输出 JSON-native + 禁止 default=str 掩码
 
 warn 模式（--warn-steps）：
     - 指定步骤以 WARN 模式运行：发现问题时打印 WARNING，但不导致非零退出码
@@ -54,6 +55,8 @@ STEPS: list[tuple[str, list[str]]] = [
     ("跨域策略安全门禁", [sys.executable, "harness/checks/check_cross_domain_policy.py"]),
     ("图表规格安全门禁", [sys.executable, "harness/checks/check_chart_spec_safety.py"]),
     ("PlanExecutor 安全门禁", [sys.executable, "harness/checks/check_plan_executor_safety.py"]),
+    # JSON-P1: 公开响应 JSON 契约序列化严格性检查（TA-R031 proposed 观察期）
+    ("JSON 响应契约序列化门禁", [sys.executable, "harness/checks/check_json_response_contract.py"]),
 ]
 
 

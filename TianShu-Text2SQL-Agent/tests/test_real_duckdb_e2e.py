@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+from datetime import date, datetime
 from pathlib import Path
 
 import pytest
@@ -476,3 +477,183 @@ def test_boundary_no_llm_import_in_runner():
         assert f".{indicator}" not in src.lower() or indicator in ["agent"], (
             f"runner 不应直接使用 LLM: {indicator}"
         )
+
+
+# ═══════════════════════════════════════════════════════════════
+# JSON-P0 真实 DuckDB DATE 列 JSON 序列化回归测试
+# ═══════════════════════════════════════════════════════════════
+
+
+def test_real_duckdb_date_column_json_serialization():
+    """
+    真实 DuckDB DATE 列 → SQLResult rows → build_public_response()
+    → json.dumps(ensure_ascii=False) → JSONResponse.render() 全链路序列化验证。
+
+    不依赖 default=str。此测试直接复现生产崩溃路径：
+    DuckDB DATE → datetime.date → TypeError in JSONResponse。
+    """
+    import duckdb
+    from src.ir import AgentResponse, SQLResult, ResultSummary
+    from src.response_contract import build_public_response
+    from starlette.responses import JSONResponse
+
+    # ── 创建内存 DuckDB，建立含 DATE 和 TIMESTAMP 列的表 ──
+    conn = duckdb.connect(":memory:")
+    conn.execute("""
+        CREATE TABLE test_dates AS
+        SELECT
+            CAST('2026-01-15' AS DATE) AS dim_date,
+            1000000 AS trip_count
+        UNION ALL
+        SELECT CAST('2026-01-16' AS DATE), 1050000
+        UNION ALL
+        SELECT CAST('2026-01-17' AS DATE), 980000
+    """)
+
+    # ── 执行真实 DuckDB 查询，rows 将包含 datetime.date 对象 ──
+    rows = conn.execute("SELECT dim_date, trip_count FROM test_dates ORDER BY dim_date").fetchall()
+    columns = ["dim_date", "trip_count"]
+    column_types = ["DATE", "BIGINT"]
+
+    # 验证 DuckDB 确实返回了 datetime.date 对象（而非字符串）
+    assert isinstance(rows[0][0], date), (
+        f"期望 DuckDB DATE 列返回 datetime.date，实际返回 {type(rows[0][0])}"
+    )
+    assert rows[0][0] == date(2026, 1, 15)
+
+    conn.close()
+
+    # ── 构造 AgentResponse（使用真实 DuckDB 返回的 rows）──
+    response = AgentResponse(
+        question="2026年1月15日至17日每天有多少行程？",
+        chinese_answer="1月15日100万，16日105万，17日98万。",
+    )
+    response.result = SQLResult(
+        sql="SELECT dim_date, trip_count FROM test_dates ORDER BY dim_date",
+        columns=columns,
+        column_types=column_types,
+        rows=rows,  # ← 包含真实的 datetime.date 对象
+        row_count=len(rows),
+        source_table="test_dates",
+    )
+    response.result_summaries = [
+        ResultSummary(
+            source_plan_index=1,
+            metrics=["trip_count"],
+            primary_table="test_dates",
+            strategy="g3_direct",
+            columns=columns,
+            column_types=column_types,
+            row_count=len(rows),
+            sample_rows=[list(r) for r in rows],  # ← datetime.date 在嵌套 list 中
+            has_date_column=True,
+            grain="daily",
+            date_min="2026-01-15",
+            date_max="2026-01-17",
+        ).to_dict()
+    ]
+    response.execution_mode = "single"
+
+    # ── 核心断言 1: build_public_response() 输出可被 json.dumps 原生序列化（不带 default=str）──
+    public = build_public_response(response)
+    try:
+        serialized = json.dumps(public, ensure_ascii=False)
+    except TypeError as e:
+        pytest.fail(
+            f"build_public_response() 输出无法原生 JSON 序列化（需 default=str 兜底）: {e}"
+        )
+
+    # ── 核心断言 2: JSONResponse.render() 生产路径不抛 TypeError ──
+    try:
+        resp = JSONResponse(content=public, status_code=200)
+        body = resp.render(public)
+        parsed = json.loads(body)
+    except TypeError as e:
+        pytest.fail(
+            f"Starlette JSONResponse 渲染失败（生产路径 crash 复现）: {e}"
+        )
+
+    # ── 验证：date 已被转为 ISO 字符串 ──
+    assert parsed["data"]["summaries"][0]["sample_rows"][0][0] == "2026-01-15"
+    assert parsed["contract_version"] == "1.0"
+    assert parsed["response_type"] == "answer"
+
+    # ── 验证：不含 SQL 文本 ──
+    assert "SELECT" not in serialized
+    assert "generated_sql" not in public
+
+
+def test_real_duckdb_timestamp_column_json_serialization():
+    """
+    真实 DuckDB TIMESTAMP 列 → datetime.datetime 对象 → 全链路序列化验证。
+    """
+    import duckdb
+    from src.ir import AgentResponse, SQLResult, ResultSummary
+    from src.response_contract import build_public_response
+    from starlette.responses import JSONResponse
+
+    conn = duckdb.connect(":memory:")
+    conn.execute("""
+        CREATE TABLE test_timestamps AS
+        SELECT CAST('2026-01-15 23:59:00' AS TIMESTAMP) AS event_time, 1 AS event_id
+        UNION ALL
+        SELECT CAST('2026-01-16 08:30:00' AS TIMESTAMP), 2
+    """)
+
+    rows = conn.execute("SELECT event_time, event_id FROM test_timestamps ORDER BY event_id").fetchall()
+
+    # 验证 DuckDB 返回 datetime.datetime 对象
+    assert isinstance(rows[0][0], datetime), (
+        f"期望 DuckDB TIMESTAMP 列返回 datetime.datetime，实际返回 {type(rows[0][0])}"
+    )
+
+    conn.close()
+
+    response = AgentResponse(
+        question="最近的事件时间是什么？",
+        chinese_answer="最新事件在 1月16日 08:30。",
+    )
+    response.result = SQLResult(
+        sql="SELECT event_time, event_id FROM test_timestamps",
+        columns=["event_time", "event_id"],
+        column_types=["TIMESTAMP", "INTEGER"],
+        rows=rows,
+        row_count=len(rows),
+        source_table="test_timestamps",
+    )
+    response.result_summaries = [
+        ResultSummary(
+            source_plan_index=1,
+            metrics=[],
+            primary_table="test_timestamps",
+            strategy="g3_direct",
+            columns=["event_time", "event_id"],
+            column_types=["TIMESTAMP", "INTEGER"],
+            row_count=len(rows),
+            sample_rows=[list(r) for r in rows],
+            has_date_column=False,
+            grain="unknown",
+        ).to_dict()
+    ]
+    response.execution_mode = "single"
+
+    public = build_public_response(response)
+
+    # 原生序列化（不带 default=str）
+    try:
+        serialized = json.dumps(public, ensure_ascii=False)
+    except TypeError as e:
+        pytest.fail(f"真实 DuckDB TIMESTAMP 列序列化失败: {e}")
+
+    # JSONResponse 渲染
+    try:
+        resp = JSONResponse(content=public, status_code=200)
+        body = resp.render(public)
+        parsed = json.loads(body)
+    except TypeError as e:
+        pytest.fail(f"Starlette JSONResponse 渲染失败（TIMESTAMP）: {e}")
+
+    # 验证 datetime 已转为 ISO 字符串（含 T 分隔符）
+    sample_dt = parsed["data"]["summaries"][0]["sample_rows"][0][0]
+    assert isinstance(sample_dt, str)
+    assert "T" in sample_dt

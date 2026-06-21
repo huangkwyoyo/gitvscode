@@ -542,3 +542,28 @@ rules:
       - tests/test_memory_rule_registry.py
     required_evals: []
     notes: "修改生成脚本后必须验证输出 Markdown 结构不退化、rule_id 唯一性、TA-R 前缀规范。TODO: add eval coverage in Step 9。"
+
+  # ═════════════════════════════════════════════════════════════════════════════
+  # TA-R031: Public API response must be JSON-native before JSONResponse
+  # 来源: JSON-P0 崩溃复盘（2026-06-20）
+  # ═════════════════════════════════════════════════════════════════════════════
+  - rule_id: TA-R031
+    title: "Public API response must be JSON-native before JSONResponse——build_public_response() 输出不含 date/datetime/tuple 等非 JSON 原生类型"
+    status: proposed
+    blocking: false
+    severity: high
+    source_memory: "JSON-P0 崩溃复盘——DuckDB DATE 列返回 datetime.date 导致 JSONResponse TypeError"
+    risk_ids:
+      - RISK-034
+    applies_to:
+      - src/response_contract.py
+      - src/api/app.py
+      - tests/test_response_contract.py
+      - harness/checks/check_json_response_contract.py
+    required_checks:
+      - harness/checks/check_json_response_contract.py
+    required_tests:
+      - tests/test_response_contract.py
+      - tests/test_real_duckdb_e2e.py
+    required_evals: []
+    notes: "Public response builders must normalize DuckDB/Python runtime values to JSON-native types before Starlette.JSONResponse. Tests must not use json.dumps(default=str) to mask serialization defects. 本轮只登记 proposed 不 active 不 blocking。晋升条件：check_json_response_contract.py 接入 Fast Gate 且连续 3 次无 infra_fail 后人工审查。"

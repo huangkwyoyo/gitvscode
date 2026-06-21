@@ -51,7 +51,9 @@ _MEMORY_RULES_PATH = PROJECT_ROOT / "docs" / "memory" / "memory_rules.yml"
 # Step 9 已将原 steps 7-11 从观察期（warn-only）升级为阻断模式。
 # 保留 WARN_ONLY_CHECK_INDICES 空列表以兼容现有代码路径，
 # 正常运行时 warn_pass/warn_warn/warn_infra_fail 均为 0。
-WARN_ONLY_CHECK_INDICES: list[int] = []
+# JSON-P1: 第 12 步 (JSON 响应契约序列化门禁) 处于观察期
+# TA-R031 晋升 active+blocking 后可从列表中移除
+WARN_ONLY_CHECK_INDICES: list[int] = [12]
 
 # 观察期检查对应的脚本路径（已清空，保留列表以兼容现有引用）
 WARN_ONLY_CHECKS: list[str] = []
@@ -88,7 +90,7 @@ STEPS: list[dict[str, Any]] = [
     },
     {
         "name": "harness",
-        "display": "Harness 安全检查（11 项阻断）",
+        "display": "Harness 安全检查（11 项阻断 + 1 项观察）",
         "command": _harness_cmd,
         "estimate": "< 15s",
     },
