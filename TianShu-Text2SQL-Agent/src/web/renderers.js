@@ -249,6 +249,7 @@
         // 渲染图表
         var chartSpec = responseData.chart_spec;
         var hasChart = chartSpec && chartSpec.chart_type;
+        console.log("renderers: renderDataSection, hasChart=" + hasChart + ", chart_type=" + (chartSpec && chartSpec.chart_type) + ", TianShuChartRenderer=" + (typeof window.TianShuChartRenderer));
         var chartContainer = document.getElementById("chart-container");
         if (hasChart && chartContainer && window.TianShuChartRenderer) {
             chartContainer.classList.remove("hidden");
@@ -256,7 +257,16 @@
                 window.TianShuChartRenderer.renderChart(chartSpec, chartContainer);
             } catch (e) {
                 // 图表渲染异常，降级为 table
+                console.error("图表渲染失败:", e);
                 chartContainer.classList.add("hidden");
+                // 在表格上方显示降级原因
+                var errNote = document.createElement("p");
+                errNote.textContent = "图表渲染失败，已降级为表格：" + (e.message || "未知错误");
+                errNote.style.cssText = "font-size:12px;color:var(--color-warning);margin-bottom:8px;";
+                var tableContainer = document.getElementById("table-preview-container");
+                if (tableContainer) {
+                    tableContainer.insertBefore(errNote, tableContainer.firstChild);
+                }
                 if (chartSpec.data_preview) {
                     R.renderTablePreview(chartSpec.columns || [], chartSpec.data_preview);
                 }
@@ -284,8 +294,8 @@
             if (metaContainer) {
                 var multiPlanBadge = safeEl("span", "多计划查询", "");
                 multiPlanBadge.style.cssText =
-                    "background: var(--color-accent-light); color: var(--color-accent); " +
-                    "padding: 2px 8px; border-radius: 12px; font-size: 0.75rem; margin-left: 8px;";
+                    "background: rgba(200, 137, 30, 0.08); color: #C8891E; " +
+                    "padding: 2px 8px; border-radius: 3px; font-size: 11px; margin-left: 8px;";
                 metaContainer.appendChild(multiPlanBadge);
             }
         }

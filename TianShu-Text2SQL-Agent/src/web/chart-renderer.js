@@ -23,11 +23,11 @@
 
     var C = window.TianShuChartRenderer = window.TianShuChartRenderer || {};
 
-    // ── 颜色方案（深色系，保证对比度）──
+    // ── 颜色方案（青蓝系冷调，按星枢设计体系）──
     var COLORS = [
-        "#1a56db", "#e02424", "#047857", "#b45309",
-        "#7c3aed", "#c026d3", "#0284c7", "#ca8a04",
-        "#059669", "#d97706", "#4f46e5", "#b91c1c",
+        "#4870A3", "#2D6A4F", "#6366F1", "#0E7490",
+        "#7C3AED", "#059669", "#2563EB", "#0D9488",
+        "#4F46E5", "#0284C7", "#6D28D9", "#0891B2",
     ];
 
     // ── SVG 配置 ──
@@ -74,9 +74,11 @@
         }
 
         var chartType = (spec && spec.chart_type) ? spec.chart_type : "table";
+        console.log("chart-renderer: renderChart 被调用, chart_type=" + chartType + ", spec keys=" + (spec ? Object.keys(spec).join(",") : "null"));
 
         // ── 降级检查 ──
         if (!spec || !spec.chart_type) {
+            console.warn("chart-renderer: chart_type 缺失，降级为表格");
             C._renderFallbackTable(spec, container, "chart_type 缺失，降级为表格");
             return;
         }
@@ -84,6 +86,7 @@
         // 空数据 → table
         var dataPreview = spec.data_preview || [];
         if (dataPreview.length === 0 && chartType !== "metric_card") {
+            console.warn("chart-renderer: 数据为空，降级为表格");
             C._renderFallbackTable(spec, container, "数据为空，降级为表格");
             return;
         }
@@ -201,7 +204,7 @@
         titleEl.setAttribute("text-anchor", "middle");
         titleEl.setAttribute("font-size", "14");
         titleEl.setAttribute("font-weight", "600");
-        titleEl.setAttribute("fill", "#1a365d");
+        titleEl.setAttribute("fill", "#171C33");  /* 墨蓝 */
         titleEl.textContent = title;
         svg.appendChild(titleEl);
 
@@ -211,7 +214,7 @@
         xAxis.setAttribute("y1", String(PADDING.top + chartH));
         xAxis.setAttribute("x2", String(PADDING.left + chartW));
         xAxis.setAttribute("y2", String(PADDING.top + chartH));
-        xAxis.setAttribute("stroke", "#e0dcd5");
+        xAxis.setAttribute("stroke", "#DFE4ED");  /* 霜线 */
         xAxis.setAttribute("stroke-width", "1");
         svg.appendChild(xAxis);
 
@@ -223,7 +226,7 @@
             xLabel.setAttribute("y", String(PADDING.top + chartH + 20));
             xLabel.setAttribute("text-anchor", "middle");
             xLabel.setAttribute("font-size", "11");
-            xLabel.setAttribute("fill", "#5a6577");
+            xLabel.setAttribute("fill", "#6B7A90");  /* 石墨 */
             xLabel.textContent = safeStr(allX[xi]);
             svg.appendChild(xLabel);
         }
@@ -234,7 +237,7 @@
         yAxis.setAttribute("y1", String(PADDING.top));
         yAxis.setAttribute("x2", String(PADDING.left));
         yAxis.setAttribute("y2", String(PADDING.top + chartH));
-        yAxis.setAttribute("stroke", "#e0dcd5");
+        yAxis.setAttribute("stroke", "#DFE4ED");  /* 霜线 */
         yAxis.setAttribute("stroke-width", "1");
         svg.appendChild(yAxis);
 
@@ -247,7 +250,7 @@
             gridLine.setAttribute("y1", String(yPos));
             gridLine.setAttribute("x2", String(PADDING.left + chartW));
             gridLine.setAttribute("y2", String(yPos));
-            gridLine.setAttribute("stroke", "#f0ede8");
+            gridLine.setAttribute("stroke", "#EBEEF4");  /* 浅霜线 */
             gridLine.setAttribute("stroke-width", "1");
             svg.appendChild(gridLine);
 
@@ -257,7 +260,7 @@
             yLabel.setAttribute("y", String(yPos + 4));
             yLabel.setAttribute("text-anchor", "end");
             yLabel.setAttribute("font-size", "11");
-            yLabel.setAttribute("fill", "#5a6577");
+            yLabel.setAttribute("fill", "#6B7A90");  /* 石墨 */
             yLabel.textContent = yTicks[yt].toFixed(0);
             svg.appendChild(yLabel);
         }
@@ -402,7 +405,7 @@
         titleEl.setAttribute("text-anchor", "middle");
         titleEl.setAttribute("font-size", "14");
         titleEl.setAttribute("font-weight", "600");
-        titleEl.setAttribute("fill", "#1a365d");
+        titleEl.setAttribute("fill", "#171C33");  /* 墨蓝 */
         titleEl.textContent = title;
         svg.appendChild(titleEl);
 
@@ -436,7 +439,7 @@
         yAxis.setAttribute("y1", String(PADDING.top));
         yAxis.setAttribute("x2", String(PADDING.left));
         yAxis.setAttribute("y2", String(PADDING.top + chartH));
-        yAxis.setAttribute("stroke", "#e0dcd5");
+        yAxis.setAttribute("stroke", "#DFE4ED");  /* 霜线 */
         yAxis.setAttribute("stroke-width", "1");
         svg.appendChild(yAxis);
 
@@ -447,7 +450,7 @@
             gridLine.setAttribute("y1", String(yPos));
             gridLine.setAttribute("x2", String(PADDING.left + chartW));
             gridLine.setAttribute("y2", String(yPos));
-            gridLine.setAttribute("stroke", "#f0ede8");
+            gridLine.setAttribute("stroke", "#EBEEF4");  /* 浅霜线 */
             gridLine.setAttribute("stroke-width", "1");
             svg.appendChild(gridLine);
 
@@ -456,7 +459,7 @@
             yLabel.setAttribute("y", String(yPos + 4));
             yLabel.setAttribute("text-anchor", "end");
             yLabel.setAttribute("font-size", "11");
-            yLabel.setAttribute("fill", "#5a6577");
+            yLabel.setAttribute("fill", "#6B7A90");  /* 石墨 */
             yLabel.textContent = yTicks[yt].toFixed(0);
             svg.appendChild(yLabel);
         }

@@ -40,18 +40,23 @@
     var $ = function (id) { return document.getElementById(id); };
 
     var dom = {
+        starDot: $("star-dot"),
         apiStatus: $("api-status"),
+        tokenInputRow: $("token-input-row"),
+        tokenCollapsed: $("token-collapsed"),
         tokenInput: $("token-input"),
         tokenApplyBtn: $("token-apply-btn"),
-        tokenClearBtn: $("token-clear-btn"),
+        tokenDisconnectBtn: $("token-disconnect-btn"),
         tokenStatus: $("token-status"),
         questionInput: $("question-input"),
+        questionEcho: $("question-echo"),
         submitBtn: $("submit-btn"),
         clearBtn: $("clear-btn"),
         charCountCurrent: $("char-count-current"),
         charCountMax: $("char-count-max"),
         resultSection: $("result-section"),
         resultContent: $("result-content"),
+        resultDivider: $("result-divider"),
         dataSection: $("data-section"),
         loadingOverlay: $("loading-overlay"),
     };
@@ -68,6 +73,26 @@
     }
 
     /**
+     * 星标动画控制
+     * @param {string} mode - "idle" | "breathing" | "flash-error"
+     */
+    function setStarMode(mode) {
+        if (!dom.starDot) { return; }
+        dom.starDot.classList.remove("breathing", "flash-error");
+        if (mode === "breathing") {
+            dom.starDot.classList.add("breathing");
+        } else if (mode === "flash-error") {
+            dom.starDot.classList.add("flash-error");
+            // 闪烁动画结束后自动恢复静置
+            setTimeout(function () {
+                if (dom.starDot) {
+                    dom.starDot.classList.remove("flash-error");
+                }
+            }, 600);
+        }
+    }
+
+    /**
      * 显示/隐藏 loading
      * @param {boolean} show
      */
@@ -78,6 +103,8 @@
         if (dom.submitBtn) {
             dom.submitBtn.disabled = show;
         }
+        // 星标：loading 时呼吸，否则静置
+        setStarMode(show ? "breathing" : "idle");
     }
 
     /**
@@ -105,20 +132,23 @@
     }
 
     /**
-     * 更新 Token 状态 UI
+     * 折叠 Token 区域（连接成功后）
      */
-    function updateTokenUI() {
-        var hasToken = Api.hasToken();
-        if (dom.tokenStatus) {
-            if (hasToken) {
-                dom.tokenStatus.textContent = "✓ 令牌已设置（仅内存中）";
-                dom.tokenStatus.className = "token-status token-set";
-            } else {
-                dom.tokenStatus.textContent = "";
-                dom.tokenStatus.className = "token-status";
-            }
+    function collapseToken() {
+        if (dom.tokenInputRow) { dom.tokenInputRow.classList.add("hidden"); }
+        if (dom.tokenCollapsed) { dom.tokenCollapsed.classList.remove("hidden"); }
+    }
+
+    /**
+     * 展开 Token 区域（断开连接后）
+     */
+    function expandToken() {
+        if (dom.tokenInputRow) { dom.tokenInputRow.classList.remove("hidden"); }
+        if (dom.tokenCollapsed) { dom.tokenCollapsed.classList.add("hidden"); }
+        if (dom.tokenInput) {
+            dom.tokenInput.value = "";
+            setTimeout(function () { dom.tokenInput.focus(); }, 100);
         }
-        updateSubmitState();
     }
 
     /**
@@ -154,6 +184,25 @@
     function hideResults() {
         if (dom.resultSection) { dom.resultSection.classList.add("hidden"); }
         if (dom.dataSection) { dom.dataSection.classList.add("hidden"); }
+        if (dom.resultDivider) { dom.resultDivider.classList.add("hidden"); }
+        if (dom.questionEcho) { dom.questionEcho.textContent = ""; }
+    }
+
+    /**
+     * 显示结果分割线（首次出现结果时）
+     */
+    function showResultDivider() {
+        if (dom.resultDivider) { dom.resultDivider.classList.remove("hidden"); }
+    }
+
+    /**
+     * 回显问题到结果区标题
+     * @param {string} question
+     */
+    function echoQuestion(question) {
+        if (dom.questionEcho) {
+            dom.questionEcho.textContent = question;
+        }
     }
 
     /**
@@ -173,11 +222,13 @@
 
         try {
             Api.setToken(token);
-            if (dom.tokenStatus) {
-                dom.tokenStatus.textContent = "✓ 令牌已设置（仅内存中）";
-                dom.tokenStatus.className = "token-status token-set";
-            }
+            // 连接成功 → 折叠 Token 区
+            collapseToken();
             setState(STATE.IDLE);
+            // focus 问数输入框
+            if (dom.questionInput) {
+                setTimeout(function () { dom.questionInput.focus(); }, 150);
+            }
         } catch (e) {
             if (dom.tokenStatus) {
                 dom.tokenStatus.textContent = "令牌设置失败";
@@ -186,21 +237,17 @@
             setState(STATE.TOKEN_MISSING);
         }
 
-        updateTokenUI();
+        updateSubmitState();
     }
 
     /**
-     * 清空 Token
+     * 断开 Token 连接
      */
-    function clearToken() {
+    function disconnectToken() {
         Api.clearToken();
-        if (dom.tokenInput) { dom.tokenInput.value = ""; }
-        if (dom.tokenStatus) {
-            dom.tokenStatus.textContent = "";
-            dom.tokenStatus.className = "token-status";
-        }
         setState(STATE.TOKEN_MISSING);
-        updateTokenUI();
+        expandToken();
+        updateSubmitState();
         hideResults();
     }
 
@@ -211,7 +258,7 @@
         if (_currentState === STATE.SUBMITTING) { return; }
         if (!Api.hasToken()) {
             setState(STATE.TOKEN_MISSING);
-            updateTokenUI();
+            expandToken();
             return;
         }
 
@@ -229,10 +276,15 @@
             showLoading(false);
             setSubmitReady();
 
+            // ── 回显问题 ──
+            echoQuestion(question);
+
             // ── 判断是否为 API 错误 ──
             if (result._error) {
                 setState(STATE.API_ERROR);
+                setStarMode("flash-error");
                 if (dom.resultSection) { dom.resultSection.classList.remove("hidden"); }
+                showResultDivider();
                 Renderers.renderApiError(result, dom.resultContent);
                 return;
             }
@@ -240,6 +292,7 @@
             // ── 按 response_type 分发渲染 ──
             var responseType = result.response_type || "answer";
             if (dom.resultSection) { dom.resultSection.classList.remove("hidden"); }
+            showResultDivider();
 
             switch (responseType) {
                 case "answer":
@@ -256,6 +309,7 @@
                     break;
                 case "error":
                     setState(STATE.API_ERROR);
+                    setStarMode("flash-error");
                     Renderers.renderApiError({
                         _error: true,
                         _errorType: "internal_error",
@@ -266,6 +320,7 @@
                     break;
                 default:
                     setState(STATE.API_ERROR);
+                    setStarMode("flash-error");
                     Renderers.renderApiError({
                         _error: true,
                         _errorType: "internal_error",
@@ -280,8 +335,11 @@
             showLoading(false);
             setSubmitReady();
             setState(STATE.API_ERROR);
+            setStarMode("flash-error");
 
+            echoQuestion(question);
             if (dom.resultSection) { dom.resultSection.classList.remove("hidden"); }
+            showResultDivider();
             Renderers.renderApiError({
                 _error: true,
                 _errorType: "network_error",
@@ -322,8 +380,8 @@
     if (dom.tokenApplyBtn) {
         dom.tokenApplyBtn.addEventListener("click", applyToken);
     }
-    if (dom.tokenClearBtn) {
-        dom.tokenClearBtn.addEventListener("click", clearToken);
+    if (dom.tokenDisconnectBtn) {
+        dom.tokenDisconnectBtn.addEventListener("click", disconnectToken);
     }
     if (dom.tokenInput) {
         dom.tokenInput.addEventListener("keydown", function (e) {
@@ -382,7 +440,8 @@
             dom.charCountMax.textContent = String(MAX_QUESTION_LENGTH);
         }
 
-        // 初始状态
+        // 初始状态：展开 Token 输入
+        expandToken();
         setState(STATE.TOKEN_MISSING);
         updateSubmitState();
         hideResults();
