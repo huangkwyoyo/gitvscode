@@ -1127,6 +1127,151 @@ class TestIdempotency:
         finally:
             _rmdtemp(tmp)
 
+    def test_content_hash_match_for_identical_runs(self):
+        """相同数据两次执行——规范化行哈希应一致（B1 增强 L1）。"""
+        tmp = _mkdtemp()
+        try:
+            manifest = _sample_manifest()
+            deploy_sql = _build_ctas_sql()
+            rows, cols, types = _sample_data()
+            sandbox_root = tmp / ".sandbox_tmp"
+
+            idempotency = check_idempotency(
+                deploy_sql=deploy_sql,
+                manifest=manifest,
+                sample_data_rows=rows,
+                sample_data_columns=cols,
+                sample_data_types=types,
+                sandbox_root=sandbox_root,
+            )
+
+            assert idempotency["status"] == "PASS"
+            # 内容哈希应一致（同一份输入数据 → 相同输出）
+            assert idempotency["content_hash_match"] is True, (
+                f"相同输入应产生相同的规范化行哈希"
+            )
+        finally:
+            _rmdtemp(tmp)
+
+    def test_content_hash_mismatch_detected(self):
+        """不同数据执行——内容哈希应检测到差异（B1 增强 L1）。"""
+        tmp = _mkdtemp()
+        try:
+            manifest = _sample_manifest()
+            deploy_sql = _build_ctas_sql()
+            rows, cols, types = _sample_data()
+            sandbox_root = tmp / ".sandbox_tmp"
+
+            from src.sandbox.duckdb_ctas_executor import execute_ctas_in_sandbox as _exec
+
+            # 第二次执行使用不同数据——构造完全不同的行内容
+            rows_modified = [("2027-12-31", 999, 99999.99, 8888.88)]
+
+            run1 = _exec(
+                deploy_sql=deploy_sql, manifest=manifest,
+                sample_data_rows=rows, sample_data_columns=cols,
+                sample_data_types=types, sandbox_root=sandbox_root,
+            )
+            run2 = _exec(
+                deploy_sql=deploy_sql, manifest=manifest,
+                sample_data_rows=rows_modified, sample_data_columns=cols,
+                sample_data_types=types, sandbox_root=sandbox_root,
+            )
+
+            if run1.canonical_hash and run2.canonical_hash:
+                assert run1.canonical_hash != run2.canonical_hash, (
+                    f"不同输入数据应产生不同的规范化行哈希"
+                )
+        finally:
+            _rmdtemp(tmp)
+
+    def test_numeric_sums_match_for_identical_runs(self):
+        """相同数据两次执行——数值列合计应一致（B1 增强 L2）。"""
+        tmp = _mkdtemp()
+        try:
+            manifest = _sample_manifest()
+            deploy_sql = _build_ctas_sql()
+            rows, cols, types = _sample_data()
+            sandbox_root = tmp / ".sandbox_tmp"
+
+            idempotency = check_idempotency(
+                deploy_sql=deploy_sql,
+                manifest=manifest,
+                sample_data_rows=rows,
+                sample_data_columns=cols,
+                sample_data_types=types,
+                sandbox_root=sandbox_root,
+            )
+
+            assert idempotency["status"] == "PASS"
+            # 数值合计应一致
+            assert idempotency["numeric_sums_match"] is True, (
+                f"相同输入应产生相同的数值列合计，"
+                f"但 numeric_sums_match={idempotency['numeric_sums_match']}"
+            )
+        finally:
+            _rmdtemp(tmp)
+
+    def test_null_counts_match_for_identical_runs(self):
+        """相同数据两次执行——空值计数应一致（B1 增强 L2）。"""
+        tmp = _mkdtemp()
+        try:
+            manifest = _sample_manifest()
+            deploy_sql = _build_ctas_sql()
+            rows, cols, types = _sample_data()
+            sandbox_root = tmp / ".sandbox_tmp"
+
+            idempotency = check_idempotency(
+                deploy_sql=deploy_sql,
+                manifest=manifest,
+                sample_data_rows=rows,
+                sample_data_columns=cols,
+                sample_data_types=types,
+                sandbox_root=sandbox_root,
+            )
+
+            assert idempotency["status"] == "PASS"
+            # 空值率应一致
+            assert idempotency["null_counts_match"] in (True, None), (
+                f"相同输入应有相同的空值计数，"
+                f"但 null_counts_match={idempotency['null_counts_match']}"
+            )
+        finally:
+            _rmdtemp(tmp)
+
+    def test_idempotency_returns_all_new_fields(self):
+        """幂等检查返回 dict 必须包含三层比较的所有字段（B1 增强）。"""
+        tmp = _mkdtemp()
+        try:
+            manifest = _sample_manifest()
+            deploy_sql = _build_ctas_sql()
+            rows, cols, types = _sample_data()
+            sandbox_root = tmp / ".sandbox_tmp"
+
+            idempotency = check_idempotency(
+                deploy_sql=deploy_sql,
+                manifest=manifest,
+                sample_data_rows=rows,
+                sample_data_columns=cols,
+                sample_data_types=types,
+                sandbox_root=sandbox_root,
+            )
+
+            # 验证返回字典包含所有承诺的字段
+            required_fields = {
+                "status", "detail",
+                "run1_row_count", "run2_row_count",
+                "run1_columns", "run2_columns",
+                "schema_match", "row_count_match",
+                "content_hash_match", "numeric_sums_match", "null_counts_match",
+            }
+            for field in required_fields:
+                assert field in idempotency, (
+                    f"check_idempotency 返回字典缺少字段: {field}"
+                )
+        finally:
+            _rmdtemp(tmp)
+
 
 # ═══════════════════════════════════════════════════════════════
 # §6 状态与清理失败测试

@@ -294,8 +294,9 @@ def publish_review_package(
         ),
     )
 
-    # M5：计算扩展 artifact 哈希（含部署产物，在 decision.yml 写入之前）
-    artifact_hashes = _compute_extended_hashes(package_dir)
+    # M5：计算 artifact 哈希（含部署产物，在 decision.yml 写入之前）
+    # compute_artifact_hashes 已包含 deploy_sql/deploy_spark/deployment_manifest 哈希
+    artifact_hashes = compute_artifact_hashes(package_dir)
 
     # 阶段 2：写 decision 文件（含扩展 artifact 哈希）
     decision = DecisionRecord(
@@ -335,47 +336,6 @@ def publish_review_package(
         deploy_files=DEPLOY_FILES,
         pending_items=plan.pending_items + drafts.pending_items,
         release_status=deploy_manifest.release_status,
-    )
-
-
-def _compute_extended_hashes(package_dir: Path) -> ArtifactHashes:
-    """M5：计算扩展 artifact 哈希——覆盖查询产物和部署产物。
-
-    在原有 compute_artifact_hashes 基础上新增 deploy/main.sql、
-    deploy/main.py 和 deployment_manifest.yml 的哈希。
-    """
-    base = compute_artifact_hashes(package_dir)
-
-    deploy_sql_path = package_dir / "deploy" / "main.sql"
-    deploy_spark_path = package_dir / "deploy" / "main.py"
-    deploy_manifest_path = package_dir / "deployment_manifest.yml"
-
-    deploy_sql_hash = ""
-    deploy_spark_hash = ""
-    deploy_manifest_hash = ""
-
-    if deploy_sql_path.is_file():
-        deploy_sql_hash = hashlib.sha256(
-            deploy_sql_path.read_bytes()
-        ).hexdigest()
-    if deploy_spark_path.is_file():
-        deploy_spark_hash = hashlib.sha256(
-            deploy_spark_path.read_bytes()
-        ).hexdigest()
-    if deploy_manifest_path.is_file():
-        deploy_manifest_hash = hashlib.sha256(
-            deploy_manifest_path.read_bytes()
-        ).hexdigest()
-
-    # 基于原有哈希创建扩展版本
-    return ArtifactHashes(
-        sql_main=base.sql_main,
-        spark_main=base.spark_main,
-        lineage_source_refs=base.lineage_source_refs,
-        verification_summary=base.verification_summary,
-        deploy_sql=deploy_sql_hash,
-        deploy_spark=deploy_spark_hash,
-        deployment_manifest=deploy_manifest_hash,
     )
 
 

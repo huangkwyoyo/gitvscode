@@ -375,6 +375,7 @@ class MaterializationResult:
     # ── M5b P1：样本数据来源追踪 ──
     sample_sources: list[SampleSourceRef] = field(default_factory=list)
     sample_source_hash: str = ""                 # lineage/source_refs.yml 的 SHA-256（用于完整性校验）
+    canonical_hash: str = ""                     # 规范化排序输出行的 SHA-256——幂等内容比较
 
     def to_dict(self) -> dict[str, Any]:
         """序列化为字典——供 materialization_verification.yml 使用"""

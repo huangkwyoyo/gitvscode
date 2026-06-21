@@ -729,6 +729,10 @@ def _verify_output(
             numeric_sums[col] = 0.0
     result.numeric_sums = numeric_sums
 
+    # ── 规范化行内容哈希——供幂等性检查比较实际数据内容 ──
+    # 将输出表的所有行按全部列排序后计算 SHA-256，确保内容级比较而非仅元数据比较
+    _compute_canonical_hash(conn, sandbox_target, output_columns, result)
+
     # ── 检查 6：唯一键（根据契约决定是否必需）──
     # M5b-2 P0 修复：未声明唯一键时 NOT_APPLICABLE，不阻塞 PASS。
     # 已声明唯一键时执行实际 GROUP BY/HAVING 检查，required=True。
@@ -749,6 +753,59 @@ def _verify_output(
             required=False,
         ))
         result.uniqueness_status = "NOT_APPLICABLE"
+
+
+def _compute_canonical_hash(
+    conn: Any,
+    sandbox_target: str,
+    output_columns: list[str],
+    result: MaterializationResult,
+) -> None:
+    """计算输出表规范化排序行的 SHA-256 哈希——供幂等内容比较。
+
+    查询所有行按全部列排序，对每个值做规范化处理后计算哈希。
+    规范化规则：
+      - NULL → 哨兵字符串 "__NULL__"
+      - float → 6 位小数格式（消除浮点表示差异）
+      - 其他 → str(value)
+    """
+    if not output_columns:
+        result.canonical_hash = ""
+        return
+
+    try:
+        # 构建 ORDER BY 子句——按所有列排序确保确定性
+        order_clause = ", ".join(f'"{col}"' for col in output_columns)
+        select_clause = ", ".join(f'"{col}"' for col in output_columns)
+        query = (
+            f'SELECT {select_clause} FROM {sandbox_target} '
+            f'ORDER BY {order_clause}'
+        )
+        rows = conn.execute(query).fetchall()
+
+        # 规范化每行每列的值并计算 SHA-256
+        hasher = hashlib.sha256()
+        for row in rows:
+            normalized_parts: list[str] = []
+            for value in row:
+                if value is None:
+                    normalized_parts.append("__NULL__")
+                elif isinstance(value, float):
+                    normalized_parts.append(f"{value:.6f}")
+                elif isinstance(value, bool):
+                    # bool 要先检测（bool 是 int 的子类）
+                    normalized_parts.append("true" if value else "false")
+                else:
+                    normalized_parts.append(str(value))
+            # 用不可见分隔符拼接各列值，避免跨列碰撞
+            hasher.update("\x1f".join(normalized_parts).encode("utf-8"))
+            hasher.update(b"\x1e")  # 行分隔符
+
+        result.canonical_hash = hasher.hexdigest()
+    except Exception:
+        # 哈希计算失败不影响主验证流程——留空标记为不可比较
+        result.canonical_hash = ""
+        result.warnings.append("规范化行哈希计算失败——幂等内容比较将不可用")
 
 
 def _check_uniqueness(
@@ -931,7 +988,12 @@ def check_idempotency(
 ) -> dict[str, Any]:
     """在两个独立 Sandbox 中分别执行同一 CTAS，比较输出一致性。
 
-    这是 M5b-1 的基础幂等验证——不是 INSERT OVERWRITE 幂等。
+    三层比较（B1 增强）：
+      L0（已有）：列名 + 行数——快速筛除明显不一致
+      L1（新增）：规范化排序行 SHA-256 哈希——检测内容差异
+      L2（新增）：数值列合计 + 空值计数——补充摘要级检测
+
+    这是 M5b-1 的幂等验证——不是 INSERT OVERWRITE 幂等。
 
     Args:
         参数同 execute_ctas_in_sandbox
@@ -946,6 +1008,9 @@ def check_idempotency(
             "run2_columns": [...],
             "schema_match": bool,
             "row_count_match": bool,
+            "content_hash_match": bool | None,
+            "numeric_sums_match": bool | None,
+            "null_counts_match": bool | None,
         }
     """
     run1 = execute_ctas_in_sandbox(
@@ -968,25 +1033,91 @@ def check_idempotency(
         timeout_seconds=timeout_seconds,
     )
 
+    # ── L0：列名 + 行数（已有逻辑）──
     schema_match = run1.output_columns == run2.output_columns
     row_count_match = run1.output_row_count == run2.output_row_count
 
-    if row_count_match and schema_match:
-        status = "PASS"
-        detail = f"两次独立执行结果一致（{run1.output_row_count} == {run2.output_row_count} 行，schema 匹配）"
-    elif schema_match and not row_count_match:
+    # ── L1：规范化行内容哈希 ──
+    content_hash_match: bool | None = None
+    if run1.canonical_hash and run2.canonical_hash:
+        content_hash_match = run1.canonical_hash == run2.canonical_hash
+
+    # ── L2：数值列合计比较（使用 0.1% 容差）──
+    numeric_sums_match: bool | None = None
+    if run1.numeric_sums or run2.numeric_sums:
+        all_cols = set(run1.numeric_sums.keys()) | set(run2.numeric_sums.keys())
+        if all_cols:
+            tolerance = 0.001
+            diffs = []
+            for col in sorted(all_cols):
+                v1 = run1.numeric_sums.get(col, 0.0)
+                v2 = run2.numeric_sums.get(col, 0.0)
+                allowed = max(abs(v1), abs(v2), 1.0) * tolerance
+                if abs(v1 - v2) > allowed:
+                    diffs.append(col)
+            numeric_sums_match = len(diffs) == 0
+
+    # ── L2：空值计数比较 ──
+    null_counts_match: bool | None = None
+    if run1.null_rates or run2.null_rates:
+        all_cols = set(run1.null_rates.keys()) | set(run2.null_rates.keys())
+        if all_cols:
+            diffs = []
+            for col in sorted(all_cols):
+                n1 = run1.null_rates.get(col, 0.0)
+                n2 = run2.null_rates.get(col, 0.0)
+                if abs(n1 - n2) > 0.001:  # 空值率需精确匹配
+                    diffs.append(col)
+            null_counts_match = len(diffs) == 0
+
+    # ── 综合判定 ──
+    if not schema_match:
+        status = "FAIL"
+        detail = (
+            f"两次执行输出 schema 不一致"
+            f"（{run1.output_columns} vs {run2.output_columns}）——"
+            f"CTAS 行为不确定"
+        )
+    elif not row_count_match:
         status = "WARN"
         detail = (
             f"两次执行 schema 一致但行数不同"
             f"（{run1.output_row_count} vs {run2.output_row_count}）——"
             f"CTAS 行为不一致，需人工审查"
         )
-    elif not schema_match:
+    elif content_hash_match is False:
+        # 行数和列名相同但内容不同——确定性 CTAS 不应出现
         status = "FAIL"
         detail = (
-            f"两次执行输出 schema 不一致"
-            f"（{run1.output_columns} vs {run2.output_columns}）——"
-            f"CTAS 行为不确定"
+            f"两次执行列名和行数一致但规范化内容哈希不同"
+            f"（{run1.output_row_count} 行）——"
+            f"CTAS 输出内容不一致，确定性假设不成立"
+        )
+    elif numeric_sums_match is False:
+        status = "FAIL"
+        detail = (
+            f"两次执行数值列合计不一致——"
+            f"CTAS 在相同输入上产生了不同的汇总值"
+        )
+    elif null_counts_match is False:
+        status = "WARN"
+        detail = (
+            f"两次执行空值计数不一致——"
+            f"可能存在 NULL 处理差异，需人工审查"
+        )
+    elif row_count_match and schema_match:
+        content_detail = (
+            "内容哈希一致" if content_hash_match
+            else "内容哈希不可用" if content_hash_match is None
+            else ""
+        )
+        status = "PASS"
+        detail = (
+            f"两次独立执行结果一致"
+            f"（{run1.output_row_count} == {run2.output_row_count} 行，"
+            f"schema 匹配"
+            f"{'，' + content_detail if content_detail else ''}"
+            f"）"
         )
     else:
         status = "FAIL"
@@ -1001,4 +1132,7 @@ def check_idempotency(
         "run2_columns": run2.output_columns,
         "schema_match": schema_match,
         "row_count_match": row_count_match,
+        "content_hash_match": content_hash_match,
+        "numeric_sums_match": numeric_sums_match,
+        "null_counts_match": null_counts_match,
     }

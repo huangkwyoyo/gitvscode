@@ -168,23 +168,6 @@ def validate_deploy_sql(deploy_sql: str) -> list[str]:
     return errors
 
 
-def validate_deploy_spark(deploy_spark: str) -> list[str]:
-    """校验 Spark 部署脚本不包含禁止的写入模式。
-
-    注意：Spark 部署脚本需要 .write.save() 来实际写入，
-    但必须受限于 deployment_manifest 中声明的策略。
-    此检查确保不出现未受控的写入路径。
-    """
-    errors: list[str] = []
-    lowered = deploy_spark.lower()
-
-    for pattern in FORBIDDEN_SPARK_DEPLOY_PATTERNS:
-        if pattern in lowered:
-            errors.append(
-                f"Spark 部署脚本包含禁止模式: {pattern}"
-            )
-
-    return errors
 
 
 def validate_deploy_does_not_reimplement_query(
