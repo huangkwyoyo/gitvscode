@@ -17,7 +17,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 # 被测试模块
-from scripts.generate_rule_index import (
+from scripts.generate_rule_index import (  # noqa: E402
     load_rules,
     validate_rules,
     generate_markdown,
@@ -46,7 +46,7 @@ class TestYamlParsing:
         rules = load_rules(RULES_YAML_PATH)
         assert isinstance(rules, list), "规则必须是列表"
         assert len(rules) > 0, "规则列表不能为空"
-        assert len(rules) == 22, f"期望 22 条规则（9 条迁移 + 12 条补齐 + 1 条 JSON-P0），实际: {len(rules)}"
+        assert len(rules) == 23, f"期望 23 条规则（含 SQL AST 安全规则），实际: {len(rules)}"
 
     def test_each_rule_is_dict(self):
         """每条规则必须是字典"""
@@ -110,7 +110,6 @@ class TestRuleIdUniqueness:
 
     def test_validate_rejects_duplicate_ids(self, tmp_path):
         """validate_rules 必须拒绝重复的 rule_id"""
-        import yaml
 
         yaml_content = """
 rules:
@@ -175,7 +174,6 @@ class TestRuleIdPrefix:
 
     def test_validate_rejects_non_ta_r_prefix(self, tmp_path):
         """validate_rules 必须拒绝非 TA-R 前缀的 rule_id"""
-        import yaml
 
         yaml_content = """
 rules:
@@ -328,7 +326,6 @@ class TestProposedNotBlocking:
 
     def test_proposed_with_blocking_true_warns(self, tmp_path):
         """proposed + blocking=true 应产生警告"""
-        import yaml
 
         yaml_content = """
 rules:
@@ -358,7 +355,6 @@ rules:
 
     def test_active_with_blocking_true_info(self, tmp_path):
         """active + blocking=true 应产生提示信息"""
-        import yaml
 
         yaml_content = """
 rules:
@@ -395,7 +391,6 @@ rules:
 
     def test_validate_rejects_invalid_status(self, tmp_path):
         """validate_rules 必须拒绝非法 status 值"""
-        import yaml
 
         yaml_content = """
 rules:

@@ -19,19 +19,16 @@
 
 from __future__ import annotations
 
-import json
 import sys
 from pathlib import Path
 
-import pytest
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from harness.memory_rule_blocking_expansion import (
+from harness.memory_rule_blocking_expansion import (  # noqa: E402
     VALID_RECOMMENDATIONS,
-    ExpansionReview,
     RuleReview,
     _asset_exists,
     _assess_false_positive_risk,
@@ -104,10 +101,10 @@ def test_valid_recommendations_contains_all_expected():
 
 
 def test_all_rules_reviewed():
-    """审查结果应覆盖 memory_rules.yml 中所有规则（22 条）。"""
+    """审查结果应覆盖 memory_rules.yml 中所有规则（23 条）。"""
     review = review_rules()
-    assert review.total_rules == 22
-    assert len(review.reviews) == 22
+    assert review.total_rules == 23
+    assert len(review.reviews) == 23
 
     # 所有规则的 recommendation 必须合法
     for rv in review.reviews:
@@ -123,7 +120,7 @@ def test_all_rules_reviewed():
         + len(review.kept_non_blocking)
         + len(review.rejected)
     )
-    assert total_classified == 22, f"分类总数应为 22，实际 {total_classified}"
+    assert total_classified == 23, f"分类总数应为 23，实际 {total_classified}"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

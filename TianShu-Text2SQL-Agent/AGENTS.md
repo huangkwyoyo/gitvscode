@@ -94,6 +94,8 @@ Step 5: 解释（结果 → 中文回答）
 2. 表名必须完全限定（`gold.xxx`）
 3. 日期过滤必须通过 `gold.dim_date`
 4. JOIN 仅限于白名单路径
+5. SQL 必须经 DuckDB 方言 AST 解析且仅含一条顶层 SELECT
+6. SQL 函数仅限允许白名单，禁止外部文件、URL、扩展或系统资源访问函数
 
 ---
 
@@ -230,6 +232,7 @@ CRCS 的完整分类定义、处理规则和输出格式由统一契约文件维
 | LLM 不直接生成最终可执行 SQL | SQL 必须由 sql_plan_to_sql() 生成 |
 | SQLPlan 流程不可绕过 | 必须经过 Layer 1→2→3 完整链路 |
 | validate_sql_safety() 必须执行 | 每次 SQL 执行前强制调用 |
+| SQL AST 与函数白名单不可绕过 | 解析失败、非单条 SELECT 或未知函数必须 fail closed |
 | DuckDB read_only=True 不可变 | 数据库层最后防线 |
 | 离线模式禁止执行 SQL | AgentContext.offline=True 时阻断 |
 

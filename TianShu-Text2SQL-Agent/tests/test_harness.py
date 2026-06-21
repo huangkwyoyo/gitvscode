@@ -7,6 +7,8 @@ Harness 门禁集成测试。
 import sys
 from pathlib import Path
 
+import pytest
+
 # 添加项目根目录
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -38,6 +40,15 @@ class TestSQLReadonlyCheck:
         assert "INSERT" in keywords
         assert "DELETE" in keywords
         assert "DROP" in keywords
+
+    def test_missing_safety_policy_fails_closed(self, tmp_path):
+        """安全策略文件缺失时不得返回空规则继续运行。"""
+        import pytest
+
+        from harness.checks.check_sql_readonly import load_forbidden_keywords
+
+        with pytest.raises(FileNotFoundError):
+            load_forbidden_keywords(tmp_path, {})
 
     def test_sql_extraction_from_evals(self):
         """测试从 evals/ 提取 SQL"""
@@ -456,7 +467,7 @@ class TestHarnessWarnModeStep3:
         )
 
         try:
-            result = subprocess.run(
+            subprocess.run(
                 [
                     sys.executable,
                     "harness/run_harness.py",
@@ -666,8 +677,8 @@ class TestRegistryClosureFunctions:
         registry = load_memory_rules_registry()
         assert registry is not None, "registry 应能成功加载"
         assert "rules" in registry, "registry 应包含 rules 键"
-        assert len(registry["rules"]) == 22, (
-            f"期望 22 条规则（9 条迁移 + 12 条补齐 + 1 条 JSON-P0），实际: {len(registry['rules'])}"
+        assert len(registry["rules"]) == 23, (
+            f"期望 23 条规则（含 SQL AST 安全规则），实际: {len(registry['rules'])}"
         )
 
     def test_build_registry_reverse_index_structure(self):
@@ -754,7 +765,7 @@ class TestRegistryClosureFunctions:
 
         rules = _find_covering_rules("harness/checks/check_refusal_policy.py", ri)
         assert len(rules) >= 1, (
-            f"harness/checks/check_refusal_policy.py 应被至少 1 条规则覆盖"
+            "harness/checks/check_refusal_policy.py 应被至少 1 条规则覆盖"
         )
 
     def test_find_covering_rules_no_match(self):
@@ -769,7 +780,7 @@ class TestRegistryClosureFunctions:
         ri = build_registry_reverse_index(registry["rules"])
 
         rules = _find_covering_rules("README.md", ri)
-        assert rules == [], f"README.md 不应被任何规则覆盖"
+        assert rules == [], "README.md 不应被任何规则覆盖"
 
 
 class TestRegistryClosureCheck:
@@ -1026,8 +1037,8 @@ class TestStep7FullCoverage:
         from harness.checks.check_memory_update import load_memory_rules_registry
 
         registry = load_memory_rules_registry()
-        assert len(registry["rules"]) == 22, (
-            f"期望 22 条规则，实际: {len(registry['rules'])}"
+        assert len(registry["rules"]) == 23, (
+            f"期望 23 条规则，实际: {len(registry['rules'])}"
         )
 
     def test_all_new_rules_are_proposed_not_blocking(self):
@@ -1053,14 +1064,14 @@ class TestStep7FullCoverage:
                     f"{rid}: 本轮所有规则 blocking 必须为 false，实际: {rule['blocking']}"
                 )
 
-    def test_generated_md_contains_22_rules(self):
-        """生成的 Markdown 应包含 22 条规则——统计详情章节标题"""
+    def test_generated_md_contains_23_rules(self):
+        """生成的 Markdown 应包含 23 条规则——统计详情章节标题"""
         output_path = Path(__file__).resolve().parents[1] / "docs" / "memory" / "规则来源索引.md"
         content = output_path.read_text(encoding="utf-8")
         # 统计详情章节标题（### TA-Rxxx），每个规则仅出现一次
         ta_r_count = content.count("### TA-R")
-        assert ta_r_count == 22, (
-            f"Markdown 应包含 22 条 TA-R 规则详情，实际: {ta_r_count}"
+        assert ta_r_count == 23, (
+            f"Markdown 应包含 23 条 TA-R 规则详情，实际: {ta_r_count}"
         )
 
 
@@ -1186,7 +1197,6 @@ class TestStep8aInfrastructureFail:
 
     def _make_minimal_registry(self, tmp_path, rules_yaml: str) -> Path:
         """在临时目录创建最小 memory_rules.yml，返回文件路径"""
-        import yaml as yaml_lib
         yaml_path = tmp_path / "memory_rules.yml"
         yaml_path.write_text(rules_yaml, encoding="utf-8")
         return yaml_path
@@ -1411,7 +1421,6 @@ class TestStep8aInfrastructureFail:
     def test_active_blocking_all_paths_exist_passes(self):
         """Infra-7: active+blocking=true 规则所有路径存在 → PASS"""
         # 使用 tests/ 目录下的真实存在文件来测试
-        import harness.checks.check_memory_update as cm
 
         # 引用真实存在的文件（相对于项目根目录）
         existing_check = "harness/checks/check_memory_update.py"
@@ -1534,7 +1543,7 @@ class TestStep8aBackwardCompatibility:
         assert registry.get("load_error") is None, (
             f"真实 registry 加载失败: {registry.get('load_error')}"
         )
-        assert len(registry["rules"]) == 22
+        assert len(registry["rules"]) == 23
 
         # 反向索引正常工作
         ri = build_registry_reverse_index(registry["rules"])
@@ -1631,10 +1640,10 @@ class TestStep8cCoverageGaps:
         rules = self._load_rules()
         assert "TA-R021" in rules
         assert len(rules["TA-R021"]["required_checks"]) > 0, (
-            f"TA-R021 required_checks 应为非空"
+            "TA-R021 required_checks 应为非空"
         )
         assert len(rules["TA-R021"]["required_tests"]) > 0, (
-            f"TA-R021 required_tests 应为非空"
+            "TA-R021 required_tests 应为非空"
         )
 
     def test_tar022_has_check_coverage(self):
@@ -1642,7 +1651,7 @@ class TestStep8cCoverageGaps:
         rules = self._load_rules()
         assert "TA-R022" in rules
         assert len(rules["TA-R022"]["required_checks"]) > 0, (
-            f"TA-R022 required_checks 应为非空"
+            "TA-R022 required_checks 应为非空"
         )
 
     def test_tar023_has_eval_coverage(self):
@@ -1658,7 +1667,7 @@ class TestStep8cCoverageGaps:
         rules = self._load_rules()
         assert "TA-R024" in rules
         assert len(rules["TA-R024"]["required_tests"]) > 0, (
-            f"TA-R024 required_tests 应为非空"
+            "TA-R024 required_tests 应为非空"
         )
 
     def test_tar025_has_check_coverage(self):
@@ -1666,7 +1675,7 @@ class TestStep8cCoverageGaps:
         rules = self._load_rules()
         assert "TA-R025" in rules
         assert len(rules["TA-R025"]["required_checks"]) > 0, (
-            f"TA-R025 required_checks 应为非空"
+            "TA-R025 required_checks 应为非空"
         )
 
     def test_tar029_has_eval_coverage(self):
@@ -1682,7 +1691,7 @@ class TestStep8cCoverageGaps:
         rules = self._load_rules()
         assert "TA-R030" in rules
         assert len(rules["TA-R030"]["required_checks"]) > 0, (
-            f"TA-R030 required_checks 应为非空"
+            "TA-R030 required_checks 应为非空"
         )
 
     def test_new_check_result_summary_safety_exists(self):
@@ -1893,7 +1902,6 @@ class TestStep8dClosureFailureExitCode:
 
     def test_cli_exit_1_when_active_blocking_closure_fails(self, monkeypatch):
         """CLI 层面：active+blocking 闭缺口 → exit 1（直接调用 main）"""
-        import copy
         from harness.checks.check_memory_update import main
 
         # 构造一条 active+blocking 规则，applies_to 包含变更文件，

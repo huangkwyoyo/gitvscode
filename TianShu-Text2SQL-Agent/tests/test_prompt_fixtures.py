@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 
+import pytest
 import yaml
 
 from src.ir import (
@@ -135,6 +136,11 @@ def test_sql_planner_fixtures_map_to_valid_plan_and_safe_sql():
         plan = _sql_plan_from_dict(case["expected_plan"])
 
         assert plan.validate(AVAILABLE_TABLES, JOIN_WHITELIST) == [], case["id"]
+        if plan.strategy == Strategy.UNSUPPORTED_MULTI_PLAN:
+            with pytest.raises(ValueError, match="UNSUPPORTED_MULTI_PLAN"):
+                sql_plan_to_sql(plan)
+            continue
+
         sql = sql_plan_to_sql(plan)
         assert validate_sql_safety(
             sql,

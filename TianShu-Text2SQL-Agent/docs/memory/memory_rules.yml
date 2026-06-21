@@ -567,3 +567,28 @@ rules:
       - tests/test_real_duckdb_e2e.py
     required_evals: []
     notes: "Public response builders must normalize DuckDB/Python runtime values to JSON-native types before Starlette.JSONResponse. Tests must not use json.dumps(default=str) to mask serialization defects. 本轮只登记 proposed 不 active 不 blocking。晋升条件：check_json_response_contract.py 接入 Fast Gate 且连续 3 次无 infra_fail 后人工审查。"
+
+  # ═════════════════════════════════════════════════════════════════════════════
+  # TA-R032: SQL AST 单语句与函数白名单
+  # 来源: 经验复盘.md R014
+  # ═════════════════════════════════════════════════════════════════════════════
+  - rule_id: TA-R032
+    title: "SQL 必须通过 DuckDB AST 单语句校验和函数白名单，外部资源读取能力一律拒绝"
+    status: proposed
+    blocking: false
+    severity: high
+    source_memory: "docs/memory/经验复盘.md#R014"
+    risk_ids:
+      - RISK-017
+    applies_to:
+      - src/sql_gen.py
+      - src/safety_policy_loader.py
+      - harness/checks/check_sql_readonly.py
+    required_checks:
+      - harness/checks/check_sql_readonly.py
+    required_tests:
+      - tests/test_sql_safety_ast.py
+      - tests/test_harness.py
+    required_evals:
+      - evals/unsafe_questions.yml
+    notes: "本轮按晋升流程保持 proposed + blocking=false。晋升前需确认 sqlglot DuckDB 方言兼容性、正反探针稳定运行且无合法查询误报。"

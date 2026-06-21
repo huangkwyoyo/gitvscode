@@ -45,6 +45,9 @@ _ALLOWED_SQL_FUNCTIONS = {
 _EXTERNAL_RESOURCE_FUNCTIONS = {
     "CSV_SCAN",
     "GLOB",
+    "HTTP_GET",
+    "HTTP_HEAD",
+    "HTTP_POST",
     "HTTPFS",
     "MYSQL_SCAN",
     "PARQUET_SCAN",
@@ -75,6 +78,8 @@ def sql_plan_to_sql(plan: SQLPlan) -> str:
     """
     if plan.strategy == Strategy.NEED_CLARIFICATION:
         raise ValueError("SQLPlan 策略为 NEED_CLARIFICATION，不应生成 SQL")
+    if plan.strategy == Strategy.UNSUPPORTED_MULTI_PLAN:
+        raise ValueError("SQLPlan 策略为 UNSUPPORTED_MULTI_PLAN，必须先拆分子计划")
 
     table = plan.primary_table or "未知表"
 

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import pytest
 
+from src.ir import SQLPlan, Strategy
+from src.sql_gen import sql_plan_to_sql
 from src.sql_gen import validate_sql_safety
 
 
@@ -28,8 +30,20 @@ def test_rejects_multiple_statements() -> None:
     "sql",
     [
         "SELECT read_blob('file')",
+        "SELECT read_text('file')",
+        "SELECT read_csv('file.csv')",
         "SELECT * FROM read_csv_auto('file.csv')",
+        "SELECT read_json('file.json')",
+        "SELECT read_json_auto('file.json')",
+        "SELECT read_ndjson('file.ndjson')",
         "SELECT * FROM read_parquet('file.parquet')",
+        "SELECT parquet_scan('file.parquet')",
+        "SELECT csv_scan('file.csv')",
+        "SELECT glob('*')",
+        "SELECT sqlite_scan('file.db')",
+        "SELECT postgres_scan('dsn')",
+        "SELECT mysql_scan('dsn')",
+        "SELECT http_get('https://example.invalid')",
     ],
 )
 def test_rejects_external_resource_functions(sql: str) -> None:
@@ -69,6 +83,25 @@ def test_rejects_parse_failure() -> None:
     assert _violations("SELECT (")
 
 
+def test_rejects_unknown_statement_type() -> None:
+    """未核准的顶层 AST 类型必须被拒绝。"""
+    assert _violations("VALUES (1)")
+
+
+def test_rejects_function_outside_allowlist() -> None:
+    """非外部函数也必须显式进入白名单才能使用。"""
+    assert _violations("SELECT LOWER('VALUE')")
+
+
+def test_allows_registered_safe_functions() -> None:
+    """当前指标链路需要的安全函数必须继续可用。"""
+    sql = (
+        "SELECT COUNT(*), SUM(1), AVG(1), MIN(1), MAX(1), "
+        "COALESCE(NULL, 0), ROUND(1.2), CAST(1 AS INTEGER)"
+    )
+    assert _violations(sql) == []
+
+
 def test_allows_existing_valid_gold_query() -> None:
     """现有 Gold 查询及日期过滤规则不得回归。"""
     sql = """
@@ -90,3 +123,10 @@ def test_allows_existing_valid_gold_query() -> None:
         join_whitelist=join_whitelist,
     ) == []
 
+
+def test_rejects_unsupported_multi_plan_sql_generation() -> None:
+    """多计划占位符不能生成未知表 SQL。"""
+    plan = SQLPlan(strategy=Strategy.UNSUPPORTED_MULTI_PLAN)
+
+    with pytest.raises(ValueError, match="UNSUPPORTED_MULTI_PLAN"):
+        sql_plan_to_sql(plan)
