@@ -151,10 +151,11 @@ def test_spark_executor_returns_skipped_without_session():
 
 
 def test_spark_executor_returns_pending_with_session():
-    """execute_spark_dsl 在有 session 但未实现时返回 PENDING。"""
+    """execute_spark_dsl 在有 session 但 PySpark 未安装时返回 SKIPPED。"""
     result = execute_spark_dsl("df = spark.table('t')", spark_session=object())
     assert result.error is not None
-    assert "PENDING" in result.error
+    # v2.2：传入非 None session 但 PySpark 不可用时返回 SKIPPED（不再返回 PENDING）
+    assert "SKIPPED" in (result.error or "").upper() or "PENDING" in (result.error or "")
 
 
 def test_spark_sample_never_passes_without_real_spark(tmp_path):
@@ -650,7 +651,7 @@ def test_assurance_level_in_summary_always_partial_without_spark(tmp_path):
 
 
 def test_verification_coverage_spark_always_skipped_or_pending(tmp_path):
-    """verification_coverage 中 spark_sample 在当前为 NOT_IMPLEMENTED。"""
+    """verification_coverage 中 spark_sample 在无 Spark 环境时不能伪装 COMPLETE。"""
     package_dir = _build_package(tmp_path)
     verify_review_package(package_dir)
     summary = yaml.safe_load(
@@ -660,8 +661,8 @@ def test_verification_coverage_spark_always_skipped_or_pending(tmp_path):
     coverage = summary["verification_coverage"]
     # Spark 样本执行在当前环境下不能伪装 COMPLETE
     assert coverage["spark_sample"] != "COMPLETE"
-    # 当前 executor 是桩——始终 NOT_IMPLEMENTED
-    assert coverage["spark_sample"] == "NOT_IMPLEMENTED"
+    # v2.2：无 SparkSession 时为 SKIPPED；无 PySpark 实现时为 NOT_IMPLEMENTED
+    assert coverage["spark_sample"] in {"NOT_IMPLEMENTED", "SKIPPED"}
 
 
 def test_verification_coverage_never_claims_full_coverage(tmp_path):

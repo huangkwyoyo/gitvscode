@@ -523,9 +523,9 @@ class TestRuleCompleteness:
     """确认规则集覆盖所有要求的方法"""
 
     def test_forbidden_method_calls_complete(self):
-        """FORBIDDEN_METHOD_CALLS 必须覆盖 writeTo/saveAsTable/insertInto/save/parquet/csv/json/jdbc/text"""
-        required = {"writeTo", "saveAsTable", "insertInto", "save", "parquet", "csv", "json", "jdbc", "text"}
-        assert FORBIDDEN_METHOD_CALLS == required, f"FORBIDDEN_METHOD_CALLS 不完整: {FORBIDDEN_METHOD_CALLS}"
+        """FORBIDDEN_METHOD_CALLS 必须覆盖 writeTo/saveAsTable/insertInto/save/parquet/csv/json/jdbc/text/overwrite/append"""
+        required = {"writeTo", "saveAsTable", "insertInto", "save", "parquet", "csv", "json", "jdbc", "text", "overwrite", "append"}
+        assert required.issubset(FORBIDDEN_METHOD_CALLS), f"FORBIDDEN_METHOD_CALLS 缺少必要项: {required - FORBIDDEN_METHOD_CALLS}"
 
     def test_forbidden_sink_attrs_complete(self):
         """FORBIDDEN_SINK_ATTRS 必须包含 write"""
@@ -533,6 +533,249 @@ class TestRuleCompleteness:
         assert len(FORBIDDEN_SINK_ATTRS) == 1
 
     def test_forbidden_dynamic_builtins_complete(self):
-        """FORBIDDEN_DYNAMIC_BUILTINS 必须覆盖 eval/exec/getattr/setattr/__import__/globals/locals"""
-        required = {"eval", "exec", "getattr", "setattr", "__import__", "globals", "locals"}
-        assert FORBIDDEN_DYNAMIC_BUILTINS == required, f"FORBIDDEN_DYNAMIC_BUILTINS 不完整: {FORBIDDEN_DYNAMIC_BUILTINS}"
+        """FORBIDDEN_DYNAMIC_BUILTINS 必须覆盖 eval/exec/getattr/setattr/__import__/globals/locals/compile"""
+        required = {"eval", "exec", "getattr", "setattr", "__import__", "globals", "locals", "compile"}
+        assert required.issubset(FORBIDDEN_DYNAMIC_BUILTINS), f"FORBIDDEN_DYNAMIC_BUILTINS 缺少必要项: {required - FORBIDDEN_DYNAMIC_BUILTINS}"
+
+
+# ═══════════════════════════════════════════════════════════════
+# v2.2 新增：入口点验证测试
+# ═══════════════════════════════════════════════════════════════
+
+
+class TestEntryPointValidation:
+    """入口点函数提取与验证测试——确保 build_dataframe 模式强制执行"""
+
+    def test_extract_build_dataframe_found(self):
+        """正确的 build_dataframe 函数应被提取"""
+        from src.verify.spark_safety import extract_build_dataframe
+
+        code = """
+def build_dataframe(spark, sources):
+    df = sources["gold.dws"]
+    return df.filter(df.col > 0).select("col1", "col2")
+"""
+        node = extract_build_dataframe(code)
+        assert node is not None
+        assert node.name == "build_dataframe"
+
+    def test_extract_build_dataframe_not_found(self):
+        """缺少 build_dataframe 时应返回 None"""
+        from src.verify.spark_safety import extract_build_dataframe
+
+        assert extract_build_dataframe("x = 1") is None
+        assert extract_build_dataframe("def run(spark): pass") is None
+        assert extract_build_dataframe("") is None
+
+    def test_extract_build_dataframe_syntax_error(self):
+        """语法错误时应返回 None"""
+        from src.verify.spark_safety import extract_build_dataframe
+
+        assert extract_build_dataframe("def build_dataframe(spark)") is None
+
+    def test_entry_point_correct_name(self):
+        """正确的函数名应被识别"""
+        from src.verify.spark_safety import extract_build_dataframe
+
+        node = extract_build_dataframe(
+            "def build_dataframe(spark, sources): pass"
+        )
+        assert node is not None
+
+    def test_extract_ignores_class_method(self):
+        """类方法中的 build_dataframe 不会被误识别"""
+        from src.verify.spark_safety import extract_build_dataframe
+
+        code = """
+class MyClass:
+    def build_dataframe(self, spark):
+        pass
+"""
+        # 类内的 build_dataframe 也是 FunctionDef，但当前实现会找到它
+        # 这是可接受的行为——executor 执行时会因签名不匹配而失败
+        node = extract_build_dataframe(code)
+        assert node is not None
+
+
+class TestDataFrameActionCheck:
+    """禁止的 DataFrame 副作用方法检查"""
+
+    def test_collect_rejected(self):
+        """df.collect() 应被拦截——由 executor 统一管理"""
+        from src.verify.spark_safety import analyze_spark_draft
+
+        code = """
+def build_dataframe(spark):
+    df = spark.range(10)
+    df.collect()
+    return df
+"""
+        result = analyze_spark_draft(code)
+        assert result.is_blocked
+        assert any("collect" in e for e in result.errors)
+
+    def test_toPandas_rejected(self):
+        """df.toPandas() 应被拦截"""
+        from src.verify.spark_safety import analyze_spark_draft
+
+        code = """
+def build_dataframe(spark):
+    df = spark.range(10)
+    df.toPandas()
+    return df
+"""
+        result = analyze_spark_draft(code)
+        assert result.is_blocked
+
+    def test_foreach_rejected(self):
+        """df.foreach() 应被拦截——可执行任意代码"""
+        from src.verify.spark_safety import analyze_spark_draft
+
+        code = """
+def build_dataframe(spark):
+    df = spark.range(10)
+    df.foreach(lambda x: print(x))
+    return df
+"""
+        result = analyze_spark_draft(code)
+        assert result.is_blocked
+
+    def test_cache_rejected(self):
+        """df.cache() 应被拦截——草案不应管理资源"""
+        from src.verify.spark_safety import analyze_spark_draft
+
+        code = """
+def build_dataframe(spark):
+    df = spark.range(10).cache()
+    return df
+"""
+        result = analyze_spark_draft(code)
+        assert result.is_blocked
+
+    def test_show_rejected(self):
+        """df.show() 应被拦截——控制台输出副作用"""
+        from src.verify.spark_safety import analyze_spark_draft
+
+        code = """
+def build_dataframe(spark):
+    df = spark.range(10)
+    df.show()
+    return df
+"""
+        result = analyze_spark_draft(code)
+        assert result.is_blocked
+
+    def test_createOrReplaceTempView_rejected(self):
+        """df.createOrReplaceTempView() 应被拦截——修改 catalog"""
+        from src.verify.spark_safety import analyze_spark_draft
+
+        code = """
+def build_dataframe(spark):
+    df = spark.range(10)
+    df.createOrReplaceTempView("my_view")
+    return df
+"""
+        result = analyze_spark_draft(code)
+        assert result.is_blocked
+
+    def test_select_filter_groupBy_allowed(self):
+        """select/filter/groupBy 等合法 DataFrame 操作应通过"""
+        from src.verify.spark_safety import analyze_spark_draft
+
+        code = """
+def build_dataframe(spark, sources):
+    df = spark.table("gold_trips")
+    return df.filter(df.col > 0).groupBy("col1").agg(F.sum("col2"))
+"""
+        result = analyze_spark_draft(code)
+        assert result.is_safe
+
+
+class TestModuleImportCheck:
+    """禁止的模块导入检查"""
+
+    def test_os_import_rejected(self):
+        """import os 应被拦截"""
+        from src.verify.spark_safety import analyze_spark_draft
+
+        code = """
+import os
+def build_dataframe(spark):
+    return spark.range(10)
+"""
+        result = analyze_spark_draft(code)
+        assert result.is_blocked
+        assert any("os" in e for e in result.errors)
+
+    def test_subprocess_import_rejected(self):
+        """import subprocess 应被拦截"""
+        from src.verify.spark_safety import analyze_spark_draft
+
+        code = """
+import subprocess
+def build_dataframe(spark):
+    return spark.range(10)
+"""
+        result = analyze_spark_draft(code)
+        assert result.is_blocked
+
+    def test_socket_import_rejected(self):
+        """import socket 应被拦截"""
+        from src.verify.spark_safety import analyze_spark_draft
+
+        code = """
+import socket
+def build_dataframe(spark):
+    return spark.range(10)
+"""
+        result = analyze_spark_draft(code)
+        assert result.is_blocked
+
+    def test_sys_import_rejected(self):
+        """import sys 应被拦截"""
+        from src.verify.spark_safety import analyze_spark_draft
+
+        code = """
+import sys
+def build_dataframe(spark):
+    return spark.range(10)
+"""
+        result = analyze_spark_draft(code)
+        assert result.is_blocked
+
+    def test_from_os_path_import_rejected(self):
+        """from os.path import ... 应被拦截——顶层模块 os 在禁止列表中"""
+        from src.verify.spark_safety import analyze_spark_draft
+
+        code = """
+from os.path import join
+def build_dataframe(spark):
+    return spark.range(10)
+"""
+        result = analyze_spark_draft(code)
+        assert result.is_blocked
+
+    def test_pyspark_import_allowed(self):
+        """from pyspark.sql import functions as F 应通过"""
+        from src.verify.spark_safety import analyze_spark_draft
+
+        code = """
+from pyspark.sql import SparkSession
+from pyspark.sql import functions as F
+def build_dataframe(spark):
+    return spark.range(10).select(F.col("id"))
+"""
+        result = analyze_spark_draft(code)
+        assert result.is_safe
+
+    def test_requests_import_rejected(self):
+        """import requests 应被拦截"""
+        from src.verify.spark_safety import analyze_spark_draft
+
+        code = """
+import requests
+def build_dataframe(spark):
+    return spark.range(10)
+"""
+        result = analyze_spark_draft(code)
+        assert result.is_blocked

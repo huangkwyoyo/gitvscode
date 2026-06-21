@@ -935,17 +935,20 @@ def _to_coverage_term(status: str) -> str:
 
 
 def _spark_coverage_term(status: str) -> str:
-    """Spark sample 专用映射——当前 executor 是桩，始终 NOT_IMPLEMENTED。
+    """Spark sample 专用映射——v2.2 已接入真实执行。
 
-    NOT_IMPLEMENTED = executor 是桩，无真实 Spark 环境（当前所有 SKIPPED/PENDING 均归于此）
-    COMPLETE        = 通过（未来真实 Spark 接入后）
-    FAILED          = 失败（未来真实 Spark 接入后）
+    COMPLETE        = Spark 样本执行通过（PASS）
+    FAILED          = Spark 样本执行失败（FAIL）
+    SKIPPED         = Spark 环境不可用，未执行（SKIPPED）
+    NOT_IMPLEMENTED = executor 是桩或未接入（PENDING / 未知）
     """
     if status == "PASS":
         return "COMPLETE"
     if status == "FAIL":
         return "FAILED"
-    # 当前所有 SKIPPED/PENDING 均来自 executor 桩 → 统一标记 NOT_IMPLEMENTED
+    if status == "SKIPPED":
+        return "SKIPPED"
+    # PENDING 或未知状态 → executor 未真实执行
     return "NOT_IMPLEMENTED"
 
 
