@@ -402,7 +402,7 @@ class TianShuResolver:
         contracts_abs = self._tianshu_root / self._config.get("tianshu", {}).get("contracts_path", "contracts")
         forbidden_keywords: list[str] = load_forbidden_keywords(
             contracts_path=contracts_abs.resolve(),
-            strict=False,  # 已在 load_contracts 中验证契约存在，此处无需重复抛异常
+            strict=True,
         )
 
         return AgentContext(

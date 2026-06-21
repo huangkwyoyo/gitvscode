@@ -13,6 +13,7 @@ dependencies = [
     "duckdb>=0.10.0",
     "pyyaml>=6.0",
     "jsonschema>=4.0",
+    "sqlglot>=30.11,<31",
 ]
 
 [project.optional-dependencies]

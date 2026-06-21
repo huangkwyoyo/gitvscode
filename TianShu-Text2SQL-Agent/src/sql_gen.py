@@ -22,7 +22,43 @@ from __future__ import annotations
 import re
 from typing import Optional
 
+import sqlglot
+from sqlglot import exp
+from sqlglot.errors import SqlglotError
+
 from .ir import SQLPlan, Strategy
+
+
+# 白名单只保留当前指标契约和规则生成器实际需要的函数。
+_ALLOWED_SQL_FUNCTIONS = {
+    "AVG",
+    "CAST",
+    "COALESCE",
+    "COUNT",
+    "MAX",
+    "MIN",
+    "ROUND",
+    "SUM",
+}
+
+# 显式拒绝集用于输出可审计原因；未知函数仍由白名单统一拒绝。
+_EXTERNAL_RESOURCE_FUNCTIONS = {
+    "CSV_SCAN",
+    "GLOB",
+    "HTTPFS",
+    "MYSQL_SCAN",
+    "PARQUET_SCAN",
+    "POSTGRES_SCAN",
+    "READ_BLOB",
+    "READ_CSV",
+    "READ_CSV_AUTO",
+    "READ_JSON",
+    "READ_JSON_AUTO",
+    "READ_NDJSON",
+    "READ_PARQUET",
+    "READ_TEXT",
+    "SQLITE_SCAN",
+}
 
 
 def sql_plan_to_sql(plan: SQLPlan) -> str:
@@ -117,6 +153,78 @@ def _extract_table_references(sql: str) -> list[str]:
             seen.add(key)
             refs.append(m)
     return refs
+
+
+def _function_name(node: exp.Func) -> str:
+    """返回 AST 函数节点的规范名称。"""
+    if isinstance(node, exp.Anonymous):
+        return node.name.upper()
+    return node.sql_name().upper()
+
+
+def _extract_ast_table_references(statement: exp.Expression) -> list[str]:
+    """从 AST 提取真实表引用并排除 CTE 别名。"""
+    cte_names = {
+        cte.alias_or_name.lower()
+        for cte in statement.find_all(exp.CTE)
+        if cte.alias_or_name
+    }
+    seen: set[str] = set()
+    refs: list[str] = []
+
+    for table in statement.find_all(exp.Table):
+        # 表函数由函数白名单处理，不能伪装成普通表名。
+        if isinstance(table.this, exp.Func):
+            continue
+
+        name = table.name
+        if not name:
+            continue
+        if not table.db and name.lower() in cte_names:
+            continue
+
+        parts = [part for part in (table.catalog, table.db, name) if part]
+        full_name = ".".join(parts)
+        key = full_name.lower()
+        if key not in seen:
+            seen.add(key)
+            refs.append(full_name)
+
+    return refs
+
+
+def _validate_sql_ast(sql: str) -> tuple[exp.Select | None, list[str]]:
+    """解析 DuckDB SQL，并校验语句类型与函数能力边界。"""
+    try:
+        statements = [
+            statement
+            for statement in sqlglot.parse(sql, read="duckdb")
+            if statement is not None
+        ]
+    except SqlglotError as exc:
+        return None, [f"SQL AST 解析失败: {exc}"]
+    except Exception as exc:
+        # 解析器异常属于安全基础设施故障，必须关闭执行路径。
+        return None, [f"SQL AST 解析器异常: {exc}"]
+
+    if len(statements) != 1:
+        return None, [f"SQL 必须且只能包含一条有效语句，当前为 {len(statements)} 条"]
+
+    statement = statements[0]
+    if not isinstance(statement, exp.Select):
+        return None, [
+            f"SQL AST 顶层类型必须为 SELECT，当前为 {type(statement).__name__}"
+        ]
+
+    violations: list[str] = []
+    for function in statement.find_all(exp.Func):
+        name = _function_name(function)
+        if name in _EXTERNAL_RESOURCE_FUNCTIONS or name.startswith("HTTPFS"):
+            violations.append(f"SQL 禁止访问外部资源函数: {name}")
+        elif name not in _ALLOWED_SQL_FUNCTIONS:
+            violations.append(f"SQL 函数不在允许白名单中: {name}")
+
+    return statement, violations
 
 
 def _has_date_condition(sql: str) -> bool:
@@ -237,13 +345,21 @@ def validate_sql_safety(
     violations: list[str] = []
     sql_stripped = sql.strip()
 
+    # AST 是语句边界和函数能力的主防线，解析失败必须 fail closed。
+    statement, ast_violations = _validate_sql_ast(sql_stripped)
+    violations.extend(ast_violations)
+
     # ── 1. 必须以 SELECT 开头（允许 WITH ... SELECT 的 CTE 形式）──
     sql_upper_stripped = sql_stripped.upper()
     if not sql_upper_stripped.startswith('SELECT') and not sql_upper_stripped.startswith('WITH'):
         violations.append("SQL 必须以 SELECT 开头（只读查询），当前不以 SELECT/WITH 开头")
 
     # ── 2. 提取表引用，检查是否完全限定 ──
-    table_refs = _extract_table_references(sql)
+    table_refs = (
+        _extract_ast_table_references(statement)
+        if statement is not None
+        else _extract_table_references(sql)
+    )
     unqualified = [t for t in table_refs if '.' not in t]
     if unqualified:
         violations.append(

@@ -58,6 +58,15 @@ class TestSQLReadonlyCheck:
         assert results["clean_count"] == 3
         assert len(results["violations"]) == 0
 
+    def test_security_probes_cover_ast_boundaries(self):
+        """Harness 必须验证多语句和外部读取函数均被生产安全器拒绝。"""
+        from harness.checks.check_sql_readonly import run_security_probes
+
+        results = run_security_probes(["INSERT", "UPDATE", "DELETE"])
+
+        assert results["failed"] == []
+        assert results["passed_count"] == results["total_count"]
+
 
 class TestIRSchemaCheck:
     """IR 数据结构检查测试"""

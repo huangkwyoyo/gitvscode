@@ -16,7 +16,6 @@
 from __future__ import annotations
 
 import argparse
-import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -26,6 +25,32 @@ import yaml
 # 添加项目根目录到路径，以便导入 harness.config
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 from harness.config import load_harness_config
+from src.safety_policy_loader import load_forbidden_keywords as load_policy_keywords
+from src.sql_gen import validate_sql_safety
+
+
+SECURITY_PROBES = [
+    {"name": "multiple_statements", "sql": "SELECT 1; SELECT 2", "allowed": False},
+    {"name": "read_blob", "sql": "SELECT read_blob('file')", "allowed": False},
+    {
+        "name": "read_csv_auto",
+        "sql": "SELECT * FROM read_csv_auto('file.csv')",
+        "allowed": False,
+    },
+    {
+        "name": "read_parquet",
+        "sql": "SELECT * FROM read_parquet('file.parquet')",
+        "allowed": False,
+    },
+    {"name": "trailing_semicolon", "sql": "SELECT 1;", "allowed": True},
+    {"name": "semicolon_literal", "sql": "SELECT ';' AS value", "allowed": True},
+    {"name": "semicolon_comment", "sql": "SELECT 1 -- ;", "allowed": True},
+    {
+        "name": "select_cte",
+        "sql": "WITH cte AS (SELECT 1 AS value) SELECT value FROM cte",
+        "allowed": True,
+    },
+]
 
 
 def load_forbidden_keywords(contracts_path: Path, agent_config: dict[str, Any]) -> list[str]:
@@ -39,22 +64,32 @@ def load_forbidden_keywords(contracts_path: Path, agent_config: dict[str, Any]) 
     Returns:
         禁止的关键字列表（大写）
     """
-    keywords: list[str] = []
+    return load_policy_keywords(
+        contracts_path=contracts_path,
+        agent_config=agent_config,
+        strict=True,
+    )
 
-    # 从 sql_safety_policy.yml 加载
-    safety_file = contracts_path / "sql_safety_policy.yml"
-    if safety_file.exists():
-        with open(safety_file, "r", encoding="utf-8") as f:
-            safety = yaml.safe_load(f)
-        forbidden_ops = safety.get("forbidden_operations", [])
-        for op in forbidden_ops:
-            keywords.extend(op.get("keywords", []))
 
-    # 从 agent_config.yml 加载额外关键字
-    extra = agent_config.get("safety", {}).get("extra_forbidden_keywords", [])
-    keywords.extend(extra)
+def run_security_probes(forbidden_keywords: list[str]) -> dict[str, Any]:
+    """运行 AST 正反探针，确认生产安全器保持预期边界。"""
+    failed: list[dict[str, Any]] = []
 
-    return [kw.upper() for kw in keywords]
+    for probe in SECURITY_PROBES:
+        violations = validate_sql_safety(probe["sql"], forbidden_keywords)
+        actual_allowed = not violations
+        if actual_allowed != probe["allowed"]:
+            failed.append({
+                **probe,
+                "violations": violations,
+                "actual_allowed": actual_allowed,
+            })
+
+    return {
+        "failed": failed,
+        "passed_count": len(SECURITY_PROBES) - len(failed),
+        "total_count": len(SECURITY_PROBES),
+    }
 
 
 def scan_yaml_for_sql(evals_path: Path) -> list[dict[str, Any]]:
@@ -104,16 +139,12 @@ def check_sql_readonly(
     violations: list[dict[str, Any]] = []
 
     for entry in entries:
-        sql_upper = entry["sql"].upper()
-        for keyword in forbidden_keywords:
-            # 使用词边界匹配，避免误匹配列名中的子串
-            pattern = r'\b' + re.escape(keyword) + r'\b'
-            if re.search(pattern, sql_upper):
-                violations.append({
-                    **entry,
-                    "keyword": keyword,
-                })
-                break  # 每条 SQL 只报告一次
+        sql_violations = validate_sql_safety(entry["sql"], forbidden_keywords)
+        if sql_violations:
+            violations.append({
+                **entry,
+                "reason": "; ".join(sql_violations),
+            })
 
     return {
         "violations": violations,
@@ -137,7 +168,7 @@ def print_report(results: dict[str, Any], forbidden_keywords: list[str]) -> int:
 
     for v in violations:
         print(f"  [FAIL] {v['file']} / {v['question_id']}")
-        print(f"         SQL 包含禁止关键字: {v['keyword']}")
+        print(f"         安全违规: {v['reason']}")
         print(f"         问题: {v.get('question_zh', '')}")
 
     if not violations:
@@ -145,7 +176,7 @@ def print_report(results: dict[str, Any], forbidden_keywords: list[str]) -> int:
 
     print()
     if violations:
-        print(f"[FAIL] 发现 {len(violations)} 条 SQL 包含禁止的写操作关键字！")
+        print(f"[FAIL] 发现 {len(violations)} 条 SQL 未通过生产安全校验！")
         return 1
     else:
         print(f"[OK] 全部 {results['total_count']} 条 SQL 通过只读安全检查。")
@@ -165,8 +196,8 @@ def main() -> int:
     try:
         harness_config = load_harness_config(args.config)
     except FileNotFoundError as e:
-        print(f"[SKIP] {e}")
-        return 0
+        print(f"[FAIL] {e}")
+        return 1
 
     evals_path = args.evals or harness_config.evals_path
 
@@ -178,9 +209,20 @@ def main() -> int:
             agent_config = yaml.safe_load(f) or {}
 
     # 加载禁止关键字
-    forbidden_keywords = load_forbidden_keywords(
-        harness_config.contracts_path, agent_config
-    )
+    try:
+        forbidden_keywords = load_forbidden_keywords(
+            harness_config.contracts_path, agent_config
+        )
+    except (FileNotFoundError, ValueError, TypeError) as exc:
+        print(f"[FAIL] SQL 安全策略加载失败: {exc}")
+        return 1
+
+    probe_results = run_security_probes(forbidden_keywords)
+    if probe_results["failed"]:
+        print("[FAIL] SQL AST 安全探针失败:")
+        for probe in probe_results["failed"]:
+            print(f"  - {probe['name']}: {probe['violations']}")
+        return 1
 
     results = check_sql_readonly(evals_path, forbidden_keywords)
     return print_report(results, forbidden_keywords)
