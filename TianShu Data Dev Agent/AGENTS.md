@@ -356,7 +356,7 @@ generated/review_packages/{request_id}/
   失败后果：人拒绝，Agent 修改后重新提交
 ```
 
-**重要边界声明**：三道防线用于降低风险，不构成上线充分条件。当前验证为 PARTIAL 级别（仅 SQL 单引擎样本执行，Spark 侧 NOT_IMPLEMENTED），不证明业务正确或生产就绪。即使交叉验证 CONSISTENT_SAMPLE，也只代表两份代码的 LIMIT 1000 样本结果在已比较维度上一致——不代表全量数据一致、JOIN 基数正确、生产性能可接受或部署安全。
+**重要边界声明**：三道防线用于降低风险，不构成上线充分条件。当前验证为 PARTIAL 级别（SQL 单引擎样本执行 + Spark 受控执行已实现，Spark 侧待 PySpark 环境就绪），不证明业务正确或生产就绪。即使交叉验证 CONSISTENT_SAMPLE，也只代表两份代码的 LIMIT 1000 样本结果在已比较维度上一致——不代表全量数据一致、JOIN 基数正确、生产性能可接受或部署安全。
 
 ### 6.2 防线 2 的检查项
 
@@ -561,7 +561,7 @@ scripts/dev_agent/                 ← v2 CLI 入口
 | v1 pipeline 保留 | ✅ | `scripts/pipeline/` 完整保留，143 测试通过 |
 | **M5b-1 DuckDB CTAS Sandbox** | ✅ | `sandbox/duckdb_ctas_executor.py`——一次性可写 Sandbox，12 步生命周期 + 白名单 + 物化验证 |
 | **M5b-1 物化静态验证** | ✅ | `verify/materialization_validator.py`——15 项检查 + 物化状态机 |
-| 测试 | ✅ | `pytest tests/ -q`（最近验收：2026-06-19，669 passed，零回归） |
+| 测试 | ✅ | `pytest tests/ -q`（最近验收：2026-06-21，674 passed，零回归） |
 
 ### 10.3 部分完成（PARTIAL）
 

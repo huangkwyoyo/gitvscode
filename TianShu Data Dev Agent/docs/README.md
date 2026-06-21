@@ -124,7 +124,7 @@ Obsidian/
 
 > **权威事实源：项目根目录 `AGENTS.md` §10。** 本节为摘要索引，详细状态以 AGENTS.md 为准。
 >
-> 最近验收：2026-06-19，`pytest tests/ -q` → 669 passed，零回归。
+> 最近验收：2026-06-21，`pytest tests/ -q` → 674 passed，零回归。
 
 ### ✅ DONE（已完成）
 
@@ -138,7 +138,7 @@ Obsidian/
 | **M5b-1 DuckDB CTAS Sandbox** | ✅ | `duckdb_ctas_executor.py`——一次性可写 Sandbox，12 步生命周期 + 白名单 + 物化验证 |
 | **Spark 只读样本执行** | ✅ | `spark_executor.py`——12 层防御受控执行（PySpark 不可用时 SKIPPED） |
 | **SQL/Spark 交叉验证** | ✅ | `cross_validation.py`——7 维度比较（列名/类型/行数/抽样行/空值/数值合计/快照哈希） |
-| 测试 | ✅ | 669 passed，零回归 |
+| 测试 | ✅ | 674 passed，零回归 |
 
 ### ⚠️ PARTIAL（部分完成）
 

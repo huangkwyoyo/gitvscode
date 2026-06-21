@@ -77,7 +77,7 @@ M5a 已完成以下静态闭环：
 |--------|------|-----------|
 | `INSERT_OVERWRITE_PARTITION` | 需要分区元数据和更复杂的状态管理 | M5c |
 | `INSERT_INTO_PARTITION` | 同上 | M5c |
-| Spark Writer | `sandbox/spark_executor.py` 当前是桩 | M5c |
+| Spark Writer | `sandbox/spark_executor.py` 12 层防御受控执行已实现 | M5c |
 | MERGE | 跨表复杂操作，安全风险高 | M5c+ |
 | 生产调度 | 当前不接 CI/CD | M7 |
 | 真实 LLM API | 项目边界 | M6 |
@@ -640,7 +640,7 @@ tests/
 - ✅ 更新 AGENTS.md 和 README 添加 M5b-0 状态说明。
 - ❌ 不写任何执行代码。
 
-### M5b-1：DuckDB CTAS Sandbox（下一阶段）
+### M5b-1：DuckDB CTAS Sandbox（✅ 已实现——2026-06-19）
 
 **实现内容**：
 
