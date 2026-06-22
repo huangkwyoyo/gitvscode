@@ -67,6 +67,9 @@ table_reference_rules:
       - "gold.fact_tif_payments ↔ gold.dim_date (payment_date_key)"
       - "gold.fact_driver_applications ↔ gold.dim_date (app_date_key)"
       - "gold.dws_daily_trip_summary ↔ gold.dws_daily_crash_summary (trip_date = crash_date)"
+      - "gold.dws_daily_trip_summary ↔ gold.dim_date (trip_date)"
+      - "gold.dws_daily_parking_summary ↔ gold.dim_date (issue_date)"
+      - "gold.dws_daily_crash_summary ↔ gold.dim_date (crash_date)"
 
   - rule: "forbidden_joins"
     description: "禁止以下 JOIN 模式"
