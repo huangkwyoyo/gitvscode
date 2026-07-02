@@ -56,6 +56,9 @@ ai_data_analyst/samples/*.xls
 # 本地 Harness 检查报告
 TianShu/harness/reports/local/
 
+# CodeGraph 代码图谱索引（自动生成）
+.codegraph/
+
 # 系统和编辑器缓存
 .DS_Store
 Thumbs.db
