@@ -48,3 +48,34 @@ def test_get_run_dir(tmp_path, monkeypatch):
     assert run_path == expected
     assert run_path.exists()
     assert run_path.is_dir()
+
+
+def test_trace_store_save_state_history(tmp_path):
+    """验证 state_history.jsonl 能被正确写入"""
+    from runtime_lab.storage.trace_store import TraceStore
+    store = TraceStore(str(tmp_path))
+    state = RuntimeState(run_id="test_001", status="running", current_step="classify")
+    store.save_state_history(state, step_info={"node": "classify"})
+    history_file = tmp_path / "state_history.jsonl"
+    assert history_file.exists()
+    content = history_file.read_text(encoding="utf-8")
+    assert "test_001" in content
+    assert "classify" in content
+
+
+def test_trace_store_write_run_report(tmp_path):
+    """验证 run_report.md 能被正确生成"""
+    from runtime_lab.storage.trace_store import TraceStore
+    store = TraceStore(str(tmp_path))
+    state = RuntimeState(
+        run_id="test_001",
+        user_input="greet",
+        demo_type="greet",
+        status="completed",
+    )
+    store.write_run_report(state)
+    report_file = tmp_path / "reports" / "run_report.md"
+    assert report_file.exists()
+    content = report_file.read_text(encoding="utf-8")
+    assert "Run Report" in content
+    assert "completed" in content
