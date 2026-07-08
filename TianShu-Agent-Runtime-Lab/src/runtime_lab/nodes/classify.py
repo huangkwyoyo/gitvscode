@@ -1,7 +1,9 @@
 """任务分类节点——判断运行哪个 Demo"""
 
+from runtime_lab.state import RuntimeState
 
-def classify_node(state) -> dict:
+
+def classify_node(state: RuntimeState) -> dict:
     """根据用户输入判断 Demo 类型"""
     text = state.user_input.lower() if isinstance(state.user_input, str) else ""
 

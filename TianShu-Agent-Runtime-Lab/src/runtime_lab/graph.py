@@ -7,7 +7,7 @@ from runtime_lab.nodes.classify import classify_node
 from runtime_lab.nodes.summarize import summarize_node
 
 
-def router(state) -> str:
+def router(state: RuntimeState) -> str:
     """根据 demo_type 路由到下一个节点"""
     if state.demo_type == "greet":
         return "summarize"

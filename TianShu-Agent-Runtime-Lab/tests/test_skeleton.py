@@ -99,7 +99,7 @@ def test_graph_greet_invocation():
         "current_step": "init",
     })
     assert result["status"] in ("completed",)
-    assert "state_history" not in result or True  # 图能正常返回即可
+    assert "state_history" not in result  # 图能正常返回即可
 
 
 def test_cli_greet_output():
