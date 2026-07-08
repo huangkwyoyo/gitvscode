@@ -1,6 +1,7 @@
 """LangGraph 单 Agent Runtime 主图定义"""
 
 from langgraph.graph import StateGraph
+from langgraph.graph.state import CompiledStateGraph
 from runtime_lab.state import RuntimeState
 from runtime_lab.nodes.classify import classify_node
 from runtime_lab.nodes.summarize import summarize_node
@@ -14,7 +15,7 @@ def router(state) -> str:
     return "summarize"
 
 
-def build_graph() -> StateGraph:
+def build_graph() -> CompiledStateGraph:
     """构建并编译 LangGraph 图"""
     builder = StateGraph(RuntimeState)
 
