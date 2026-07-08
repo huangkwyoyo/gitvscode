@@ -100,3 +100,13 @@ def test_graph_greet_invocation():
     })
     assert result["status"] in ("completed",)
     assert "state_history" not in result or True  # 图能正常返回即可
+
+
+def test_cli_greet_output():
+    """验证 CLI greet 命令产生正确输出"""
+    from typer.testing import CliRunner
+    from runtime_lab.app import app
+    runner = CliRunner()
+    result = runner.invoke(app, ["greet"])
+    assert result.exit_code == 0
+    assert "completed" in result.stdout.lower() or "alive" in result.stdout.lower()
