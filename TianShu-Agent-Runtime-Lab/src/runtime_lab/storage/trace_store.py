@@ -25,7 +25,7 @@ class TraceStore:
             "created_at": state.created_at,
             "updated_at": state.updated_at,
         }
-        if step_info:
+        if step_info is not None:
             record["step_info"] = step_info
 
         history_file = self.run_dir / "state_history.jsonl"
