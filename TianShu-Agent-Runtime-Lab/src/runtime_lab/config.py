@@ -1,6 +1,5 @@
 """本地路径配置"""
 
-import os
 from pathlib import Path
 
 

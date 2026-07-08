@@ -2,6 +2,7 @@
 
 import pytest
 from runtime_lab.state import RuntimeState
+from runtime_lab.config import get_project_root
 
 
 def test_state_default_values():
@@ -32,3 +33,18 @@ def test_config_paths():
     assert (root / "src").exists()
     runs = get_runs_dir()
     assert runs.name == "runs"
+
+
+def test_get_run_dir(tmp_path, monkeypatch):
+    """验证 get_run_dir 创建目录"""
+    # 将 get_project_root 替换为临时路径，避免操作真实文件系统
+    monkeypatch.setattr("runtime_lab.config.get_project_root", lambda: tmp_path)
+    from runtime_lab.config import get_run_dir
+
+    run_id = "test_run_001"
+    run_path = get_run_dir(run_id)
+
+    expected = tmp_path / "runs" / run_id
+    assert run_path == expected
+    assert run_path.exists()
+    assert run_path.is_dir()
