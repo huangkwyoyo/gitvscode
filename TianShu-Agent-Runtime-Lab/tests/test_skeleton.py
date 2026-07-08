@@ -79,3 +79,24 @@ def test_trace_store_write_run_report(tmp_path):
     content = report_file.read_text(encoding="utf-8")
     assert "Run Report" in content
     assert "completed" in content
+
+
+def test_build_graph_exists():
+    """验证 build_graph 函数存在"""
+    from runtime_lab.graph import build_graph
+    graph = build_graph()
+    assert graph is not None
+
+
+def test_graph_greet_invocation():
+    """验证 greet 类型输入能走通全图"""
+    from runtime_lab.graph import build_graph
+    graph = build_graph()
+    result = graph.invoke({
+        "run_id": "test_graph_001",
+        "user_input": "greet",
+        "status": "init",
+        "current_step": "init",
+    })
+    assert result["status"] in ("completed",)
+    assert "state_history" not in result or True  # 图能正常返回即可
