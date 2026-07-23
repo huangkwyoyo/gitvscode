@@ -1,8 +1,10 @@
 # Python
 __pycache__/
 *.pyc
+*.pyo
 .venv/
 *.egg-info/
+dist/
 
 # IDE
 .vscode/
@@ -15,10 +17,17 @@ __pycache__/
 # 测试临时文件
 .pytest_cache/
 .pytest_tmp/
+.coverage
+htmlcov/
 
-# 审计和证据（运行时生成）
+# 运行时生成
 _audit/
 _evidence/
+llm_responses/
+llm_reports/
+logs/
+generated/
+*.log
 
 # OS
 Thumbs.db
