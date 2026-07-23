@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+
+# IDE
+.vscode/
+.idea/
+
+# 环境
+.env
+.env.*
+
+# 测试临时文件
+.pytest_cache/
+.pytest_tmp/
+
+# 审计和证据（运行时生成）
+_audit/
+_evidence/
+
+# OS
+Thumbs.db
+.DS_Store
